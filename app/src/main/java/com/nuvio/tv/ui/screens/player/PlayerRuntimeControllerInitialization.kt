@@ -589,11 +589,12 @@ internal fun PlayerRuntimeController.initializePlayer(
             )
             trackSelector = object : DefaultTrackSelector(context, adaptiveTrackSelectionFactory) {
                 override fun selectAllTracks(
+                    definitions: Array<ExoTrackSelection.Definition?>,
                     mappedTrackInfo: MappedTrackInfo,
                     rendererFormatSupports: Array<out Array<out IntArray>>,
                     rendererMixedMimeTypeAdaptationSupports: IntArray,
                     params: Parameters
-                ): Array<ExoTrackSelection.Definition?> {
+                ) {
                     val streamMime = currentStreamMimeType
                     val isHls = streamMime != null && (
                         streamMime.equals(MimeTypes.APPLICATION_M3U8, ignoreCase = true) ||
@@ -639,7 +640,8 @@ internal fun PlayerRuntimeController.initializePlayer(
                             }
                         }
                     }
-                    return super.selectAllTracks(
+                    super.selectAllTracks(
+                        definitions,
                         mappedTrackInfo,
                         rendererFormatSupports,
                         rendererMixedMimeTypeAdaptationSupports,
@@ -1609,21 +1611,15 @@ internal fun PlayerRuntimeController.resolveAutoInternalPlayerEngine(): Internal
         currentStreamDescription?.let { appendLine(it) }
         append(title)
     }
-    val isHdrOrDv = Regex("""(?i)\b(hdr|hdr10\+?|dv|dolby\s*vision)\b""").containsMatchIn(streamMetadataText)
+    // Only route Dolby Vision content to ExoPlayer — its forked extractor pipeline
+    // handles DV7→DV8.1 conversion via DoviBridge. Everything else goes to MPV
+    // which handles HDR10, HDR10+, HLG natively with libplacebo tone-mapping.
+    val isDolbyVision = Regex("""(?i)\b(dv|dolby\s*vision)\b""").containsMatchIn(streamMetadataText)
 
-    return if (isHdrOrDv) {
+    return if (isDolbyVision) {
         InternalPlayerEngine.EXOPLAYER
     } else {
-        val hasAnimeGenre = metaGenres.any { it.equals("anime", ignoreCase = true) }
-        val isAnimationFromJapan = (metaGenres.any { it.equals("animation", ignoreCase = true) } &&
-                metaCountry?.contains("Japan", ignoreCase = true) == true)
-        val hasAnimeId = currentVideoId?.startsWith("kitsu:") == true ||
-                currentVideoId?.startsWith("mal:") == true ||
-                currentVideoId?.startsWith("anilist:") == true
-
-        val isAnime = hasAnimeGenre || hasAnimeId || isAnimationFromJapan
-
-        if (isAnime) InternalPlayerEngine.MVP_PLAYER else InternalPlayerEngine.EXOPLAYER
+        InternalPlayerEngine.MVP_PLAYER
     }
 }
 

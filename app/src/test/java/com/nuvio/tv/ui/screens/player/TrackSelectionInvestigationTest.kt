@@ -408,11 +408,12 @@ class TrackSelectionInvestigationTest {
         val isHls = true
         val selector = object : DefaultTrackSelector(context, adaptiveTrackSelectionFactory) {
             public override fun selectAllTracks(
+                definitions: Array<ExoTrackSelection.Definition?>,
                 mappedTrackInfo: MappedTrackInfo,
                 rendererFormatSupports: Array<out Array<out IntArray>>,
                 rendererMixedMimeTypeAdaptationSupports: IntArray,
                 params: Parameters
-            ): Array<ExoTrackSelection.Definition?> {
+            ) {
                 if (isHls) {
                     for (rendererIndex in 0 until mappedTrackInfo.rendererCount) {
                         if (mappedTrackInfo.getRendererType(rendererIndex) == C.TRACK_TYPE_VIDEO) {
@@ -448,11 +449,11 @@ class TrackSelectionInvestigationTest {
                           }
                       }
                   }
-                  return arrayOfNulls(mappedTrackInfo.rendererCount)
               }
           }
 
         selector.selectAllTracks(
+            arrayOfNulls(mappedTrackInfo.rendererCount),
             mappedTrackInfo,
             rendererFormatSupports,
             intArrayOf(),
