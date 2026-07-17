@@ -116,7 +116,7 @@ android {
         targetSdk = 36
         // Keep this greater than the previous SlugYard debug build so Android TV
         // can install the public beta as an in-place update.
-        versionCode = 1037
+        versionCode = 1039
         versionName = "0.1.0-beta"
 
         buildConfigField("String", "PARENTAL_GUIDE_API_URL", "\"${localProperties.getProperty("PARENTAL_GUIDE_API_URL", "")}\"")
