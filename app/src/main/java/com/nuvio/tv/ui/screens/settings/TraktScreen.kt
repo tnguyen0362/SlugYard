@@ -77,23 +77,14 @@ fun TraktScreen(
     var showDisconnectConfirm by remember { mutableStateOf(false) }
     var showDaysCapDialog by remember { mutableStateOf(false) }
     var showCommentsDialog by remember { mutableStateOf(false) }
-    var showWatchProgressDialog by remember { mutableStateOf(false) }
     var showLibrarySourceDialog by remember { mutableStateOf(false) }
     var showMoreLikeThisSourceDialog by remember { mutableStateOf(false) }
     val strAllHistory = stringResource(R.string.trakt_all_history)
     val strDaysFormat = stringResource(R.string.trakt_days_format)
-    val strWatchProgressTrakt = stringResource(R.string.trakt_watch_progress_source_trakt)
-    val strWatchProgressNuvio = stringResource(R.string.trakt_watch_progress_source_nuvio)
     val strSettingOn = stringResource(R.string.trakt_setting_on)
     val strSettingOff = stringResource(R.string.trakt_setting_off)
     val cwWindowFormatter: (Int) -> String = { days ->
         formatContinueWatchingWindow(days, strAllHistory) { strDaysFormat.format(it) }
-    }
-    val watchProgressFormatter: (WatchProgressSource) -> String = { source ->
-        when (source) {
-            WatchProgressSource.TRAKT -> strWatchProgressTrakt
-            WatchProgressSource.NUVIO_SYNC -> strWatchProgressNuvio
-        }
     }
     val strLibrarySourceTrakt = stringResource(R.string.trakt_library_source_trakt)
     val strLibrarySourceNuvio = stringResource(R.string.trakt_library_source_nuvio)
@@ -316,11 +307,15 @@ fun TraktScreen(
                         value = librarySourceFormatter(uiState.librarySourceMode),
                         onClick = { showLibrarySourceDialog = true }
                     )
-                    SettingsActionRow(
+                    SettingsToggleRow(
                         title = stringResource(R.string.trakt_watch_progress_title),
                         subtitle = stringResource(R.string.trakt_watch_progress_subtitle),
-                        value = watchProgressFormatter(uiState.watchProgressSource),
-                        onClick = { showWatchProgressDialog = true }
+                        checked = uiState.watchProgressSource == WatchProgressSource.TRAKT,
+                        onToggle = {
+                            viewModel.onTraktContinueWatchingChanged(
+                                uiState.watchProgressSource != WatchProgressSource.TRAKT
+                            )
+                        }
                     )
                     SettingsActionRow(
                         title = stringResource(R.string.trakt_continue_watching_window),
@@ -386,25 +381,6 @@ fun TraktScreen(
                 }
             }
         }
-    }
-
-    if (showWatchProgressDialog) {
-        SettingsSingleChoiceDialog(
-            title = stringResource(R.string.trakt_watch_progress_dialog_title),
-            subtitle = stringResource(R.string.trakt_watch_progress_dialog_subtitle),
-            options = listOf(
-                SettingsPickerOption(WatchProgressSource.TRAKT, stringResource(R.string.trakt_watch_progress_source_trakt)),
-                SettingsPickerOption(WatchProgressSource.NUVIO_SYNC, stringResource(R.string.trakt_watch_progress_source_nuvio))
-            ),
-            selectedValue = uiState.watchProgressSource,
-            onOptionSelected = { source ->
-                viewModel.onWatchProgressSourceSelected(source)
-                showWatchProgressDialog = false
-            },
-            onDismiss = { showWatchProgressDialog = false },
-            width = 620.dp,
-            maxHeight = 320.dp
-        )
     }
 
     if (showLibrarySourceDialog) {

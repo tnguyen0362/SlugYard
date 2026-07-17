@@ -20,19 +20,15 @@ SlugYard is a substantially overhauled Android TV fork of [NuvioTV](https://gith
 
 This project is independently branded and maintained as SlugYard. It retains the NuvioTV attribution and is released under the same GPLv3 license; see [NOTICE](NOTICE) and [LICENSE](LICENSE).
 
-## Product and release notes
+## Release notes
 
-SlugYard is built for a polished Android TV experience. It does not host media or provide debrid accounts; each user connects the services they are authorized to use. For commercial distribution, GPLv3 requires that the corresponding SlugYard source remains available to recipients of the APK.
+### 0.1.0-beta — July 16, 2026
 
-### Changelog
-
-#### Unreleased
-
-- Complete SlugYard rebrand across Android TV surfaces, launcher assets, deep links, attribution, and public project links.
-- Netflix-inspired home programming, focused hero experience, and a dedicated genre shelf.
-- Improved automatic stream selection, multi-provider debrid support, and bundled source setup.
-- Hardened MPV and ExoPlayer fallback behavior for subtitle-heavy anime and Dolby Vision playback.
-- Added TMDB recommendations, device-local debrid credentials, and Supabase-backed account/profile sync.
+- Complete SlugYard rebrand across the Android TV app, launcher artwork, settings, and public project links.
+- Catalog-first TV home experience with focused rows, profile switching, and Trakt-backed Continue Watching.
+- Automatic stream scoring and next-episode selection, with Torbox, Premiumize, and Real-Debrid support.
+- Dual-engine internal playback: ExoPlayer for Dolby Vision conversion, MPV for anime and ASS-heavy streams, plus automatic startup fallback.
+- TMDB enrichment and recommendations, OpenSubtitles fallback, and device-local debrid credentials.
 
 See [PRIVACY.md](PRIVACY.md) for the data-handling summary.
 
@@ -53,32 +49,33 @@ Built with Kotlin and Jetpack Compose, optimized for a TV-first viewing experien
 - Anime/K-drama/J-drama prioritizes subtitles and seeders
 - Mainstream content prioritizes quality and audio
 
-**Simplified Settings**
-- Reduced from 12 categories to 6
-- Only essential settings visible: Account, Profiles, Playback, Trakt, About
-- Advanced settings hidden for consumer audience
+**Focused Settings**
+- Account, Profiles, Playback, Trakt, and About are the primary user-facing areas
+- Advanced playback controls remain available when compatibility tuning is needed
 
-**Bundled Addons**
-- 4 pre-configured addons (Torrentio, Comet, MediaFusion, Torbox Stream)
-- Addon manager hidden from users
-- Bundled addons cannot be removed or disabled
+**Automatic Source Setup**
+- Cinemeta supplies metadata and OpenSubtitles supplies subtitle lookup
+- Connecting Torbox, Premiumize, or Real-Debrid configures Torrentio with that account
+- MediaFusion is included as a keyless hash source and is resolved through the selected debrid service
+- Comet is not bundled; users may add their own manifest URL if they choose
 
 **OpenSubtitles Integration**
 - Automatic fallback when embedded subtitles unavailable
 - Hash-based lookup first, IMDB ID search fallback
 - Configurable API key and auto-download toggle
 
-**Netflix-Style UI**
+**TV-First UI**
 - Email/password authentication (no QR codes)
 - Simplified startup flow (skips all onboarding)
-- Torbox-only debrid settings
+- One-screen debrid connection for Torbox, Premiumize, and Real-Debrid
 - Streamlined Trakt configuration
 
 ### Player Engine Architecture
 
-**AUTO Mode (Hardcoded)**
+**AUTO Mode (Default)**
 - Dolby Vision content → ExoPlayer (for DV7→DV8.1 conversion via DoviBridge)
-- Everything else → mpv (for HDR10/HDR10+/HLG tone-mapping via libplacebo)
+- Anime and ASS/SSA subtitle streams → MPV
+- Other streams → ExoPlayer
 - Both engines embedded in-process, share same PlayerScreen composable
 
 **mpv Performance Optimizations**
@@ -117,7 +114,7 @@ Built with Kotlin and Jetpack Compose, optimized for a TV-first viewing experien
 
 ### Android TV
 
-Download the latest APK from [GitHub Releases](https://github.com/tnguyen0362/SlugYard/releases/latest) and install on your Android TV device.
+Download [SlugYard 0.1.0-beta for Android TV](https://github.com/tnguyen0362/SlugYard/releases/download/v0.1.0-beta/SlugYard-0.1.0-beta-armeabi-v7a.apk) and install it on your Android TV device.
 
 ### From Source
 
@@ -183,19 +180,18 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for:
 
 | Area | NuvioTV | SlugYard |
 |------|---------|----------|
-| Default player | ExoPlayer | MPV (via AUTO mode) |
-| AUTO heuristic | HDR→ExoPlayer, anime→MPV | DV→ExoPlayer, everything else→MPV |
+| Default player | ExoPlayer | Auto (content-aware) |
+| AUTO heuristic | HDR→ExoPlayer, anime→MPV | DV→ExoPlayer; anime/ASS→MPV; other streams→ExoPlayer |
 | MPV config | `profile=fast`, basic settings | Optimized: adaptive buffers, tone-mapping, AAudio, ASS compat, latency hacks |
 | UI strings | "Libmpv (Beta)", "Experimental" | "MPV Player", production labels |
 | Auto-failover | Disabled | Enabled (ExoPlayer fallback on MPV error) |
-| Deep link scheme | `nuvio://` | `slugyard://` |
 | Settings categories | 12 | 6 (simplified for consumers) |
 | Autoplay modes | MANUAL, FIRST_STREAM, REGEX_MATCH | + SCORED (content-type-aware scoring) |
-| Addon manager | Visible, user-configurable | Hidden, 4 bundled addons locked |
+| Source setup | Addons configured individually | Automatic Torrentio + MediaFusion setup after linking a debrid account |
 | OpenSubtitles | Not integrated | Automatic fallback when embedded subs unavailable |
 | Auth screens | QR code + email/password | Email/password only (Netflix-style) |
 | Startup flow | Experience mode + layout selection | Skips all onboarding, goes straight to home |
-| Debrid settings | Multi-provider UI | Torbox-only simplified UI |
+| Debrid settings | Multi-provider UI | Torbox, Premiumize, and Real-Debrid connection flow |
 | Media3 version | 1.8.0 | 1.10.1 (forked with custom modifications) |
 | Branding | NuvioTV | SlugYard |
 
@@ -214,31 +210,6 @@ SlugYard maintains a fork of Media3 1.10.1 with custom performance optimizations
 | `decoder-ffmpeg` | FFmpeg audio decoders |
 
 See [app/libs/README.md](app/libs/README.md) for build instructions.
-
-## Commercial Readiness
-
-All critical and high severity issues have been fixed:
-
-**Critical (7) — All Fixed:**
-- LoudnessEnhancer resource leak
-- 6 missing job cancellations in releasePlayer()
-
-**High (7) — All Fixed:**
-- isReleasingPlayer missing @Volatile
-- disposeExoPlayerBeforeRebuild() doesn't release loudnessEnhancer
-- initializeMpvPlayer() incomplete ExoPlayer teardown
-- Engine failover race conditions
-- Missing job cancellations in onCleared()
-
-**Medium (8) — 6 Fixed:**
-- pauseForLifecycle() ExoPlayer progress updates
-- keepMpvPlayingIfNeeded false playing state
-- NuvioMpvSurfaceView initialized @Volatile
-- resolveAutoInternalPlayerEngine regex
-- onPlayerError background crash recovery UI state
-- attemptAutoRetry corrupt state handling
-
-See [HANDOFF.md](HANDOFF.md) for complete details.
 
 ## Legal & DMCA
 

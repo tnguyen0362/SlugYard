@@ -152,6 +152,16 @@ class TraktViewModel @Inject constructor(
         }
     }
 
+    /**
+     * The UI presents this as one explicit switch, while the data layer keeps
+     * its source enum so resume and Continue Watching always agree.
+     */
+    fun onTraktContinueWatchingChanged(enabled: Boolean) {
+        onWatchProgressSourceSelected(
+            if (enabled) WatchProgressSource.TRAKT else WatchProgressSource.NUVIO_SYNC
+        )
+    }
+
     fun onLibrarySourceModeSelected(mode: LibrarySourceMode) {
         viewModelScope.launch {
             traktSettingsDataStore.setLibrarySourceMode(mode)

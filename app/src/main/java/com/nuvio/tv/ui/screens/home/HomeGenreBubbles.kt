@@ -12,12 +12,10 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.Border
 import androidx.tv.material3.Card
@@ -42,8 +40,6 @@ internal fun HomeGenreBubbles(
     val genres = remember {
         listOf("Drama", "Action", "Comedy", "Crime", "Adventure", "Romance", "Thriller", "Animation")
     }
-    var selectedGenre by remember { mutableStateOf("Drama") }
-
     LazyRow(
         modifier = modifier.height(108.dp),
         contentPadding = PaddingValues(horizontal = 52.dp),
@@ -51,33 +47,28 @@ internal fun HomeGenreBubbles(
         verticalAlignment = Alignment.CenterVertically
     ) {
         items(genres, key = { it }) { genre ->
-            val selected = genre == selectedGenre
             val shape = RoundedCornerShape(18.dp)
             Card(
-                onClick = { selectedGenre = genre },
+                // These are browse labels, not pretend filters. They must not
+                // steal D-pad focus from the first catalog rail until filtering
+                // has an actual catalog action behind it.
+                onClick = {},
                 modifier = Modifier
-                    .width(178.dp)
-                    .height(82.dp),
+                    .width(164.dp)
+                    .height(64.dp)
+                    .focusProperties { canFocus = false },
                 shape = CardDefaults.shape(shape),
                 colors = CardDefaults.colors(
-                    containerColor = if (selected) {
-                        NuvioTheme.colors.BackgroundCard.copy(alpha = 0.96f)
-                    } else {
-                        NuvioTheme.colors.BackgroundCard.copy(alpha = 0.80f)
-                    },
+                    containerColor = NuvioTheme.colors.BackgroundCard.copy(alpha = 0.80f),
                     focusedContainerColor = NuvioTheme.colors.BackgroundCard
                 ),
                 border = CardDefaults.border(
-                    border = if (selected) {
-                        Border(
-                            border = BorderStroke(1.dp, NuvioTheme.colors.TextPrimary.copy(alpha = 0.46f)),
-                            shape = shape
-                        )
-                    } else {
-                        Border.None
-                    },
+                    border = Border(
+                        border = BorderStroke(1.dp, NuvioTheme.colors.TextPrimary.copy(alpha = 0.22f)),
+                        shape = shape
+                    ),
                     focusedBorder = Border(
-                        border = BorderStroke(3.dp, NuvioTheme.colors.FocusRing),
+                        border = BorderStroke(2.dp, NuvioTheme.colors.FocusRing),
                         shape = shape
                     )
                 ),
@@ -86,14 +77,15 @@ internal fun HomeGenreBubbles(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 18.dp),
-                    contentAlignment = Alignment.BottomStart
+                        .padding(horizontal = 14.dp),
+                    contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = genre,
-                        style = MaterialTheme.typography.bodyLarge,
+                        style = MaterialTheme.typography.bodyMedium,
                         color = NuvioTheme.colors.TextPrimary.copy(alpha = 0.94f),
-                        maxLines = 1
+                        maxLines = 1,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
                     )
                 }
             }

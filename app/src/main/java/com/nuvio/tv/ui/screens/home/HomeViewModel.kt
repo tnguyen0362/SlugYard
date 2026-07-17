@@ -245,7 +245,9 @@ class HomeViewModel @Inject constructor(
     internal var startupAuthNoticeJob: Job? = null
 
     // Lazy catalog loading
-    internal val eagerCatalogLoadCount: Int = 4
+    // Keep first paint small on lower-end Android TV hardware. Remaining
+    // catalogs load as their rows approach the viewport.
+    internal val eagerCatalogLoadCount: Int = 2
     internal val lazyLoadRequestedKeys: MutableSet<String> = ConcurrentHashMap.newKeySet()
     internal val pendingLazyCatalogs = linkedMapOf<String, Pair<Addon, CatalogDescriptor>>()
     /** All placeholder descriptors for homeRow construction. */

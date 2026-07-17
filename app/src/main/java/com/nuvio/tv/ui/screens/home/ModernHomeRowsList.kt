@@ -1,8 +1,10 @@
 package com.nuvio.tv.ui.screens.home
 
 import com.nuvio.tv.ui.theme.NuvioTheme
+import com.nuvio.tv.LocalHomeHeaderFocusRequester
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.BringIntoViewSpec
 import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.foundation.layout.Arrangement
@@ -22,12 +24,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.foundation.focusGroup
@@ -59,6 +63,8 @@ import com.nuvio.tv.ui.util.dpadVerticalFastScroll
 import com.nuvio.tv.ui.util.recompositionHighlighter
 import com.nuvio.tv.ui.components.rememberPlaceholderShimmerOffsetState
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -86,6 +92,7 @@ internal fun ModernHomeRowsList(
     onFastScrollingChanged: (Boolean) -> Unit,
     contentFocusRequester: FocusRequester,
     rowsViewportHeight: Dp,
+    catalogTopPadding: Dp,
     catalogBottomPadding: Dp,
     trailerContentAlpha: () -> Float,
     verticalRowBringIntoViewSpec: BringIntoViewSpec,
@@ -153,6 +160,9 @@ internal fun ModernHomeRowsList(
     val rowFocusRequesters = remember { mutableMapOf<String, FocusRequester>() }
     val stableItemFocusRequestersByRow = remember { mutableMapOf<String, StableRef<MutableMap<Int, FocusRequester>>>() }
     val focusScope = rememberCoroutineScope()
+    var rowFocusJob by remember { mutableStateOf<Job?>(null) }
+    var directContentFocus by remember { mutableStateOf(false) }
+    val homeHeaderFocusRequester = LocalHomeHeaderFocusRequester.current
 
     val density = LocalDensity.current
     val context = LocalContext.current
@@ -172,11 +182,8 @@ internal fun ModernHomeRowsList(
         landscapeCatalogCardHeight
     ) {
         val prefetchAheadRows = 1
-        // A TV viewport reveals several cards at once. One prefetched image
-        // still leaves the next row visibly filling in during focus-driven
-        // vertical navigation; six covers the initial viewport without
-        // eagerly decoding an entire rail.
-        val prefetchItemsPerRow = 6
+        // Limit background decode work while focus-driven navigation is active.
+        val prefetchItemsPerRow = 2
         snapshotFlow {
             verticalRowListState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
         }
@@ -278,12 +285,15 @@ internal fun ModernHomeRowsList(
         val targetRow = carouselRows.list.getOrNull(targetIndex) ?: return false
         val savedIndex = (focusedItemByRowMap[targetRow.key] ?: 0)
             .coerceIn(0, (targetRow.items.list.size - 1).coerceAtLeast(0))
-        focusScope.launch {
+        // D-pad repeats can arrive while a prior bring-into-view animation is
+        // still active. Keep one job so animations cannot accumulate.
+        rowFocusJob?.cancel()
+        latestOnActiveRowKeyChange.value(targetRow.key)
+        latestOnActiveItemIndexChange.value(savedIndex)
+        rowFocusJob = focusScope.launch {
             verticalRowListState.animateScrollToItem(targetIndex)
             // The target row may only enter composition after the scroll.
             delay(48L)
-            latestOnActiveRowKeyChange.value(targetRow.key)
-            latestOnActiveItemIndexChange.value(savedIndex)
             val itemRequester = stableItemFocusRequestersByRow[targetRow.key]
                 ?.value
                 ?.get(savedIndex)
@@ -295,6 +305,28 @@ internal fun ModernHomeRowsList(
     }
 
     val defaultBringIntoViewSpec = LocalBringIntoViewSpec.current
+
+    // The header sits above an intentionally full-screen hero.  Native focus
+    // search cannot reach a rail that is below that first viewport, so a Down
+    // press hands focus to this container.  Bring the first rail on screen and
+    // then focus its saved card; subsequent movement remains ordinary rail
+    // navigation.
+    LaunchedEffect(directContentFocus, carouselRows) {
+        if (!directContentFocus) return@LaunchedEffect
+        val firstRow = carouselRows.list.firstOrNull() ?: return@LaunchedEffect
+        val topPaddingPx = with(density) { catalogTopPadding.roundToPx() }
+        verticalRowListState.scrollToItem(0, topPaddingPx)
+        delay(32L)
+        val targetIndex = (focusedItemByRowMap[firstRow.key] ?: 0)
+            .coerceIn(0, (firstRow.items.list.size - 1).coerceAtLeast(0))
+        runCatching {
+            stableItemFocusRequestersByRow[firstRow.key]
+                ?.value
+                ?.get(targetIndex)
+                ?.requestFocus()
+                ?: rowFocusRequesters[firstRow.key]?.requestFocus()
+        }
+    }
 
     val sharedPlaceholderShimmerOffsetState = rememberPlaceholderShimmerOffsetState(label = "sharedRowShimmer")
 
@@ -313,10 +345,36 @@ internal fun ModernHomeRowsList(
                 .clipToBounds()
                 .graphicsLayer { alpha = trailerContentAlpha() }
                 .focusRequester(contentFocusRequester)
+                .onFocusChanged { focusState -> directContentFocus = focusState.isFocused }
+                .focusable()
                 .focusRestorer { focusRestorerRequester() }
                 .onPreviewKeyEvent { event ->
                     val firstRowKey = carouselRows.list.firstOrNull()?.key
                     val lastRowKey = carouselRows.list.lastOrNull()?.key
+                    if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionUp &&
+                        verticalRowListState.firstVisibleItemIndex == 0 &&
+                        verticalRowListState.firstVisibleItemScrollOffset > 0
+                    ) {
+                        // Restore the feature viewport first. Previously this
+                        // jumped directly from the first rail to the header,
+                        // skipping the hero while moving back up Home. This
+                        // must use scroll position rather than the active row:
+                        // Continue Watching can be inserted ahead of catalogs.
+                        rowFocusJob?.cancel()
+                        rowFocusJob = focusScope.launch {
+                            verticalRowListState.animateScrollToItem(0, 0)
+                        }
+                        return@onPreviewKeyEvent true
+                    }
+                    if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionUp &&
+                        activeRowKey.value == firstRowKey
+                    ) {
+                        // Once the hero is visible, the next Up returns to the
+                        // actual Home tab. Header actions (including Settings)
+                        // are therefore always reachable with the remote.
+                        runCatching { homeHeaderFocusRequester.requestFocus() }
+                        return@onPreviewKeyEvent true
+                    }
                     if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionUp &&
                         activeRowKey.value != null && activeRowKey.value != firstRowKey
                     ) {
@@ -396,7 +454,13 @@ internal fun ModernHomeRowsList(
                         }
                     },
                 ),
-            contentPadding = PaddingValues(bottom = rowsViewportHeight),
+            // The feature and genre shelf occupy the first viewport above the
+            // rails. Keep that space in this same LazyColumn so a normal
+            // vertical scroll moves the entire home surface as one feed.
+            contentPadding = PaddingValues(
+                top = catalogTopPadding,
+                bottom = rowsViewportHeight
+            ),
             verticalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.xl)
         ) {
             itemsIndexed(

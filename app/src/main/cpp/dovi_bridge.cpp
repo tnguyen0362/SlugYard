@@ -511,7 +511,9 @@ Java_com_nuvio_tv_core_player_DoviBridge_nativeProcessVideoSample(
 
             if (convertDovi || stripDoviRpu) {
                 bool isRpu = (nalType == 62);
-                bool isEl = (layerId > 0);
+                // Type 63 carries the P7 enhancement layer in single-track
+                // remuxes even when the layer id is zero.
+                bool isEl = (layerId > 0) || (nalType == 63);
                 if (isRpu) {
                     if (stripDoviRpu) {
                         shouldDrop = true;
@@ -621,7 +623,9 @@ Java_com_nuvio_tv_core_player_DoviBridge_nativeProcessVideoSample(
 
                 if (convertDovi || stripDoviRpu) {
                     bool isRpu = (nalType == 62);
-                    bool isEl = (layerId > 0);
+                    // Type 63 carries the P7 enhancement layer in single-track
+                    // remuxes even when the layer id is zero.
+                    bool isEl = (layerId > 0) || (nalType == 63);
                     if (isRpu) {
                         if (stripDoviRpu) {
                             shouldDrop = true;

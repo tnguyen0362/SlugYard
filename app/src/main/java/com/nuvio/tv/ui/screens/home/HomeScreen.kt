@@ -60,7 +60,7 @@ private data class HomePosterOptionsTarget(
     val addonBaseUrl: String
 )
 
-private const val HOME_STABLE_GATE_TIMEOUT_MS = 5_000L
+private const val HOME_STABLE_GATE_TIMEOUT_MS = 1_500L
 
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
@@ -156,12 +156,11 @@ fun HomeScreen(
         if (uiState.installedAddonsCount > 0) {
             catalogLoadingStarted = true
         }
-        // Wait until catalog loading has completed with content AND the CW
-        // pipeline has completed its first emission.
+        // Render as soon as one usable catalog rail is ready. Waiting for every
+        // eager catalog and Continue Watching creates a large one-frame layout
+        // workload on lower-end Android TV devices.
         if (!homeStableGateReleased &&
             catalogLoadingStarted &&
-            !uiState.isLoading &&
-            initialCwResolved &&
             modernPresentationReady &&
             // When addons are installed, require at least one catalog row.
             (hasCatalogContent || uiState.installedAddonsCount == 0)
@@ -312,15 +311,9 @@ fun HomeScreen(
                     }
                     AnimatedVisibility(
                         visible = showHomeContentWithAnimation,
-                        enter = if (hasShownInitialHomeContent) {
-                            EnterTransition.None
-                        } else {
-                            fadeIn(animationSpec = tween(320)) +
-                                slideInVertically(
-                                    initialOffsetY = { it / 24 },
-                                    animationSpec = tween(320)
-                                )
-                        }
+                        // Avoid a full-screen enter animation competing with
+                        // first-paint image decoding and rail layout on TV.
+                        enter = EnterTransition.None
                     ) {
                         when (uiState.homeLayout) {
                             HomeLayout.CLASSIC -> ClassicHomeRoute(

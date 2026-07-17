@@ -704,6 +704,12 @@ internal suspend fun HomeViewModel.updateCatalogRowsPipeline() {
     val (computedHomeRows, nextGridItems) = withContext(Dispatchers.Default) {
         val computedHomeRows = buildList {
             val displayRowsByKey = displayRows.associateBy { it.legacyKey() }
+            // Several addons expose the same catalog through multiple
+            // manifest entries. Showing each one produces consecutive,
+            // identical headers even though it is one browsing destination.
+            // Keep the first ordered row for a title; catalog order remains
+            // deterministic and the rail no longer looks duplicated.
+            val displayedCatalogTitles = mutableSetOf<String>()
             // Build a lookup of placeholder descriptors by key for lazy catalogs
             val placeholdersByKey = synchronized(catalogStateLock) {
                 placeholderDescriptors.associateBy { it.catalogKey }
@@ -724,7 +730,13 @@ internal suspend fun HomeViewModel.updateCatalogRowsPipeline() {
             } else {
                     val catalogRow = displayRowsByKey[key]
                     if (catalogRow != null && catalogRow.items.isNotEmpty()) {
-                        add(HomeRow.Catalog(catalogRow))
+                        val normalizedTitle = catalogRow.catalogName
+                            .trim()
+                            .lowercase()
+                            .replace(Regex("\\s+"), " ")
+                        if (displayedCatalogTitles.add(normalizedTitle)) {
+                            add(HomeRow.Catalog(catalogRow))
+                        }
                     } else {
                         val placeholder = placeholdersByKey[key]
                         if (placeholder != null) {

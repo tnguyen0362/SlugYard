@@ -114,8 +114,10 @@ android {
         applicationId = "com.sluggyard.tv"
         minSdk = 24
         targetSdk = 36
-        versionCode = 1035
-        versionName = "0.7.16-beta"
+        // Keep this greater than the previous SlugYard debug build so Android TV
+        // can install the public beta as an in-place update.
+        versionCode = 1037
+        versionName = "0.1.0-beta"
 
         buildConfigField("String", "PARENTAL_GUIDE_API_URL", "\"${localProperties.getProperty("PARENTAL_GUIDE_API_URL", "")}\"")
         buildConfigField("String", "INTRODB_API_URL", "\"${localProperties.getProperty("INTRODB_API_URL", "https://api.introdb.app/")}\"")

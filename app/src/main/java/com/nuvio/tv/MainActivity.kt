@@ -47,6 +47,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.runtime.Composable
@@ -174,6 +175,7 @@ import kotlinx.coroutines.launch
 
 val LocalSidebarExpanded = compositionLocalOf { false }
 val LocalContentFocusRequester = compositionLocalOf { FocusRequester.Default }
+val LocalHomeHeaderFocusRequester = compositionLocalOf { FocusRequester.Default }
 
 private const val SIDEBAR_AUTO_COLLAPSE_DELAY_MS = 4_000L
 
@@ -314,6 +316,9 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             var hasSelectedProfileThisSession by rememberSaveable { mutableStateOf(false) }
+            // The selector is also a destination from the top bar, not only a
+            // first-launch gate. This makes changing profiles reversible.
+            var profileSelectorRequested by rememberSaveable { mutableStateOf(false) }
             var onboardingCompletedThisSession by remember { mutableStateOf(false) }
             var onboardingProfileSyncInProgress by remember { mutableStateOf(false) }
             val hasSeenAuthQrFlow = remember(appOnboardingDataStore) {
@@ -510,17 +515,19 @@ class MainActivity : ComponentActivity() {
                         onboardingCompletedThisSession = true
                     }
 
-                    val shouldShowProfileSelection =
-                        !hasSelectedProfileThisSession && (profiles.size > 1 || activeProfileHasPin)
+                    val shouldShowProfileSelection = profileSelectorRequested ||
+                        (!hasSelectedProfileThisSession && (profiles.size > 1 || activeProfileHasPin))
 
                     if (shouldShowProfileSelection) {
                         ProfileSelectionScreen(
                             onProfileSelected = {
                                 hasSelectedProfileThisSession = true
+                                profileSelectorRequested = false
                                 if (authManager.authState.value is AuthState.FullAccount) {
                                     startupSyncService.requestSyncNow()
                                 }
-                            }
+                            },
+                            onBackPress = { profileSelectorRequested = false }
                         )
                         return@Surface
                     }
@@ -762,6 +769,7 @@ class MainActivity : ComponentActivity() {
                         drawerItems = drawerItems,
                         selectedRoute = selectedDrawerRoute,
                         onNavigate = { optimisticRoute = it },
+                        onShowProfiles = { profileSelectorRequested = true },
                         onExitApp = {
                             finishAffinity()
                             finishAndRemoveTask()
@@ -918,6 +926,7 @@ private fun NetflixTopNavigationScaffold(
     drawerItems: List<DrawerItem>,
     selectedRoute: String?,
     onNavigate: (String) -> Unit,
+    onShowProfiles: () -> Unit,
     onExitApp: () -> Unit
 ) {
     // The browse header belongs to Home. Search, Library and Settings already
@@ -925,6 +934,7 @@ private fun NetflixTopNavigationScaffold(
     // Search control shown on TV.
     val showTopNavigation = currentRoute == Screen.Home.route
     val contentFocusRequester = remember { FocusRequester() }
+    val homeHeaderFocusRequester = remember { FocusRequester() }
     val topItems = remember(drawerItems) {
         drawerItems.filter { item ->
             item.route != Screen.Settings.route && item.route != Screen.Search.route
@@ -946,7 +956,8 @@ private fun NetflixTopNavigationScaffold(
     ) {
         CompositionLocalProvider(
             LocalSidebarExpanded provides false,
-            LocalContentFocusRequester provides contentFocusRequester
+            LocalContentFocusRequester provides contentFocusRequester,
+            LocalHomeHeaderFocusRequester provides homeHeaderFocusRequester
         ) {
             NuvioNavHost(
                 navController = navController,
@@ -964,6 +975,15 @@ private fun NetflixTopNavigationScaffold(
                     .align(Alignment.TopCenter)
                     .fillMaxWidth()
                     .background(Color.Black.copy(alpha = 0.92f))
+                    .onPreviewKeyEvent { event ->
+                        if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionDown) {
+                            // A full hero occupies the first viewport, so make
+                            // the header's Down action explicitly enter browse.
+                            runCatching { contentFocusRequester.requestFocus() }.isSuccess
+                        } else {
+                            false
+                        }
+                    }
                     .padding(horizontal = 52.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
@@ -991,6 +1011,7 @@ private fun NetflixTopNavigationScaffold(
                             NetflixTopNavItem(
                                 label = item.label,
                                 selected = selectedRoute == item.route,
+                                focusRequester = if (item.route == Screen.Home.route) homeHeaderFocusRequester else null,
                                 onClick = {
                                     onNavigate(item.route)
                                     navigateToDrawerRoute(navController, currentRoute, item.route)
@@ -1019,6 +1040,11 @@ private fun NetflixTopNavigationScaffold(
                         }
                     )
                 }
+                NetflixTopNavIconAction(
+                    imageVector = Icons.Default.AccountCircle,
+                    contentDescription = "Profiles",
+                    onClick = onShowProfiles
+                )
             }
         }
     }
@@ -1029,6 +1055,7 @@ private fun NetflixTopNavigationScaffold(
 private fun NetflixTopNavItem(
     label: String,
     selected: Boolean,
+    focusRequester: FocusRequester? = null,
     onClick: () -> Unit
 ) {
     var focused by remember { mutableStateOf(false) }
@@ -1037,6 +1064,7 @@ private fun NetflixTopNavItem(
         onClick = onClick,
         modifier = Modifier
             .height(34.dp)
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .onFocusChanged { focused = it.isFocused },
         colors = CardDefaults.colors(
             containerColor = if (selected) Color.White.copy(alpha = 0.20f) else Color.Transparent,

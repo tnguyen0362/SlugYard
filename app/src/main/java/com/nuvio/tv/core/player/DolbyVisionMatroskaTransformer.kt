@@ -120,11 +120,10 @@ internal class DolbyVisionMatroskaTransformer(
             scratch.reset()
             scratch.write(sample, 0, sampleLength)
         }
-        // Convert + append the BlockAdditional RPU straight into scratch with no allocation.
-        // If conversion fails, fall back to appending the original RPU NAL unchanged.
-        if (!appendConvertedRpuToScratch(blockAdditionalData, mode, nalUnitLengthFieldLength) &&
-            !appendLengthDelimitedNalToScratch(blockAdditionalData, nalUnitLengthFieldLength)
-        ) {
+        // The BlockAdditional RPU was converted in
+        // onDolbyVisionBlockAdditionalData (or retained raw on failure).
+        // Appending it here must not invoke libdovi a second time.
+        if (!appendLengthDelimitedNalToScratch(blockAdditionalData, nalUnitLengthFieldLength)) {
             return null
         }
         val dvResult = finishScratch()
@@ -192,28 +191,6 @@ internal class DolbyVisionMatroskaTransformer(
         return null
     }
 
-    /**
-     * Converts [nal] (a DV7 RPU NAL) and writes the length-delimited DV8.1 result straight
-     * into [scratch], performing zero JVM allocations on the hot path (the converted bytes
-     * stay in [DoviBridge.rpuOutBuffer]). Mirrors [convertRpuNal]'s mode-2 -> mode-1 fallback.
-     *
-     * Returns true if a converted NAL was appended; false if conversion failed (the caller
-     * is responsible for appending the original NAL instead).
-     */
-    private fun appendConvertedRpuToScratch(nal: ByteArray, mode: Int, nalLenField: Int): Boolean {
-        var outLen = DoviBridge.convertDv7RpuToDv81NonAllocating(nal, 0, nal.size, mode)
-        var usedMode = mode
-        if (outLen <= 0 && config.allowMode2Fallback && mode == 2) {
-            outLen = DoviBridge.convertDv7RpuToDv81NonAllocating(nal, 0, nal.size, 1)
-            usedMode = 1
-        }
-        if (outLen <= 0) return false
-        if (!writeLengthField(scratch, outLen, nalLenField)) return false
-        scratch.write(DoviBridge.rpuOutBuffer, 0, outLen)
-        DolbyVisionConversionStats.recordConversionMode(usedMode)
-        return true
-    }
-
     private fun rewriteMp4HevcSampleInto(
         sample: ByteArray,
         sampleLength: Int,
@@ -235,6 +212,9 @@ internal class DolbyVisionMatroskaTransformer(
             when {
                 // Enhancement-layer NAL that isn't the RPU: drop it.
                 layerId > 0 && nalType != NAL_TYPE_UNSPEC62 -> changed = true
+                // P7 single-track remuxes carry the enhancement layer as
+                // type-63 NALs at layer 0.
+                nalType == NAL_TYPE_UNSPEC63 -> changed = true
                 // RPU NAL: convert directly from sample buffer without JVM allocations
                 nalType == NAL_TYPE_UNSPEC62 -> {
                     val outLen = DoviBridge.convertDv7RpuToDv81NonAllocating(sample, offset, nalSize, mode)
@@ -384,5 +364,6 @@ internal class DolbyVisionMatroskaTransformer(
 
     private companion object {
         const val NAL_TYPE_UNSPEC62 = 62
+        const val NAL_TYPE_UNSPEC63 = 63
     }
 }

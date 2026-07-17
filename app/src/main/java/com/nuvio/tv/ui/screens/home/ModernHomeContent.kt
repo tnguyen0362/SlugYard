@@ -120,6 +120,10 @@ fun ModernHomeContent(
     blockLeftOnFirstExpandedItem: Boolean = false
 ) {
     val onRowItemFocusedPassedDown = rememberUpdatedState(onRowItemFocusedCallback)
+    // Keep Home catalog-first for now. The experimental feature/genre overlay
+    // competed with the rail focus model and made remote navigation unreliable.
+    // A future feature surface can be reintroduced only as a real list section.
+    val showHomeFeature = false
     val defaultBringIntoViewSpec = LocalBringIntoViewSpec.current
     val sidebarExpanded = LocalSidebarExpanded.current
     val isSidebarExpanded = remember(sidebarExpanded) { derivedStateOf { sidebarExpanded } }
@@ -130,7 +134,7 @@ fun ModernHomeContent(
     val fullScreenBackdrop = false
     val trailerPlaybackTarget = uiState.focusedPosterBackdropTrailerPlaybackTarget
     val effectiveAutoplayEnabled =
-        uiState.focusedPosterBackdropTrailerEnabled &&
+        showHomeFeature && uiState.focusedPosterBackdropTrailerEnabled &&
             (useLandscapePosters || uiState.focusedPosterBackdropExpandEnabled)
     val landscapeExpandedCardMode =
         useLandscapePosters &&
@@ -315,6 +319,23 @@ fun ModernHomeContent(
             payload.trailerApiType
         )
         lastRequestedTrailerFocusKey = selection.focusKey
+    }
+
+    val latestHeroRotationRows = rememberUpdatedState(carouselRows)
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(12_000)
+            val candidates = latestHeroRotationRows.value.list
+                .flatMap { it.items.list }
+                .filter { !it.key.startsWith("__placeholder_") }
+            if (candidates.size < 2) continue
+            val currentIndex = candidates.indexOfFirst {
+                it.key == featuredCarouselItem.value?.key
+            }
+            featuredCarouselItem.value = candidates[
+                if (currentIndex < 0) 0 else (currentIndex + 1) % candidates.size
+            ]
+        }
     }
 
     LaunchedEffect(carouselRows, focusState.hasSavedFocus) {
@@ -567,12 +588,14 @@ fun ModernHomeContent(
     val portraitBaseWidth = uiState.posterCardWidthDp.dp
     val portraitBaseHeight = uiState.posterCardHeightDp.dp
     val portraitModernPosterScale = 1.08f
-    val landscapeModernPosterScale = 1.34f
+    // Keep landscape rails dense enough to read as a Netflix-style catalog,
+    // rather than turning the focused item into a screen-sized feature card.
+    val landscapeModernPosterScale = 1.08f
     val portraitCatalogCardWidth = portraitBaseWidth * 0.84f * portraitModernPosterScale
     val portraitCatalogCardHeight = portraitBaseHeight * 0.84f * portraitModernPosterScale
     val landscapeCatalogCardWidth = portraitBaseWidth * 1.24f * landscapeModernPosterScale
     val landscapeCatalogCardHeight = landscapeCatalogCardWidth / 1.77f
-    val continueWatchingScale = 1.34f
+    val continueWatchingScale = 1.12f
     val continueWatchingCardWidth = portraitBaseWidth * 1.24f * continueWatchingScale
     val continueWatchingCardHeight = continueWatchingCardWidth / 1.77f
 
@@ -878,11 +901,25 @@ fun ModernHomeContent(
             // The browse shelf belongs between the featured title and programming rails.
             // Keeping all three as distinct surfaces prevents the former title/header
             // overlap while preserving the intended Netflix-style hierarchy.
-            val rowsTopOffset = remember(heroBackdropHeight) {
+            val rowsTopOffset = if (showHomeFeature) {
                 heroBackdropHeight + 24.dp + 108.dp + 28.dp
+            } else {
+                NuvioTheme.spacing.none
             }
-            val rowsViewportHeight = remember(screenHeight, rowsTopOffset) {
-                (screenHeight - rowsTopOffset).coerceAtLeast(240.dp)
+            // One full-height scrolling feed. The old half-height rail viewport
+            // stranded focus below a fixed hero, making Home feel frozen.
+            val rowsViewportHeight = screenHeight
+            val heroScrollProgress by remember(verticalRowListState, localDensity, rowsTopOffset) {
+                derivedStateOf {
+                    when {
+                        verticalRowListState.firstVisibleItemIndex > 0 -> 1f
+                        else -> {
+                            val travelPx = with(localDensity) { rowsTopOffset.toPx() }.coerceAtLeast(1f)
+                            (verticalRowListState.firstVisibleItemScrollOffset / travelPx)
+                                .coerceIn(0f, 1f)
+                        }
+                    }
+                }
             }
             val verticalRowBringIntoViewSpec = remember(localDensity, defaultBringIntoViewSpec) {
                 val topInsetPx = with(localDensity) { MODERN_ROW_HEADER_FOCUS_INSET.toPx() }
@@ -927,11 +964,6 @@ fun ModernHomeContent(
                         .fillMaxWidth()
                         .height(heroBackdropHeight)
                         .clip(RoundedCornerShape(18.dp))
-                        .border(
-                            width = 1.dp,
-                            color = Color.White.copy(alpha = 0.18f),
-                            shape = RoundedCornerShape(18.dp)
-                        )
                 }
             }
 
@@ -950,15 +982,20 @@ fun ModernHomeContent(
             }
             val onFirstFrameRenderedLambda = remember { { heroTrailerFirstFrameRendered = true } }
 
-            ModernHeroSection(
-                heroSceneState = heroSceneStateLambda,
-                isFullScreen = isFullScreenLambda,
-                heroMediaWidthPx = heroMediaWidthPx,
-                heroMediaHeightPx = heroMediaHeightPx,
-                modifier = heroMediaModifier,
-                onTrailerEnded = onTrailerEndedLambda,
-                onFirstFrameRendered = onFirstFrameRenderedLambda
-            )
+            if (showHomeFeature) {
+                ModernHeroSection(
+                    heroSceneState = heroSceneStateLambda,
+                    isFullScreen = isFullScreenLambda,
+                    heroMediaWidthPx = heroMediaWidthPx,
+                    heroMediaHeightPx = heroMediaHeightPx,
+                    modifier = heroMediaModifier.graphicsLayer {
+                        alpha = 1f - heroScrollProgress
+                        translationY = -size.height * heroScrollProgress
+                    },
+                    onTrailerEnded = onTrailerEndedLambda,
+                    onFirstFrameRendered = onFirstFrameRenderedLambda
+                )
+            }
 
             val trailerContentAlphaState = animateFloatAsState(
                 targetValue = if (fullScreenBackdropUpdated && shouldPlayCatalogHeroTrailerUpdated && heroTrailerFirstFrameRenderedUpdated) 0f else 1f,
@@ -978,47 +1015,40 @@ fun ModernHomeContent(
                     .fillMaxWidth(MODERN_HERO_TEXT_WIDTH_FRACTION)
             }
 
-            HeroTitleBlock(
-                previewProvider = {
-                    val state = heroSceneStateLambda()
-                    if (isRapidHorizontalNav.value || state.enrichmentActive) null
-                    else state.preview
-                },
-                enrichmentActive = {
-                    if (isRapidHorizontalNav.value) false
-                    else heroSceneStateLambda().enrichmentActive
-                },
-                portraitMode = !useLandscapePosters,
-                trailerPlaying = {
-                    if (isRapidHorizontalNav.value) false
-                    else {
+            if (showHomeFeature) {
+                HeroTitleBlock(
+                    previewProvider = {
                         val state = heroSceneStateLambda()
-                        state.fullScreenBackdrop && shouldPlayTrailerLambda() && heroTrailerRenderedLambda()
+                        if (isRapidHorizontalNav.value || state.enrichmentActive) null else state.preview
+                    },
+                    enrichmentActive = {
+                        if (isRapidHorizontalNav.value) false else heroSceneStateLambda().enrichmentActive
+                    },
+                    portraitMode = !useLandscapePosters,
+                    trailerPlaying = {
+                        val state = heroSceneStateLambda()
+                        !isRapidHorizontalNav.value && state.fullScreenBackdrop &&
+                            shouldPlayTrailerLambda() && heroTrailerRenderedLambda()
+                    },
+                    onDetails = {
+                        val payload = featuredCarouselItem.value?.payload as? ModernPayload.Catalog ?: return@HeroTitleBlock
+                        onNavigateToDetail(payload.itemId, payload.itemType, payload.addonBaseUrl)
+                    },
+                    modifier = heroMetadataModifier.graphicsLayer {
+                        alpha = 1f - heroScrollProgress
+                        translationY = -size.height * heroScrollProgress
                     }
-                },
-                onDetails = {
-                    when (val payload = featuredCarouselItem.value?.payload) {
-                        is ModernPayload.Catalog -> onNavigateToDetail(
-                            payload.itemId,
-                            payload.itemType,
-                            payload.addonBaseUrl
-                        )
-                        is ModernPayload.ContinueWatching -> onNavigateToDetail(
-                            payload.item.contentId(),
-                            payload.item.contentType(),
-                            ""
-                        )
-                        is ModernPayload.CollectionFolder, null -> Unit
-                    }
-                },
-                modifier = heroMetadataModifier
-            )
-
-            HomeGenreBubbles(
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(top = heroBackdropHeight + 24.dp)
-            )
+                )
+                HomeGenreBubbles(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(top = heroBackdropHeight + 24.dp)
+                        .graphicsLayer {
+                            alpha = 1f - heroScrollProgress
+                            translationY = -size.height * heroScrollProgress
+                        }
+                )
+            }
 
             val onActiveRowKeyChangeLambda = remember { { key: String? -> focusHolder.activeRowKey = key; activeRowKey.value = key } }
             val onActiveItemIndexChangeLambda = remember { { index: Int -> focusHolder.activeItemIndex = index; activeItemIndex.intValue = index } }
@@ -1070,6 +1100,10 @@ fun ModernHomeContent(
                 onFastScrollingChanged = onFastScrollingChangedLambda,
                 contentFocusRequester = contentFocusRequester,
                 rowsViewportHeight = rowsViewportHeight,
+                // The home header is outside the list. Keep a small, fixed
+                // breathing room above the first row title so it cannot be
+                // clipped by the header inset on TV launch.
+                catalogTopPadding = 18.dp,
                 catalogBottomPadding = NuvioTheme.spacing.none,
                 trailerContentAlpha = stableTrailerContentAlphaLambda,
                 verticalRowBringIntoViewSpec = verticalRowBringIntoViewSpec,
@@ -1127,7 +1161,7 @@ fun ModernHomeContent(
                 isVerticalRowsScrollingState = isVerticalRowsScrollingState,
                 modifier = Modifier
                     .align(Alignment.TopStart)
-                    .padding(top = rowsTopOffset)
+                    .fillMaxWidth()
             )
     }
 

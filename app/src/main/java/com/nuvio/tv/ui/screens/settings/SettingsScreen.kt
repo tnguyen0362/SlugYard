@@ -272,7 +272,7 @@ fun SettingsScreen(
                 // Account uses the self-contained email sign-in screen. The
                 // unavailable hosted QR flow is no longer the settings target.
                 SettingsCategory.ACCOUNT -> true
-                SettingsCategory.TRAKT -> false
+                SettingsCategory.TRAKT -> true
                 else -> true
             }
         }

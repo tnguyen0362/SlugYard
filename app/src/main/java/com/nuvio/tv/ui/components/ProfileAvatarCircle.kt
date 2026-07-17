@@ -6,7 +6,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -45,6 +48,9 @@ fun ProfileAvatarCircle(
                 .build()
         }
     }
+    // Avatar URLs are optional remote content. A stale catalog URL used to
+    // leave a blank circle, so retain the local initial as the error fallback.
+    var imageFailed by remember(avatarImageUrl) { mutableStateOf(false) }
 
     Box(
         modifier = modifier
@@ -60,21 +66,23 @@ fun ProfileAvatarCircle(
             ),
         contentAlignment = Alignment.Center
     ) {
-        if (imageRequest != null) {
+        // Render the local identity immediately. A successful image covers it;
+        // a slow or broken remote image never leaves an empty avatar.
+        Text(
+            text = initial,
+            color = Color.White,
+            fontSize = fontSize,
+            fontWeight = FontWeight.Bold
+        )
+        if (imageRequest != null && !imageFailed) {
             AsyncImage(
                 model = imageRequest,
                 contentDescription = name,
                 modifier = Modifier
                     .size(size)
                     .clip(CircleShape),
-                contentScale = ContentScale.Crop
-            )
-        } else {
-            Text(
-                text = initial,
-                color = Color.White,
-                fontSize = fontSize,
-                fontWeight = FontWeight.Bold
+                contentScale = ContentScale.Crop,
+                onError = { imageFailed = true }
             )
         }
     }
