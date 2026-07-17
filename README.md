@@ -101,13 +101,13 @@ Built with Kotlin and Jetpack Compose, optimized for a TV-first viewing experien
 
 ### Android TV
 
-Download the latest APK from [GitHub Releases](https://github.com/tnguyen0362/PlayFlix/releases/latest) and install on your Android TV device.
+Download the latest APK from [GitHub Releases](https://github.com/tnguyen0362/SlugYard/releases/latest) and install on your Android TV device.
 
 ### From Source
 
 ```bash
-git clone https://github.com/tnguyen0362/PlayFlix.git
-cd PlayFlix
+git clone https://github.com/tnguyen0362/SlugYard.git
+cd SlugYard
 ```
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for build prerequisites and project structure.
@@ -181,7 +181,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for:
 | Startup flow | Experience mode + layout selection | Skips all onboarding, goes straight to home |
 | Debrid settings | Multi-provider UI | Torbox-only simplified UI |
 | Media3 version | 1.8.0 | 1.10.1 (forked with custom modifications) |
-| Branding | NuvioTV / PlayFlix | SlugYard |
+| Branding | NuvioTV | SlugYard |
 
 ## Media3 Fork Details
 
@@ -249,18 +249,18 @@ This project is licensed under the GNU General Public License v3.0 — see [LICE
 ## Credits
 
 - [NuvioTV](https://github.com/tapframe/NuvioTV) — upstream project
-- [PlayFlix](https://github.com/NuvioMedia/NuvioTV) — intermediate fork
+- [NuvioTV](https://github.com/NuvioMedia/NuvioTV) — original project
 - [libmpv-android](https://github.com/jarnedemeulemeester/libmpv-android) — MPV Android integration
 - [Stremio](https://www.stremio.com/) — addon ecosystem
 
 <!-- MARKDOWN LINKS & IMAGES -->
-[contributors-shield]: https://img.shields.io/github/contributors/tnguyen0362/PlayFlix.svg?style=for-the-badge
-[contributors-url]: https://github.com/tnguyen0362/PlayFlix/graphs/contributors
-[forks-shield]: https://img.shields.io/github/forks/tnguyen0362/PlayFlix.svg?style=for-the-badge
-[forks-url]: https://github.com/tnguyen0362/PlayFlix/network/members
-[stars-shield]: https://img.shields.io/github/stars/tnguyen0362/PlayFlix.svg?style=for-the-badge
-[stars-url]: https://github.com/tnguyen0362/PlayFlix/stargazers
-[issues-shield]: https://img.shields.io/github/issues/tnguyen0362/PlayFlix.svg?style=for-the-badge
-[issues-url]: https://github.com/tnguyen0362/PlayFlix/issues
-[license-shield]: https://img.shields.io/github/license/tnguyen0362/PlayFlix.svg?style=for-the-badge
+[contributors-shield]: https://img.shields.io/github/contributors/tnguyen0362/SlugYard.svg?style=for-the-badge
+[contributors-url]: https://github.com/tnguyen0362/SlugYard/graphs/contributors
+[forks-shield]: https://img.shields.io/github/forks/tnguyen0362/SlugYard.svg?style=for-the-badge
+[forks-url]: https://github.com/tnguyen0362/SlugYard/network/members
+[stars-shield]: https://img.shields.io/github/stars/tnguyen0362/SlugYard.svg?style=for-the-badge
+[stars-url]: https://github.com/tnguyen0362/SlugYard/stargazers
+[issues-shield]: https://img.shields.io/github/issues/tnguyen0362/SlugYard.svg?style=for-the-badge
+[issues-url]: https://github.com/tnguyen0362/SlugYard/issues
+[license-shield]: https://img.shields.io/github/license/tnguyen0362/SlugYard.svg?style=for-the-badge
 [license-url]: http://www.gnu.org/licenses/gpl-3.0.en.html
