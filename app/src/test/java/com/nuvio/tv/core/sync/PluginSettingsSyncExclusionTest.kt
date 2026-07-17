@@ -59,4 +59,14 @@ class PluginSettingsSyncExclusionTest {
             )
         }
     }
+
+    @Test
+    fun `legacy MDBList settings remain device local`() {
+        assertTrue(
+            shouldExcludePreferenceFromProfileSettingsSync(
+                feature = "mdblist_settings",
+                keyName = "api_key"
+            )
+        )
+    }
 }

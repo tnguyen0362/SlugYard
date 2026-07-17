@@ -149,6 +149,10 @@ internal fun shouldExcludePreferenceFromProfileSettingsSync(feature: String, key
         feature == "layout_settings" && keyName in catalogKeysExcludedFromProfileSettingsBlob -> true
         feature == "layout_settings" && keyName in localOnlyLayoutProfileSettingsKeys -> true
         feature == "layout_settings" && keyName == "search_discover_enabled" -> true
+        // MDBList is not part of the SlugYard product surface. Keeping this
+        // legacy feature local also prevents its optional API key from ever
+        // being included in a hosted profile-settings blob.
+        feature == "mdblist_settings" -> true
         feature == PLAYER_SETTINGS_FEATURE && keyName in localOnlyPlayerProfileSettingsKeys -> true
         feature == PLUGIN_SETTINGS_FEATURE && keyName in localOnlyPluginProfileSettingsKeys -> true
         // Debrid credentials are device-local secrets. They must never enter
@@ -187,7 +191,6 @@ class ProfileSettingsSyncService @Inject constructor(
         StreamBadgeSettingsDataStore.FEATURE,
         "trailer_settings",
         "tmdb_settings",
-        "mdblist_settings",
         "trakt_settings",
         "debrid_settings",
         "animeskip_settings",
