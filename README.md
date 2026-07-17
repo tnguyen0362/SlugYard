@@ -1,6 +1,6 @@
 <div align="center">
 
-  <img src="assets/brand/app_logo_wordmark.png" alt="SlugYard" width="300" />
+  <img src="app/src/main/res/drawable-nodpi/slugyard_logo.png" alt="SlugYard" width="300" />
   <br />
   <br />
 
