@@ -142,12 +142,12 @@ fun PureFireDebridSettingsContent(
         }
 
         Text(
-            connectionMessage ?: "Your key is validated before it is saved. StreamFlix automatically enables its curated sources and subtitles.",
+            connectionMessage ?: "Your key is validated before it is saved. PlayFlix automatically enables its curated sources and subtitles.",
             style = MaterialTheme.typography.bodySmall,
             color = if (connectionMessage?.contains("connected") == true) NuvioTheme.colors.Secondary else NuvioTheme.colors.TextSecondary
         )
 
-        // Advanced source entry stays out of the consumer UI. StreamFlix provisions
+        // Advanced source entry stays out of the consumer UI. PlayFlix provisions
         // its curated source set automatically after a debrid account connects.
         if (false) {
         Spacer(modifier = Modifier.height(8.dp))

@@ -45,7 +45,7 @@ Built with Kotlin and Jetpack Compose, optimized for a TV-first viewing experien
 
 ## Key Features
 
-### PureFire Fork Features
+### PlayFlix bundled-addon features
 
 **Smart Autoplay Engine**
 - Content-type-aware scoring (mainstream, anime, K-drama, J-drama, live events)

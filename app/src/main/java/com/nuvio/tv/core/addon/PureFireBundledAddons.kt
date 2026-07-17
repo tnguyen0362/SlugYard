@@ -4,7 +4,7 @@ import com.nuvio.tv.domain.model.DebridSettings
 import com.nuvio.tv.core.debrid.DebridProviders
 
 /**
- * PureFire default addons - safe Stremio infrastructure only.
+ * PlayFlix default addons - safe Stremio infrastructure only.
  *
  * We ship with official Stremio addons for metadata and subtitles.
  * Content sources are provisioned silently as part of connecting a debrid account.
@@ -30,9 +30,9 @@ object PureFireBundledAddons {
 
     /**
      * A public, no-account MediaFusion configuration. It returns torrent hashes;
-     * StreamFlix resolves those hashes using the customer’s connected debrid account.
+     * PlayFlix resolves those hashes using the customer's connected debrid account.
      */
-    private const val STREAMFLIX_MEDIAFUSION_MANIFEST =
+    private const val PLAYFLIX_MEDIAFUSION_MANIFEST =
         "https://mediafusionfortheweebs.midnightignite.me/D-JPpZFd2i8K8NFjTEDOFoYYZKfxv0RyIaBXdhVYa9m-ekkXhqkWB4WsahDS15AFA86fjwu7H2tB1wkkRpE-e17SJIhlmj_HX2-sPV0lC_2hg8XDANf_u4AHq1O-VS-C9ViZJWdm8dTGd4nsrFAVm0IjkAC2-M6YGZ2GPbG7nvklg/manifest.json"
 
     /**
@@ -71,8 +71,8 @@ object PureFireBundledAddons {
         configuredUrls.add("https://torrentio.strem.fun/$torrentioConfig/manifest.json")
         
         // MediaFusion is a static hash source. It carries no customer debrid key;
-        // the playback resolver uses the key saved in StreamFlix instead.
-        configuredUrls.add(STREAMFLIX_MEDIAFUSION_MANIFEST)
+        // the playback resolver uses the key saved in PlayFlix instead.
+        configuredUrls.add(PLAYFLIX_MEDIAFUSION_MANIFEST)
         
         return configuredUrls
     }
