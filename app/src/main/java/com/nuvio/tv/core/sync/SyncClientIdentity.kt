@@ -9,7 +9,7 @@ import javax.inject.Singleton
 import kotlin.random.Random
 
 private const val CLIENT_ID_LENGTH = 32
-private const val CLIENT_ID_PREFIX = "playflix-"
+private const val CLIENT_ID_PREFIX = "slugyard-"
 private const val CLIENT_ID_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
 private const val ORIGIN_CLIENT_ID_PARAM = "p_origin_client_id"
 
@@ -18,7 +18,7 @@ class SyncClientIdentity @Inject constructor(
     @ApplicationContext context: Context
 ) {
     private val preferences = context.getSharedPreferences(
-        "nuvio_sync_client_identity",
+        "slugyard_sync_client_identity",
         Context.MODE_PRIVATE
     )
     private var cachedClientId: String? = null

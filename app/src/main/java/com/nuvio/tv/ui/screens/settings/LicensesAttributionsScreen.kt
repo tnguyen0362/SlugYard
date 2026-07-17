@@ -65,12 +65,11 @@ import com.nuvio.tv.core.cloud.PremiumizeCloudLibraryPosterUrl
 import com.nuvio.tv.core.cloud.TorboxCloudLibraryPosterUrl
 import com.nuvio.tv.core.cloud.cloudLibraryDisplayArtworkUrl
 
-private const val PlayFlixRepositoryUrl = "https://github.com/tnguyen0362/PlayFlix"
+private const val SlugYardRepositoryUrl = "https://github.com/tnguyen0362/SlugYard"
 private const val TmdbUrl = "https://www.themoviedb.org"
 private const val TraktUrl = "https://trakt.tv"
 private const val PremiumizeUrl = "https://www.premiumize.me"
 private const val TorboxUrl = "https://torbox.app"
-private const val MdbListUrl = "https://mdblist.com"
 private const val IntroDbUrl = "https://introdb.app/"
 private const val ImdbDatasetsUrl = "https://developer.imdb.com/non-commercial-datasets/"
 private const val ApacheLicenseUrl = "https://www.apache.org/licenses/LICENSE-2.0"
@@ -353,7 +352,7 @@ private fun rememberUrlSvgPainter(url: String): Painter {
 private fun appLicenseItem() = LicenseAttributionItem(
     title = stringResource(R.string.licenses_attributions_nuvio_title),
     body = stringResource(R.string.licenses_attributions_nuvio_body),
-    url = PlayFlixRepositoryUrl
+    url = SlugYardRepositoryUrl
 )
 
 @Composable
@@ -381,12 +380,6 @@ private fun dataAttributionItems() = listOf(
         body = stringResource(R.string.licenses_attributions_torbox_body),
         url = TorboxUrl,
         logo = cloudLibraryDisplayArtworkUrl(TorboxCloudLibraryPosterUrl)?.let(LicenseLogo::Url)
-    ),
-    LicenseAttributionItem(
-        title = stringResource(R.string.licenses_attributions_mdblist_title),
-        body = stringResource(R.string.licenses_attributions_mdblist_body),
-        url = MdbListUrl,
-        logo = LicenseLogo.Raw(R.raw.mdblist_logo)
     ),
     LicenseAttributionItem(
         title = stringResource(R.string.licenses_attributions_introdb_title),

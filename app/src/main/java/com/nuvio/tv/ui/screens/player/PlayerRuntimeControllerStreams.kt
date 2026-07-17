@@ -975,7 +975,11 @@ internal fun PlayerRuntimeController.buildEpisodeRequestKey(type: String, video:
     return "$type|${video.id}|${video.season ?: -1}|${video.episode ?: -1}"
 }
 
-internal fun PlayerRuntimeController.loadStreamsForEpisode(video: Video, forceRefresh: Boolean) {
+internal fun PlayerRuntimeController.loadStreamsForEpisode(
+    video: Video,
+    forceRefresh: Boolean,
+    showPicker: Boolean = true
+) {
     val type = contentType
     if (type.isNullOrBlank()) {
         _uiState.update { it.copy(episodeStreamsError = context.getString(com.nuvio.tv.R.string.player_stream_error_missing_content_type)) }
@@ -988,7 +992,10 @@ internal fun PlayerRuntimeController.loadStreamsForEpisode(video: Video, forceRe
     if (!forceRefresh && requestKey == episodeStreamsCacheRequestKey && hasCachedPayload) {
         _uiState.update {
             it.copy(
-                showEpisodeStreams = true,
+                showEpisodesPanel = showPicker,
+                showEpisodeStreams = showPicker,
+                showLoadingOverlay = if (showPicker) it.showLoadingOverlay else it.loadingOverlayEnabled,
+                loadingMessage = if (showPicker) it.loadingMessage else context.getString(com.nuvio.tv.R.string.player_loading_preparing),
                 isLoadingEpisodeStreams = false,
                 episodeStreamsForVideoId = video.id,
                 episodeStreamsSeason = video.season,
@@ -1010,7 +1017,10 @@ internal fun PlayerRuntimeController.loadStreamsForEpisode(video: Video, forceRe
         val previousAddonFilter = _uiState.value.episodeSelectedAddonFilter
         _uiState.update {
             it.copy(
-                showEpisodeStreams = true,
+                showEpisodesPanel = showPicker,
+                showEpisodeStreams = showPicker,
+                showLoadingOverlay = if (showPicker) it.showLoadingOverlay else it.loadingOverlayEnabled,
+                loadingMessage = if (showPicker) it.loadingMessage else context.getString(com.nuvio.tv.R.string.player_loading_preparing),
                 isLoadingEpisodeStreams = true,
                 episodeStreamsError = null,
                 episodeAllStreams = if (forceRefresh || targetChanged) emptyList() else it.episodeAllStreams,
@@ -1138,6 +1148,9 @@ internal fun PlayerRuntimeController.loadStreamsForEpisode(video: Video, forceRe
                 forcedTargetVideo = video,
                 isAutoPlay = true
             )
+        } else if (!autoPlayStarted && !showPicker) {
+            _uiState.update { it.copy(showLoadingOverlay = false) }
+            showEpisodeStreamPicker(video = video, forceRefresh = false)
         }
     }
 }

@@ -43,6 +43,8 @@ import com.nuvio.tv.R
 import com.nuvio.tv.core.build.AppFeaturePolicy
 import com.nuvio.tv.updater.UpdateViewModel
 
+private const val SlugYardRepositoryUrl = "https://github.com/tnguyen0362/SlugYard"
+
 @Composable
 fun AboutScreen(
     onNavigateToSupportersContributors: () -> Unit = {},
@@ -150,7 +152,7 @@ fun AboutSettingsContent(
                     onClick = {
                         val intent = Intent(
                             Intent.ACTION_VIEW,
-                            Uri.parse("https://playflix.tv/privacy-policy")
+                            Uri.parse(SlugYardRepositoryUrl)
                         )
                         context.startActivity(intent)
                     }

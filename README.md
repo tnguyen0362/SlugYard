@@ -20,6 +20,22 @@ SlugYard is a substantially overhauled Android TV fork of [NuvioTV](https://gith
 
 This project is independently branded and maintained as SlugYard. It retains the NuvioTV attribution and is released under the same GPLv3 license; see [NOTICE](NOTICE) and [LICENSE](LICENSE).
 
+## Product and release notes
+
+SlugYard is built for a polished Android TV experience. It does not host media or provide debrid accounts; each user connects the services they are authorized to use. For commercial distribution, GPLv3 requires that the corresponding SlugYard source remains available to recipients of the APK.
+
+### Changelog
+
+#### Unreleased
+
+- Complete SlugYard rebrand across Android TV surfaces, launcher assets, deep links, attribution, and public project links.
+- Netflix-inspired home programming, focused hero experience, and a dedicated genre shelf.
+- Improved automatic stream selection, multi-provider debrid support, and bundled source setup.
+- Hardened MPV and ExoPlayer fallback behavior for subtitle-heavy anime and Dolby Vision playback.
+- Added TMDB recommendations, device-local debrid credentials, and Supabase-backed account/profile sync.
+
+See [PRIVACY.md](PRIVACY.md) for the data-handling summary.
+
 It acts as a client-side playback interface that integrates with the Stremio addon ecosystem for content discovery and source resolution through bundled extensions.
 
 Built with Kotlin and Jetpack Compose, optimized for a TV-first viewing experience with dual playback engines:

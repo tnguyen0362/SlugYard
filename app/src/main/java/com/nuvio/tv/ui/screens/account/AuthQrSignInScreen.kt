@@ -592,7 +592,7 @@ private fun AuthTermsAcknowledgement() {
         Text(
             text = stringResource(R.string.auth_qr_terms_link),
             modifier = Modifier.clickable {
-                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://playflix.tv/terms")))
+                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/tnguyen0362/SlugYard")))
             },
             style = MaterialTheme.typography.bodyMedium.copy(
                 color = AuthTextPrimary,

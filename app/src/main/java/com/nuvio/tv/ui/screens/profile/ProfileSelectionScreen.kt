@@ -241,7 +241,7 @@ fun ProfileSelectionScreen(
 
     Box(modifier = Modifier.fillMaxSize()) {
         val overlayProfileColor = pinOverlayState?.profile?.avatarColorHex?.let(::parseProfileColor)
-        ProfileSelectionBackground(focusedAvatarColor = overlayProfileColor ?: focusedAvatarColor)
+        ProfileSelectionBackground()
 
         AnimatedContent(
             targetState = pinOverlayState,
@@ -613,37 +613,25 @@ fun ProfileSelectionScreen(
 }
 
 @Composable
-private fun ProfileSelectionBackground(
-    focusedAvatarColor: Color
-) {
-    val animatedAvatarColor by animateColorAsState(
-        targetValue = focusedAvatarColor,
-        animationSpec = tween(durationMillis = 520),
-        label = "focusedAvatarColor"
-    )
-    val gradientTop = lerp(NuvioTheme.colors.BackgroundElevated, animatedAvatarColor, 0.3f)
-    val gradientMid = lerp(NuvioTheme.colors.Background, animatedAvatarColor, 0.14f)
-    val halfFadeStrong = animatedAvatarColor.copy(alpha = 0.26f)
-    val halfFadeSoft = animatedAvatarColor.copy(alpha = 0.08f)
-
+private fun ProfileSelectionBackground() {
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(
                 brush = Brush.verticalGradient(
                     colorStops = arrayOf(
-                        0f to gradientTop,
-                        0.42f to gradientMid,
-                        1f to NuvioTheme.colors.Background
+                        0f to Color(0xFF09152F),
+                        0.44f to Color(0xFF050A17),
+                        1f to Color(0xFF02040A)
                     )
                 )
             )
             .background(
                 brush = Brush.horizontalGradient(
                     colorStops = arrayOf(
-                        0f to halfFadeStrong,
-                        0.45f to halfFadeSoft,
-                        0.72f to Color.Transparent,
+                        0f to Color(0xFF1469D8).copy(alpha = 0.28f),
+                        0.38f to Color(0xFF1469D8).copy(alpha = 0.08f),
+                        0.64f to Color(0xFFFFC400).copy(alpha = 0.10f),
                         1f to Color.Transparent
                     )
                 )

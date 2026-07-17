@@ -53,6 +53,11 @@ scripts/*
 tv-samples
 HOME_UI_OPTIMIZATION_NOTES.local.md
 .kotlin/
+HANDOFF.md
+.agents/
+.opencode/
+.orchestrator/
+.superpowers/
 bugs/
 avatars/
 logs

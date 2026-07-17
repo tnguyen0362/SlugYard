@@ -29,7 +29,7 @@ object SupabaseModule {
     @Singleton
     @OptIn(SupabaseInternal::class)
     fun provideSupabaseClient(): SupabaseClient {
-        val userAgent = "PlayFlix/${BuildConfig.VERSION_NAME.ifBlank { "dev" }}"
+        val userAgent = "SlugYard/${BuildConfig.VERSION_NAME.ifBlank { "dev" }}"
         return createSupabaseClient(
             supabaseUrl = BuildConfig.SUPABASE_URL,
             supabaseKey = BuildConfig.SUPABASE_ANON_KEY

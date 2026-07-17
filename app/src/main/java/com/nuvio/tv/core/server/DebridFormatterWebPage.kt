@@ -17,7 +17,7 @@ object DebridFormatterWebPage {
             } else base
         }
         fun s(id: Int, fallback: String): String = context?.getString(id) ?: fallback
-        val appName = context?.getString(R.string.app_name) ?: "PlayFlix"
+        val appName = context?.getString(R.string.app_name) ?: "SlugYard"
         return """
 <!DOCTYPE html>
 <html lang="en">
@@ -277,7 +277,7 @@ object DebridFormatterWebPage {
 <body>
 <div class="page">
   <div class="header">
-    <img src="/logo.png" alt="PlayFlix" class="header-logo">
+    <img src="/logo.png" alt="SlugYard" class="header-logo">
     <p>${s(R.string.web_debrid_title, "Direct Debrid Settings").html()}</p>
   </div>
 

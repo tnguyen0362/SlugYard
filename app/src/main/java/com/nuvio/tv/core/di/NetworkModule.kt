@@ -113,7 +113,7 @@ object NetworkModule {
             .addInterceptor { chain ->
                 val version = BuildConfig.VERSION_NAME.ifBlank { "dev" }
                 val request = chain.request().newBuilder()
-                    .header("User-Agent", "PlayFlix/$version")
+                    .header("User-Agent", "SlugYard/$version")
                     .header("Accept-Language", buildAcceptLanguageHeader())
                     .build()
                 chain.proceed(request)
@@ -148,7 +148,7 @@ object NetworkModule {
             .addInterceptor { chain ->
                 val version = BuildConfig.VERSION_NAME.ifBlank { "dev" }
                 val request = chain.request().newBuilder()
-                    .header("User-Agent", "PlayFlix/$version")
+                    .header("User-Agent", "SlugYard/$version")
                     .header("Accept-Language", buildAcceptLanguageHeader())
                     .build()
                 chain.proceed(request)
@@ -221,7 +221,7 @@ object NetworkModule {
     @Singleton
     fun provideRetrofit(okHttpClient: OkHttpClient, moshi: Moshi): Retrofit =
         Retrofit.Builder()
-            .baseUrl("https://placeholder.playflix.tv/")
+            .baseUrl("https://placeholder.slugyard.app/")
             .client(okHttpClient)
             .addConverterFactory(MoshiConverterFactory.create(moshi))
             .build()
