@@ -1,5 +1,7 @@
 package com.nuvio.tv.ui.screens.player
 
+import com.nuvio.tv.core.player.StreamScoringEngine
+import com.nuvio.tv.core.logging.urlForLog
 import android.content.Context
 import android.content.res.Resources
 import android.media.audiofx.LoudnessEnhancer
@@ -54,6 +56,7 @@ import androidx.media3.exoplayer.upstream.BandwidthMeter
 import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.extractor.DefaultExtractorsFactory
 import androidx.media3.extractor.ExtractorsFactory
+import androidx.media3.extractor.text.DefaultSubtitleParserFactory
 import androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory
 import androidx.media3.extractor.ts.TsExtractor
 import androidx.media3.session.MediaSession
@@ -88,7 +91,9 @@ import java.net.SocketTimeoutException
 import kotlin.math.min
 import androidx.media3.common.Tracks
 
-private const val STARTUP_SUBTITLE_PREFETCH_TIMEOUT_MS = 20_000L
+// Subtitle providers are best-effort enrichment. Do not make video start wait
+// for a slow addon or remote service; an unfinished request resumes after start.
+private const val STARTUP_SUBTITLE_PREFETCH_TIMEOUT_MS = 1_500L
 private const val MPV_AFR_SETTLE_DELAY_MS = 2_000L
 private const val AUDIO_DELAY_REFRESH_DEBOUNCE_MS = 120L
 private const val PLAYER_RELEASE_TIMEOUT_MS = 3000L
@@ -109,7 +114,7 @@ private suspend fun PlayerRuntimeController.resolveCurrentStreamMimeType(
     currentStreamMimeType?.let { resolvedMimeType ->
         Log.d(
             PlayerRuntimeController.TAG,
-            "Resolved stream mimeType=$resolvedMimeType for url=$url"
+            "Resolved stream mimeType=$resolvedMimeType for url=${url.urlForLog()}"
         )
         return
     }
@@ -121,17 +126,22 @@ private suspend fun PlayerRuntimeController.resolveCurrentStreamMimeType(
     )
     Log.d(
         PlayerRuntimeController.TAG,
-        "Resolved stream mimeType=${currentStreamMimeType ?: "unknown"} for url=$url"
+        "Resolved stream mimeType=${currentStreamMimeType ?: "unknown"} for url=${url.urlForLog()}"
     )
 }
 
-private fun PlayerRuntimeController.disposeExoPlayerBeforeRebuild() {
+internal fun PlayerRuntimeController.disposeExoPlayerBeforeRebuild() {
     notifyAudioSessionUpdate(false)
     try {
         currentMediaSession?.release()
         currentMediaSession = null
     } catch (_: Exception) {
     }
+    try {
+        loudnessEnhancer?.release()
+    } catch (_: Exception) {
+    }
+    loudnessEnhancer = null
     _exoPlayer?.let { player ->
         runCatching { player.playWhenReady = false }
         runCatching { player.pause() }
@@ -156,6 +166,9 @@ internal fun PlayerRuntimeController.initializePlayer(
         _uiState.update { it.copy(error = context.getString(R.string.player_error_no_stream_url), showLoadingOverlay = false) }
         return
     }
+
+    // A direct stream/engine change wins over any queued error recovery.
+    playbackRecoveryGeneration += 1L
 
     scope.launch {
         try {
@@ -815,22 +828,17 @@ internal fun PlayerRuntimeController.initializePlayer(
                         extractorsFactory
                     }
 
+            mediaSourceFactory.configureSubtitleParsing(
+                extractorsFactory = effectiveExtractorsFactory,
+                subtitleParserFactory = DefaultSubtitleParserFactory()
+            )
+
             setLoadingStatus(
                 phase = "building_player",
                 message = context.getString(R.string.player_loading_building)
             )
             // ── Build ExoPlayer ──
             val buildDefaultPlayer = {
-                // The actual MediaSource is built by mediaSourceFactory.createMediaSource()
-                // (setMediaSource below), NOT the DefaultMediaSourceFactory on the builder.
-                // So the DV7 app-level factory must be wired in here, otherwise
-                // createMediaSource falls back to a plain DefaultExtractorsFactory and the
-                // conversion never runs. (The libass path wires it via buildWithAssSupportCompat.)
-                mediaSourceFactory.configureSubtitleParsing(
-                    extractorsFactory =
-                        if (isExperimentalDv7ToDv81ActiveForCurrentPlayback || stripDvRpuEnabled || stripHdr10PlusSei) effectiveExtractorsFactory else null,
-                    subtitleParserFactory = null
-                )
                 val playerDataSourceFactory = PlayerPlaybackNetworking.createDataSourceFactory(context, headers)
                 ExoPlayer.Builder(context)
                     .setBandwidthMeter(bandwidthMeter)
@@ -947,8 +955,6 @@ internal fun PlayerRuntimeController.initializePlayer(
                 // rendering pipeline so onRenderedFirstFrame() never fires.
                 // In that case we fall back to starting on STATE_READY.
                 playWhenReady = !startPaused && !userPausedManually
-                prepare()
-
                 addListener(object : Player.Listener {
                     override fun onPlaybackStateChanged(playbackState: Int) {
                         if (isReleasingPlayer) return
@@ -1209,6 +1215,8 @@ internal fun PlayerRuntimeController.initializePlayer(
                         if (isInBackground && isRetryablePlaybackError(error)) {
                             backgroundCrashSavedPositionMs = currentPosition.takeIf { it > 0L } ?: 0L
                             pendingBackgroundCrashRecovery = true
+                            // Update UI to show recovery state so user doesn't see frozen frame on return
+                            _uiState.update { it.copy(isPlaying = false, isBuffering = true, showLoadingOverlay = true) }
                             errorRetryJob?.cancel()
                             errorRetryJob = scope.launch {
                                 releasePlayer(flushPlaybackState = false)
@@ -1307,6 +1315,13 @@ internal fun PlayerRuntimeController.initializePlayer(
                             return
                         }
 
+                        if (error.errorCode == PlaybackException.ERROR_CODE_DECODING_RESOURCES_RECLAIMED &&
+                            decoderResourcesReclaimedRecoveryUrl != currentStreamUrl
+                        ) {
+                            retryCurrentStreamAfterDecoderResourcesReclaimed(currentPosition)
+                            return
+                        }
+
                         val responseCode = (error.cause as? androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException)?.responseCode
                         if (responseCode == 416 && !hasRetriedCurrentStreamAfter416) {
                             retryCurrentStreamFromStartAfter416()
@@ -1314,7 +1329,12 @@ internal fun PlayerRuntimeController.initializePlayer(
                         }
 
                         // ── Main Engine Failover ──
-                        if (maybeAutoSwitchInternalPlayerOnStartupError(detailedError = detailedError, allowEngineFailover = allowEngineFailover)) {
+                        if (maybeAutoSwitchInternalPlayerOnStartupError(
+                                detailedError = detailedError,
+                                allowEngineFailover = allowEngineFailover,
+                                allowAfterFirstFrame = error.errorCode == PlaybackException.ERROR_CODE_DECODING_RESOURCES_RECLAIMED
+                            )
+                        ) {
                             return
                         }
                         if (attemptAutoRetry(error, detailedError)) {
@@ -1360,6 +1380,10 @@ internal fun PlayerRuntimeController.initializePlayer(
                         }
                     }
                 })
+                // Register listeners before preparation. Fast/local sources can
+                // transition to BUFFERING or READY quickly enough to miss the
+                // old post-prepare listener registration.
+                prepare()
 
                 addAnalyticsListener(object : AnalyticsListener {
                     override fun onPlaybackStateChanged(eventTime: AnalyticsListener.EventTime, state: Int) {
@@ -1614,13 +1638,52 @@ internal fun PlayerRuntimeController.resolveAutoInternalPlayerEngine(): Internal
     // Only route Dolby Vision content to ExoPlayer — its forked extractor pipeline
     // handles DV7→DV8.1 conversion via DoviBridge. Everything else goes to MPV
     // which handles HDR10, HDR10+, HLG natively with libplacebo tone-mapping.
-    val isDolbyVision = Regex("""(?i)\b(dv|dolby\s*vision)\b""").containsMatchIn(streamMetadataText)
+    // Use specific patterns to avoid false positives (e.g., "DVD", "ADV", movie titles).
+    val isDolbyVision = Regex("""(?i)(\bDV[\.\-_ ]|\bDoVi\b|\bDolby[\.\-_ ]?Vision\b|\bProfile[\.\-_ ]?7\b|\bP7\b)""").containsMatchIn(streamMetadataText)
 
-    return if (isDolbyVision) {
-        InternalPlayerEngine.EXOPLAYER
-    } else {
+    // AUTO is deliberately selective: ExoPlayer is the fast, stable default on
+    // Android TV and always owns the DV7 pipeline. MPV is reserved for
+    // non-Dolby anime/ASS cases where its subtitle renderer improves playback.
+    val isAnime = isAnimePlaybackHint(
+        contentType = contentType,
+        contentGenres = contentGenres,
+        contentLanguage = contentLanguage,
+        title = title
+    )
+    val needsAssRenderer = Regex("""(?i)\b(ass|ssa)\b""").containsMatchIn(streamMetadataText)
+    return if (!isDolbyVision && (isAnime || needsAssRenderer)) {
         InternalPlayerEngine.MVP_PLAYER
+    } else {
+        InternalPlayerEngine.EXOPLAYER
     }
+}
+
+internal fun isAnimePlaybackHint(
+    contentType: String?,
+    contentGenres: String?,
+    contentLanguage: String?,
+    title: String?
+): Boolean {
+    if (contentType.equals("anime", ignoreCase = true)) return true
+    if (StreamScoringEngine.classifyContent(
+        StreamScoringEngine.ContentContext(
+            contentType = contentType,
+            genres = contentGenres,
+            contentLanguage = contentLanguage,
+            title = title,
+            season = null,
+            episode = null
+        )
+    ) == StreamScoringEngine.ContentType.ANIME) {
+        return true
+    }
+
+    // Cinemeta frequently identifies anime only as an episodic Animation title and omits
+    // original-language metadata. For playback, that is enough of a signal to prefer MPV's
+    // native libass path; movies and non-animated series remain on ExoPlayer by default.
+    val normalizedGenres = contentGenres.orEmpty().lowercase()
+    val hasAnimationGenre = normalizedGenres.contains("animation") || normalizedGenres.contains("anime")
+    return contentType.equals("series", ignoreCase = true) && hasAnimationGenre
 }
 
 internal fun resolvePreferredAudioLanguages(

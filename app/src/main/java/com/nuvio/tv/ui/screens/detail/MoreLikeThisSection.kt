@@ -34,6 +34,7 @@ import com.nuvio.tv.ui.components.PosterCardStyle
 @Composable
 fun MoreLikeThisSection(
     items: List<MetaPreview>,
+    title: String? = null,
     sourceLabel: String? = null,
     upFocusRequester: FocusRequester? = null,
     downFocusRequester: FocusRequester? = null,
@@ -86,6 +87,22 @@ fun MoreLikeThisSection(
             .fillMaxWidth()
             .padding(top = NuvioTheme.spacing.sm, bottom = NuvioTheme.spacing.sm)
     ) {
+        title
+            ?.takeIf { it.isNotBlank() }
+            ?.let { sectionTitle ->
+                Text(
+                    text = sectionTitle,
+                    style = MaterialTheme.typography.titleLarge,
+                    color = NuvioTheme.colors.TextPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(
+                        start = NuvioTheme.spacing.xxxl,
+                        end = NuvioTheme.spacing.xxxl,
+                        bottom = NuvioTheme.spacing.xxs
+                    )
+                )
+            }
         LazyRow(
             modifier = Modifier
                 .fillMaxWidth()

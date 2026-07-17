@@ -109,8 +109,7 @@ private enum class IntegrationSettingsSection {
     Hub,
     Debrid,
     Tmdb,
-    MdbList,
-    AnimeSkip
+    MdbList
 }
 
 internal enum class SettingsSectionDestination {
@@ -262,14 +261,18 @@ fun SettingsScreen(
     val visibleSections = remember(isPrimaryProfileActive, isEssentialMode, allSectionSpecs) {
         allSectionSpecs.filter { section ->
             when (section.category) {
+                // PureFire: Only show essential categories
                 SettingsCategory.EXPERIENCE -> false
-                SettingsCategory.DEBUG -> BuildConfig.IS_DEBUG_BUILD && !isEssentialMode
+                SettingsCategory.DEBUG -> false
+                SettingsCategory.APPEARANCE -> false
+                SettingsCategory.LAYOUT -> false
+                SettingsCategory.CONTENT_DISCOVERY -> false
+                SettingsCategory.ADVANCED -> false
                 SettingsCategory.PROFILES -> isPrimaryProfileActive
-                SettingsCategory.ACCOUNT -> isPrimaryProfileActive
-                SettingsCategory.LAYOUT -> true
-                SettingsCategory.CONTENT_DISCOVERY -> true
-                SettingsCategory.INTEGRATION -> true
-                SettingsCategory.ADVANCED -> true
+                // Account uses the self-contained email sign-in screen. The
+                // unavailable hosted QR flow is no longer the settings target.
+                SettingsCategory.ACCOUNT -> true
+                SettingsCategory.TRAKT -> false
                 else -> true
             }
         }
@@ -304,7 +307,6 @@ fun SettingsScreen(
     val integrationDebridFocusRequester = remember { FocusRequester() }
     val integrationTmdbFocusRequester = remember { FocusRequester() }
     val integrationMdbListFocusRequester = remember { FocusRequester() }
-    val integrationAnimeSkipFocusRequester = remember { FocusRequester() }
     var integrationSection by remember { mutableStateOf(IntegrationSettingsSection.Hub) }
     var pendingContentFocusCategory by remember { mutableStateOf<SettingsCategory?>(null) }
     var pendingContentFocusRequestId by remember { mutableLongStateOf(0L) }
@@ -531,7 +533,6 @@ fun SettingsScreen(
                                 integrationDebridFocusRequester = integrationDebridFocusRequester,
                                 integrationTmdbFocusRequester = integrationTmdbFocusRequester,
                                 integrationMdbListFocusRequester = integrationMdbListFocusRequester,
-                                integrationAnimeSkipFocusRequester = integrationAnimeSkipFocusRequester,
                                 onNavigateToManageProfiles = onNavigateToManageProfiles,
                                 onNavigateToAddons = onNavigateToAddons,
                                 onNavigateToPlugins = onNavigateToPlugins,
@@ -682,7 +683,6 @@ fun SettingsScreen(
                         integrationDebridFocusRequester = integrationDebridFocusRequester,
                         integrationTmdbFocusRequester = integrationTmdbFocusRequester,
                         integrationMdbListFocusRequester = integrationMdbListFocusRequester,
-                        integrationAnimeSkipFocusRequester = integrationAnimeSkipFocusRequester,
                         onNavigateToManageProfiles = onNavigateToManageProfiles,
                         onNavigateToAddons = onNavigateToAddons,
                         onNavigateToPlugins = onNavigateToPlugins,
@@ -710,7 +710,6 @@ private fun SettingsDetailPane(
     integrationDebridFocusRequester: FocusRequester,
     integrationTmdbFocusRequester: FocusRequester,
     integrationMdbListFocusRequester: FocusRequester,
-    integrationAnimeSkipFocusRequester: FocusRequester,
     onNavigateToManageProfiles: () -> Unit,
     onNavigateToAddons: () -> Unit,
     onNavigateToPlugins: () -> Unit,
@@ -750,23 +749,13 @@ private fun SettingsDetailPane(
             },
             essentialMode = isEssentialMode
         )
-        SettingsCategory.PLAYBACK -> if (isEssentialMode) {
-            EssentialPlaybackSettingsContent(
-                initialFocusRequester = if (allowDetailAutofocus) {
-                    contentFocusRequesters[SettingsCategory.PLAYBACK]
-                } else {
-                    null
-                }
-            )
-        } else {
-            PlaybackSettingsContent(
-                initialFocusRequester = if (allowDetailAutofocus) {
-                    contentFocusRequesters[SettingsCategory.PLAYBACK]
-                } else {
-                    null
-                }
-            )
-        }
+        SettingsCategory.PLAYBACK -> PureFirePlaybackSettingsContent(
+            initialFocusRequester = if (allowDetailAutofocus) {
+                contentFocusRequesters[SettingsCategory.PLAYBACK]
+            } else {
+                null
+            }
+        )
         SettingsCategory.ADVANCED -> if (isEssentialMode) {
             EssentialAdvancedSettingsContent(
                 experienceModeViewModel = experienceModeViewModel,
@@ -798,7 +787,6 @@ private fun SettingsDetailPane(
             debridFocusRequester = integrationDebridFocusRequester,
             tmdbFocusRequester = integrationTmdbFocusRequester,
             mdbListFocusRequester = integrationMdbListFocusRequester,
-            animeSkipFocusRequester = integrationAnimeSkipFocusRequester,
             autoFocusEnabled = allowDetailAutofocus
         )
         SettingsCategory.ABOUT -> AboutSettingsContent(
@@ -829,7 +817,7 @@ private fun SettingsDetailPane(
             }
         )
         SettingsCategory.DEBUG -> DebugSettingsContent()
-        SettingsCategory.TRAKT -> Unit
+        SettingsCategory.TRAKT -> PureFireTraktSettings()
     }
 }
 
@@ -951,7 +939,6 @@ private fun IntegrationSettingsContent(
     debridFocusRequester: FocusRequester,
     tmdbFocusRequester: FocusRequester,
     mdbListFocusRequester: FocusRequester,
-    animeSkipFocusRequester: FocusRequester,
     autoFocusEnabled: Boolean
 ) {
     BackHandler(enabled = selectedSection != IntegrationSettingsSection.Hub) {
@@ -966,7 +953,6 @@ private fun IntegrationSettingsContent(
             IntegrationSettingsSection.Debrid -> debridFocusRequester
             IntegrationSettingsSection.Tmdb -> tmdbFocusRequester
             IntegrationSettingsSection.MdbList -> mdbListFocusRequester
-            IntegrationSettingsSection.AnimeSkip -> animeSkipFocusRequester
         }
         runCatching { requester.requestFocus() }
     }
@@ -995,8 +981,8 @@ private fun IntegrationSettingsContent(
                         ) {
                             item(key = "integration_hub_debrid") {
                                 SettingsActionRow(
-                                    title = stringResource(R.string.debrid_title),
-                                    subtitle = stringResource(R.string.settings_debrid_subtitle),
+                                    title = "Debrid services",
+                                    subtitle = "Connect Torbox, Premiumize, or Real-Debrid",
                                     onClick = { onSelectSection(IntegrationSettingsSection.Debrid) },
                                     modifier = Modifier.focusRequester(hubEntryFocusRequester)
                                 )
@@ -1008,20 +994,6 @@ private fun IntegrationSettingsContent(
                                     onClick = { onSelectSection(IntegrationSettingsSection.Tmdb) }
                                 )
                             }
-                            item(key = "integration_hub_mdblist") {
-                                SettingsActionRow(
-                                    title = "MDBList",
-                                    subtitle = stringResource(R.string.settings_mdblist_subtitle),
-                                    onClick = { onSelectSection(IntegrationSettingsSection.MdbList) }
-                                )
-                            }
-                            item(key = "integration_hub_animeskip") {
-                                SettingsActionRow(
-                                    title = "Anime-Skip",
-                                    subtitle = stringResource(R.string.settings_animeskip_subtitle),
-                                    onClick = { onSelectSection(IntegrationSettingsSection.AnimeSkip) }
-                                )
-                            }
                         }
                         SettingsVerticalScrollIndicators(state = integrationHubState)
                     }
@@ -1030,7 +1002,7 @@ private fun IntegrationSettingsContent(
         }
 
         IntegrationSettingsSection.Debrid -> {
-            DebridSettingsContent(
+            PureFireDebridSettingsContent(
                 initialFocusRequester = debridFocusRequester
             )
         }
@@ -1044,12 +1016,6 @@ private fun IntegrationSettingsContent(
         IntegrationSettingsSection.MdbList -> {
             MDBListSettingsContent(
                 initialFocusRequester = mdbListFocusRequester
-            )
-        }
-
-        IntegrationSettingsSection.AnimeSkip -> {
-            AnimeSkipSettingsContent(
-                initialFocusRequester = animeSkipFocusRequester
             )
         }
     }

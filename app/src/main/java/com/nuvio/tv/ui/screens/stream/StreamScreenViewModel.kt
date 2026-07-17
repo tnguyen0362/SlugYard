@@ -17,6 +17,7 @@ import com.nuvio.tv.core.torrent.TorrentService
 import com.nuvio.tv.core.torrent.TorrentState
 import com.nuvio.tv.core.player.StreamAutoPlayPolicy
 import com.nuvio.tv.core.player.StreamAutoPlaySelector
+import com.nuvio.tv.core.player.StreamScoringEngine
 import com.nuvio.tv.core.streams.StreamBadgePresentation
 import com.nuvio.tv.data.local.PlayerPreference
 import com.nuvio.tv.data.local.PlayerSettings
@@ -420,6 +421,7 @@ class StreamScreenViewModel @Inject constructor(
                                 videoSize = cached.videoSize,
                                 fileIdx = cached.fileIdx,
                                 sources = cached.sources,
+                                contentGenres = _uiState.value.genres?.takeIf { it.isNotBlank() } ?: genres,
                                 contentLanguage = cached.contentLanguage ?: contentLanguage
                             ),
                             showDirectAutoPlayOverlay = showOverlay || it.showDirectAutoPlayOverlay,
@@ -477,11 +479,19 @@ class StreamScreenViewModel @Inject constructor(
 
                 val allStreams = mergedAddonStreams.flatMap { it.streams }
                 val availableAddons = mergedAddonStreams.map { it.addonName }
-                // Auto-select only after all addons have responded or the
-                // configured timeout has elapsed. This gives slower addons a
-                // chance to return higher-quality streams before the selector
-                // picks from whatever is available.
-                val shouldAutoSelect = !autoPlayHandledForSession && !resolvedAutoPlayTarget && isAllLoaded
+                // An unlimited timeout used to wait for the hard 60-second
+                // safety timer before ever making a non-binge selection. In
+                // practice the first responsive addon already supplied a
+                // cached/direct candidate, while the loader remained on screen
+                // until that timer fired. Select as soon as a *playable* stream
+                // is available; the scored selector still favors cached/direct
+                // playback over a nominally higher-quality but uncertain source.
+                // Bounded modes retain their configured wait so users who ask
+                // for it can still give slower sources a chance to respond.
+                val unlimitedDirectAutoPlay = directFlowActive &&
+                    playerSettings.streamAutoPlayTimeoutSeconds == PlayerSettings.STREAM_AUTOPLAY_TIMEOUT_UNLIMITED
+                val shouldAutoSelect = !autoPlayHandledForSession && !resolvedAutoPlayTarget &&
+                    (isAllLoaded || unlimitedDirectAutoPlay)
                 val selectedAutoPlayStream = if (!shouldAutoSelect) {
                     null
                 } else {
@@ -494,7 +504,15 @@ class StreamScreenViewModel @Inject constructor(
                         selectedAddons = playerSettings.streamAutoPlaySelectedAddons,
                         selectedPlugins = playerSettings.streamAutoPlaySelectedPlugins,
                         preferredBingeGroup = persistedBingeGroup,
-                        preferBingeGroupInSelection = persistedBingeGroup != null
+                        preferBingeGroupInSelection = persistedBingeGroup != null,
+                        contentContext = StreamScoringEngine.ContentContext(
+                            contentType = contentType,
+                            genres = genres,
+                            contentLanguage = contentLanguage,
+                            title = title,
+                            season = season,
+                            episode = episode
+                        )
                     )
                 }
                 if (selectedAutoPlayStream != null) {
@@ -599,7 +617,16 @@ class StreamScreenViewModel @Inject constructor(
                         season = season,
                         episode = episode,
                         playerSettings = playerSettings,
-                        installedAddonNames = installedAddonOrder.toSet()
+                        installedAddonNames = installedAddonOrder.toSet(),
+                        preferredBingeGroup = persistedBingeGroup,
+                        contentContext = StreamScoringEngine.ContentContext(
+                            contentType = contentType,
+                            genres = genres,
+                            contentLanguage = contentLanguage,
+                            title = title,
+                            season = season,
+                            episode = episode
+                        )
                     ) { original, prepared ->
                         updateUiStateIfChanged { state ->
                             val updatedGroups = directDebridStreamPreparer.replacePreparedStream(
@@ -1301,6 +1328,10 @@ class StreamScreenViewModel @Inject constructor(
      */
     fun getStreamForPlayback(stream: Stream): StreamPlaybackInfo {
         cancelStreamsLoad()
+        // Continue Watching and some third-party catalog routes start without genres, then
+        // populate them through metadata enrichment. Use the latest state so AUTO playback
+        // receives the same content context the stream scorer and UI display.
+        val playbackGenres = _uiState.value.genres?.takeIf { it.isNotBlank() } ?: genres
         val playbackInfo = StreamPlaybackInfo(
             url = stream.getStreamUrl(),
             title = _uiState.value.title,
@@ -1330,6 +1361,7 @@ class StreamScreenViewModel @Inject constructor(
             streamDescription = stream.description,
             fileIdx = stream.getEffectiveFileIdx(),
             sources = stream.sources,
+            contentGenres = playbackGenres,
             contentLanguage = contentLanguage
         )
 
@@ -1852,6 +1884,7 @@ data class StreamPlaybackInfo(
     val streamDescription: String? = null,
     val fileIdx: Int? = null,
     val sources: List<String>? = null,
+    val contentGenres: String? = null,
     val contentLanguage: String? = null
 )
 

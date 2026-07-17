@@ -84,9 +84,9 @@ object NuvioMotion {
             decelerate = LinearOutSlowInEasing,
             accelerate = CubicBezierEasing(0.4f, 0f, 1f, 1f)
         ),
-        focusScale = 1.02f,
-        selectedScale = 1.01f,
-        pressedScale = 0.98f,
+        focusScale = 1.01f,
+        selectedScale = 1.005f,
+        pressedScale = 0.99f,
         reducedMotionScale = 1f
     )
 
@@ -106,9 +106,9 @@ object NuvioMotion {
 
 object NuvioFocus {
     val tokens = NuvioFocusTokens(
-        scale = 1.02f,
-        subtleScale = 1.01f,
-        pressedScale = 0.98f,
+        scale = 1.01f,
+        subtleScale = 1.005f,
+        pressedScale = 0.99f,
         disabledScale = 1f,
         scrollViewportTarget = 0.42f,
         longPressInitialDelayMillis = 360L,

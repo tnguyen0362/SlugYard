@@ -2,6 +2,7 @@ package com.nuvio.tv.core.debrid
 
 import android.util.Log
 import com.nuvio.tv.core.player.StreamAutoPlaySelector
+import com.nuvio.tv.core.player.StreamScoringEngine
 import com.nuvio.tv.data.local.DebridSettingsDataStore
 import com.nuvio.tv.data.local.PlayerSettings
 import com.nuvio.tv.data.local.StreamAutoPlayMode
@@ -32,6 +33,15 @@ class DirectDebridStreamPreparer @Inject constructor(
         episode: Int?,
         playerSettings: PlayerSettings,
         installedAddonNames: Set<String>,
+        preferredBingeGroup: String? = null,
+        contentContext: StreamScoringEngine.ContentContext = StreamScoringEngine.ContentContext(
+            contentType = null,
+            genres = null,
+            contentLanguage = null,
+            title = null,
+            season = null,
+            episode = null
+        ),
         onPrepared: (original: Stream, prepared: Stream) -> Unit
     ) {
         val settings = dataStore.settings.first()
@@ -42,7 +52,9 @@ class DirectDebridStreamPreparer @Inject constructor(
             streams = streams,
             limit = limit,
             playerSettings = playerSettings,
-            installedAddonNames = installedAddonNames
+            installedAddonNames = installedAddonNames,
+            preferredBingeGroup = preferredBingeGroup,
+            contentContext = contentContext
         )
         for (stream in candidates) {
             if (!resolver.shouldResolveToPlayableStream(stream)) continue
@@ -77,7 +89,16 @@ class DirectDebridStreamPreparer @Inject constructor(
         streams: List<Stream>,
         limit: Int,
         playerSettings: PlayerSettings,
-        installedAddonNames: Set<String>
+        installedAddonNames: Set<String>,
+        preferredBingeGroup: String? = null,
+        contentContext: StreamScoringEngine.ContentContext = StreamScoringEngine.ContentContext(
+            contentType = null,
+            genres = null,
+            contentLanguage = null,
+            title = null,
+            season = null,
+            episode = null
+        )
     ): List<Stream> {
         if (limit <= 0) return emptyList()
         val candidates = streams
@@ -93,7 +114,10 @@ class DirectDebridStreamPreparer @Inject constructor(
             source = playerSettings.streamAutoPlaySource,
             installedAddonNames = installedAddonNames,
             selectedAddons = playerSettings.streamAutoPlaySelectedAddons,
-            selectedPlugins = playerSettings.streamAutoPlaySelectedPlugins
+            selectedPlugins = playerSettings.streamAutoPlaySelectedPlugins,
+            preferredBingeGroup = preferredBingeGroup,
+            preferBingeGroupInSelection = !preferredBingeGroup.isNullOrBlank(),
+            contentContext = contentContext
         )
         if (autoPlaySelection?.let { it.isDirectDebrid() || it.isCachedLocalDebridTorrent() } == true) {
             candidates.firstOrNull { it.preparationKey() == autoPlaySelection.preparationKey() }
@@ -112,6 +136,13 @@ class DirectDebridStreamPreparer @Inject constructor(
                     }
                     .forEach(prioritized::add)
             }
+        }
+
+        if (playerSettings.streamAutoPlayMode == StreamAutoPlayMode.SCORED) {
+            candidates
+                .filter { candidate -> prioritized.none { it.preparationKey() == candidate.preparationKey() } }
+                .sortedByDescending { it.qualityValue }
+                .forEach(prioritized::add)
         }
 
         candidates

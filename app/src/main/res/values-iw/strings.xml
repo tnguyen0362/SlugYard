@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Nuvio</string>
+    <string name="app_name">SlugYard</string>
     <string name="tv_channel_continue_watching">המשך צפייה</string>
     <string name="type_movie">סרט</string>
     <string name="type_movies">סרטים</string>
@@ -98,7 +98,7 @@
 
     <string name="home_no_addons">אין תוספים מותקנים. הוסף אחד כדי להתחיל.</string>
     <string name="home_no_catalog_addons">אין תוספי קטלוג מותקנים. התקן תוסף קטלוג כדי לראות תוכן.</string>
-    <string name="auth_notice_nuvio_logged_out">יצאת מחשבון Nuvio. אנא התחבר מחדש.</string>
+    <string name="auth_notice_nuvio_logged_out">יצאת מחשבון SlugYard. אנא התחבר מחדש.</string>
     <string name="auth_notice_trakt_logged_out">יצאת מחשבון Trakt. אנא התחבר מחדש.</string>
     <string name="error_generic">אירעה שגיאה</string>
 
@@ -339,18 +339,18 @@
     <string name="about_licenses_attributions">רישיונות וקרדיטים</string>
     <string name="about_licenses_attributions_subtitle">מקורות מידע, תודות ורישיונות Android</string>
     <string name="licenses_attributions_title">רישיונות וקרדיטים</string>
-    <string name="licenses_attributions_subtitle">ספקי מידע, קרדיטים לשירותים ורישיונות הפעלת Android שבהם משתמשת Nuvio TV.</string>
+    <string name="licenses_attributions_subtitle">ספקי מידע, קרדיטים לשירותים ורישיונות הפעלת Android שבהם משתמשת SlugYard TV.</string>
     <string name="licenses_attributions_section_app">רישיון האפליקציה</string>
     <string name="licenses_attributions_section_data">מידע ושירותים</string>
     <string name="licenses_attributions_section_playback">רישיונות הפעלת Android</string>
     <string name="licenses_attributions_nuvio_body">קוד המקור ותנאי הרישיון זמינים במאגר הפרויקט. מורשה תחת רישיון GNU General Public License v3.0.</string>
-    <string name="licenses_attributions_tmdb_body">Nuvio משתמשת ב-API של TMDB עבור מטה-דאטה של סרטים וסדרות, תמונות, טריילרים, שחקנים, פרטי הפקה, אוספים והמלצות. מוצר זה משתמש ב-API של TMDB אך אינו מאושר או מאומת על ידי TMDB.</string>
-    <string name="licenses_attributions_trakt_body">Nuvio מתחברת ל-Trakt לצורך אימות חשבון, היסטוריית צפייה, סנכרון התקדמות, נתוני ספרייה, דירוגים, רשימות ותגובות. Nuvio אינה קשורה או מאושרת על ידי Trakt.</string>
-    <string name="licenses_attributions_premiumize_body">Nuvio מתחברת ל-Premiumize לצורך אימות חשבון, גישה לספריית ענן, בדיקות מטמון ותכונות הפעלה בענן. Nuvio אינה קשורה או מאושרת על ידי Premiumize.</string>
-    <string name="licenses_attributions_torbox_body">Nuvio מתחברת ל-TorBox לצורך אימות חשבון, גישה לספריית ענן, בדיקות מטמון ותכונות הפעלה בענן. Nuvio אינה קשורה או מאושרת על ידי TorBox.</string>
-    <string name="licenses_attributions_mdblist_body">Nuvio משתמשת ב-MDBList עבור דירוגים ונתוני ספקי ציון חיצוניים. Nuvio אינה קשורה או מאושרת על ידי MDBList.</string>
-    <string name="licenses_attributions_introdb_body">Nuvio משתמשת ב-API של IntroDB עבור חותמות זמן של פתיח, תקציר, קרדיטים ותצוגה מקדימה שסופקו על ידי הקהילה, המשמשות לפקדי הדילוג. Nuvio אינה קשורה או מאושרת על ידי IntroDB.</string>
-    <string name="licenses_attributions_imdb_body">Nuvio משתמשת ב-IMDb Non-Commerical Datasets של IMDb, כולל title.ratings.tsv.gz, עבור דירוגי וקולות IMDb. מידע באדיבות IMDb (https://www.imdb.com). בשימוש באישור. נתוני IMDb מיועדים לשימוש אישי ולא-מסחרי בכפוף לתנאי IMDb.</string>
+    <string name="licenses_attributions_tmdb_body">SlugYard משתמשת ב-API של TMDB עבור מטה-דאטה של סרטים וסדרות, תמונות, טריילרים, שחקנים, פרטי הפקה, אוספים והמלצות. מוצר זה משתמש ב-API של TMDB אך אינו מאושר או מאומת על ידי TMDB.</string>
+    <string name="licenses_attributions_trakt_body">SlugYard מתחברת ל-Trakt לצורך אימות חשבון, היסטוריית צפייה, סנכרון התקדמות, נתוני ספרייה, דירוגים, רשימות ותגובות. SlugYard אינה קשורה או מאושרת על ידי Trakt.</string>
+    <string name="licenses_attributions_premiumize_body">SlugYard מתחברת ל-Premiumize לצורך אימות חשבון, גישה לספריית ענן, בדיקות מטמון ותכונות הפעלה בענן. SlugYard אינה קשורה או מאושרת על ידי Premiumize.</string>
+    <string name="licenses_attributions_torbox_body">SlugYard מתחברת ל-TorBox לצורך אימות חשבון, גישה לספריית ענן, בדיקות מטמון ותכונות הפעלה בענן. SlugYard אינה קשורה או מאושרת על ידי TorBox.</string>
+    <string name="licenses_attributions_mdblist_body">SlugYard משתמשת ב-MDBList עבור דירוגים ונתוני ספקי ציון חיצוניים. SlugYard אינה קשורה או מאושרת על ידי MDBList.</string>
+    <string name="licenses_attributions_introdb_body">SlugYard משתמשת ב-API של IntroDB עבור חותמות זמן של פתיח, תקציר, קרדיטים ותצוגה מקדימה שסופקו על ידי הקהילה, המשמשות לפקדי הדילוג. SlugYard אינה קשורה או מאושרת על ידי IntroDB.</string>
+    <string name="licenses_attributions_imdb_body">SlugYard משתמשת ב-IMDb Non-Commerical Datasets של IMDb, כולל title.ratings.tsv.gz, עבור דירוגי וקולות IMDb. מידע באדיבות IMDb (https://www.imdb.com). בשימוש באישור. נתוני IMDb מיועדים לשימוש אישי ולא-מסחרי בכפוף לתנאי IMDb.</string>
     <string name="licenses_attributions_exoplayer_body">משמש כמנוע הפעלה באנדרואיד. מורשה תחת רישיון Apache, גרסה 2.0.</string>
     <string name="licenses_attributions_libmpv_body">משמש כמנוע הפעלה באנדרואיד. עטיפת libmpv-android מורשית תחת רישיון MIT; mpv/libmpv ורכיבים טבעיים מצורפים שומרים על תנאי הרישיון המקוריים שלהם.</string>
 
@@ -380,7 +380,7 @@
     <string name="settings_advanced_subtitle">הפעל אבחון מהירות רשת</string>
     <string name="experience_mode_essential">בסיסי</string>
     <string name="experience_mode_advanced">מתקדם</string>
-    <string name="experience_mode_choose_title">בחר את חווית ה-Nuvio שלך</string>
+    <string name="experience_mode_choose_title">בחר את חווית ה-SlugYard שלך</string>
     <string name="experience_mode_choose_subtitle">התחל בפשטות או פתח כל אפשרות להגדרה. ניתן להחליף בכל עת.</string>
     <string name="experience_mode_essential_card_subtitle">הגדרה ממוקדת, תוספים, הפעלה בסיסית, Trakt והגדרות חשבון.</string>
     <string name="experience_mode_advanced_card_subtitle">הגדרות מלאות, בחירת פריסה, סדר קטלוגים, אוספים, פלאגינים ואבחון.</string>
@@ -468,8 +468,8 @@
     <string name="buffer_safe_status">בטוח: בתוך המגבלה המומלצת עבור המכשיר שלך.</string>
     <string name="buffer_unsafe_warning">אזהרה: חורג מהמגבלה הבטוחה המומלצת (%1$d MB) עבור מכשיר %2$s שלך. עלול לגרום לקריסות באפליקציה.</string>
     <string name="buffer_auto_limit_active">מגבלה בטוחה בקנה מידה אוטומטי: %d MB</string>
-    <string name="advanced_nuvio_focus_scroll">גלילת מיקוד של Nuvio</string>
-    <string name="advanced_nuvio_focus_scroll_subtitle">השתמש באנימציית גלילת המיקוד הגלובלית המותאמת אישית של Nuvio ובמיקום שלה.</string>
+    <string name="advanced_nuvio_focus_scroll">גלילת מיקוד של SlugYard</string>
+    <string name="advanced_nuvio_focus_scroll_subtitle">השתמש באנימציית גלילת המיקוד הגלובלית המותאמת אישית של SlugYard ובמיקום שלה.</string>
     <string name="advanced_memory_only_vertical_scroll">גלילה אנכית מהזיכרון בלבד</string>
     <string name="advanced_memory_only_vertical_scroll_subtitle">דלג על בקשות תמונה מהדיסק ומהרשת בעת גלילה אנכית בשורות דף הבית.</string>
     <string name="advanced_compose_highlighter">מדגיש Compose</string>
@@ -507,16 +507,16 @@
     <string name="action_close">סגור</string>
 
     <string name="supporters_contributors_title">תומכים ותורמים</string>
-    <string name="supporters_contributors_subtitle">האנשים שתומכים ב-Nuvio והתורמים הבונים אותו בטלוויזיה ובנייד.</string>
+    <string name="supporters_contributors_subtitle">האנשים שתומכים ב-SlugYard והתורמים הבונים אותו בטלוויזיה ובנייד.</string>
     <string name="supporters_contributors_supporters_copy">תומכים ותורמים עוזרים לשמור את הפרויקט בתנועה, מממנים תשתיות ומאפשרים פיצ׳רים שאפתניים.</string>
-    <string name="supporters_contributors_donate_copy">Nuvio יישאר חינמי וקוד פתוח. אם ברצונך לתמוך בפרויקט, תוכל לעזור לכסות את הזמן והתשתית שמאחוריו.</string>
+    <string name="supporters_contributors_donate_copy">SlugYard יישאר חינמי וקוד פתוח. אם ברצונך לתמוך בפרויקט, תוכל לעזור לכסות את הזמן והתשתית שמאחוריו.</string>
     <string name="supporters_contributors_donation_progress_title">שרת ותחזוקה לחודש זה</string>
     <string name="supporters_contributors_donation_progress_complete">מכוסה. תמיכה נוספת תלך כעת לפיתוח.</string>
     <string name="supporters_contributors_donation_progress_remaining">לאחר 100%%, תמיכה נוספת הולכת לפיתוח.</string>
     <string name="supporters_contributors_loading_donation_progress">טוען התקדמות מימון\u2026</string>
-    <string name="supporters_contributors_donate_button">תרום ל-Nuvio</string>
+    <string name="supporters_contributors_donate_button">תרום ל-SlugYard</string>
     <string name="supporters_contributors_qr_title">סרוק לתרומה</string>
-    <string name="supporters_contributors_qr_subtitle">פתח את הקישור בטלפון שלך ותמוך ב-Nuvio דרך Ko-fi.</string>
+    <string name="supporters_contributors_qr_subtitle">פתח את הקישור בטלפון שלך ותמוך ב-SlugYard דרך Ko-fi.</string>
     <string name="supporters_contributors_qr_hint">כוון את המצלמה לקוד ה-QR או השתמש בכפתור למטה.</string>
     <string name="supporters_contributors_back_button">חזור לפרטים</string>
     <string name="supporters_tab">תומכים</string>
@@ -530,7 +530,7 @@
     <string name="sponsors_loading">טוען נותני חסות\u2026</string>
     <string name="sponsors_empty">עדיין לא נמצאו נותני חסות.</string>
     <string name="sponsors_error_title">לא ניתן לטעון נותני חסות</string>
-    <string name="sponsors_detail_copy">נותני החסות עוזרים לקדם את Nuvio קדימה דרך תמיכה בחלקים השונים של הפיתוח.</string>
+    <string name="sponsors_detail_copy">נותני החסות עוזרים לקדם את SlugYard קדימה דרך תמיכה בחלקים השונים של הפיתוח.</string>
     <string name="sponsors_channel_unavailable">ערוץ נותני החסות אינו זמין.</string>
     <string name="sponsors_open_channel">פתח ערוץ נותני החסות</string>
     <string name="contributors_loading">טוען תורמי GitHub\u2026</string>
@@ -601,8 +601,8 @@
     <string name="playback_player_ask_desc">בחר נגן בכל פעם</string>
     <string name="playback_player_auto">אוטומטי (הטוב ביותר לתוכן)</string>
     <string name="playback_player_auto_desc">ExoPlayer לסרטים ולתוכניות טלוויזיה · MPV לאנימה</string>
-    <string name="playback_engine_exoplayer_desc">תאימות הטובה ביותר עם תכונות Nuvio הנוכחיות.</string>
-    <string name="playback_engine_mvplayer_desc">משתמש ב-Libmpv עם פקדי המסך של Nuvio. ניסיוני.</string>
+    <string name="playback_engine_exoplayer_desc">תאימות הטובה ביותר עם תכונות SlugYard הנוכחיות.</string>
+    <string name="playback_engine_mvplayer_desc">משתמש ב-Libmpv עם פקדי המסך של SlugYard. ניסיוני.</string>
 
     <string name="video_section">וידאו</string>
     <string name="audio_trailer_section">טריילר</string>
@@ -908,7 +908,7 @@
     <string name="debrid_disconnect">נתק</string>
     <string name="debrid_device_auth_connected">%1$s מחובר במכשיר זה.</string>
     <string name="debrid_device_auth_starting">מתחיל התחברות מאובטחת...</string>
-    <string name="debrid_device_auth_instructions">סרוק את קוד ה-QR והזן קוד זה כדי לאשר את Nuvio.</string>
+    <string name="debrid_device_auth_instructions">סרוק את קוד ה-QR והזן קוד זה כדי לאשר את SlugYard.</string>
     <string name="debrid_device_auth_code_copied">הקוד הועתק.</string>
     <string name="debrid_device_auth_waiting">ממתין לאישור\u2026</string>
     <string name="debrid_device_auth_failed">לא ניתן להתחיל את תהליך ההתחברות.</string>
@@ -1060,17 +1060,17 @@
     <string name="trakt_watch_progress_title">התקדמות צפייה</string>
     <string name="trakt_watch_progress_subtitle">בחר מקור התקדמות שמניע המשך וצפייה מתמשכת</string>
     <string name="trakt_watch_progress_dialog_title">התקדמות צפייה</string>
-    <string name="trakt_watch_progress_dialog_subtitle">בחר איפה לשמור את התקדמות הצפייה שלך. ב-Trakt או בשרת של Nuvio.</string>
+    <string name="trakt_watch_progress_dialog_subtitle">בחר איפה לשמור את התקדמות הצפייה שלך. ב-Trakt או בשרת של SlugYard.</string>
     <string name="trakt_library_source_title">מקור ספרייה</string>
     <string name="trakt_library_source_subtitle">בחר באיזו ספרייה להשתמש לשמירה וצפייה באוסף שלך</string>
     <string name="trakt_library_source_dialog_title">מקור ספרייה</string>
     <string name="trakt_library_source_dialog_subtitle">בחר היכן לשמור ולנהל את פריטי הספרייה שלך</string>
     <string name="trakt_library_source_trakt_selected">ספריית Trakt נבחרה</string>
-    <string name="trakt_library_source_nuvio_selected">ספריית Nuvio נבחרה</string>
+    <string name="trakt_library_source_nuvio_selected">ספריית SlugYard נבחרה</string>
     <string name="trakt_setting_on">פעיל</string>
     <string name="trakt_setting_off">כבוי</string>
     <string name="trakt_watch_progress_trakt_selected">מקור התקדמות צפייה הוגדר ל-Trakt</string>
-    <string name="trakt_watch_progress_nuvio_selected">מקור התקדמות צפייה הוגדר ל-Nuvio Sync</string>
+    <string name="trakt_watch_progress_nuvio_selected">מקור התקדמות צפייה הוגדר ל-SlugYard Sync</string>
     <string name="trakt_continue_watching_window">חלון  \"המשך צפייה\"</string>
     <string name="trakt_continue_watching_subtitle">היסטוריית Trakt הנחשבת להמשך צפייה</string>
     <string name="trakt_unaired_next_up">פרקים הבאים שטרם שודרו</string>
@@ -1093,7 +1093,7 @@
     <string name="trakt_stat_watched_hours">שעות צפייה</string>
     <string name="trakt_disconnect">נתק</string>
     <string name="trakt_disconnect_title">לנתק Trakt?</string>
-    <string name="trakt_disconnect_subtitle">פעולה זו תנתק את חשבון Trakt שלך מ-Nuvio.</string>
+    <string name="trakt_disconnect_subtitle">פעולה זו תנתק את חשבון Trakt שלך מ-SlugYard.</string>
     <string name="trakt_login">התחבר</string>
     <string name="trakt_retry">נסה שוב</string>
     <string name="trakt_back">חזרה</string>
@@ -1152,7 +1152,7 @@
     <string name="profile_addons">תוספים</string>
     <string name="profile_plugins">פלאגינים</string>
     <string name="profile_choose_avatar">בחר אווטאר</string>
-    <string name="profile_custom_avatar_web_panel_note">ניתן להגדיר כתובות אווטאר מותאמות אישית מפאנל האינטרנט של Nuvio.</string>
+    <string name="profile_custom_avatar_web_panel_note">ניתן להגדיר כתובות אווטאר מותאמות אישית מפאנל האינטרנט של SlugYard.</string>
     <string name="profile_avatar_none_selected">לא נבחר אווטאר</string>
     <string name="profile_avatar_focus_hint">התמקד באווטאר כדי לראות את שמו</string>
     <string name="profile_avatar_category_all">הכל</string>
@@ -1196,7 +1196,7 @@
     <string name="profile_pin_overlay_set_support">סיסמה זו תידרש לפני פתיחת פרופיל זה.</string>
     <string name="profile_pin_overlay_confirm_support">הזן שוב את אותן 4 ספרות כדי לסיים את ההגדרה.</string>
     <string name="profile_pin_overlay_mismatch">הסיסמות אינן תואמות. הזן סיסמה חדשה שוב.</string>
-    <string name="profile_pin_overlay_forgot_hint">שכחת סיסמה? אפס אותה באתר של Nuvio.</string>
+    <string name="profile_pin_overlay_forgot_hint">שכחת סיסמה? אפס אותה באתר של SlugYard.</string>
     <string name="profile_pin_overlay_back_hint">לחץ חזרה כדי לבטל</string>
 
 
@@ -1514,7 +1514,7 @@
     <string name="library_delete_subtitle">פעולה זו מסירה את הרשימה וכל הפריטים שבה מ-Trakt.</string>
     <string name="library_delete_confirm">מחק</string>
     <string name="library_source_local">מקומי</string>
-    <string name="library_source_nuvio">NUVIO</string>
+    <string name="library_source_nuvio">SLUGYARD</string>
     <string name="library_source_trakt">TRAKT</string>
     <string name="library_source_saved">נשמר</string>
     <string name="library_source_cloud">ענן</string>
@@ -1661,7 +1661,7 @@
     <string name="catalog_see_all_empty_title">אין פריטים זמינים</string>
     <string name="catalog_see_all_empty_subtitle">נסה קטלוג אחר או חזור מאוחר יותר</string>
 
-    <string name="layout_selection_welcome">ברוך הבא ל-Nuvio</string>
+    <string name="layout_selection_welcome">ברוך הבא ל-SlugYard</string>
     <string name="layout_selection_subtitle">בחר את פריסת מסך הבית שלך</string>
     <string name="layout_selection_continue">המשך</string>
 
@@ -1672,7 +1672,7 @@
     <string name="update_unknown_sources">אפשר התקנות ממקורות לא ידועים להמשך.</string>
     <!-- AccountScreen -->
     <string name="account_title">חשבון</string>
-    <string name="account_sign_in_description">התחבר לסנכרון הספרייה, התקדמות הצפייה, התוספים והפלאגינים בין מכשירים. סנכרון הספרייה משתמש ב-Nuvio Sync כאשר Trakt לא מחובר, והתקדמות הצפייה יכולה להשתמש ב-Trakt או ב-Nuvio Sync.</string>
+    <string name="account_sign_in_description">התחבר לסנכרון הספרייה, התקדמות הצפייה, התוספים והפלאגינים בין מכשירים. סנכרון הספרייה משתמש ב-SlugYard Sync כאשר Trakt לא מחובר, והתקדמות הצפייה יכולה להשתמש ב-Trakt או ב-SlugYard Sync.</string>
     <string name="account_sync_code_title">קוד סנכרון</string>
     <string name="account_sync_code_description">סנכרן בין מכשירים ללא יצירת חשבון.</string>
     <string name="account_linked_devices">מכשירים מקושרים (%1$d)</string>
@@ -1850,7 +1850,7 @@
     <string name="collections_paste_clipboard">הדבק מהמקלדת</string>
     <string name="collections_validate">אמת</string>
     <string name="collections_paste_hint">הדבק כאן JSON של אוספים\u2026</string>
-    <string name="collections_file_description">קורא את nuvio-collections.json מתיקיית ההורדות.</string>
+    <string name="collections_file_description">קורא את slugyard-collections.json מתיקיית ההורדות.</string>
     <string name="collections_load_file">טען קובץ</string>
     <string name="collections_fetch_url">משוך URL</string>
     <string name="collections_fetching">מושך\u2026</string>
@@ -2047,7 +2047,7 @@
     <string name="autoplay_regex_preset_no_remux_hdr">ללא REMUX/HDR</string>
 
     <!-- Playback settings sections -->
-    <string name="playback_player_internal_desc">השתמש בנגן המובנה של NuvioTV</string>
+    <string name="playback_player_internal_desc">השתמש בנגן המובנה של SlugYard</string>
 
     <!-- Player runtime: torrent overlay + tracks -->
     <string name="player_torrent_peer_info">%1$d מקורות · %2$d עמיתים</string>

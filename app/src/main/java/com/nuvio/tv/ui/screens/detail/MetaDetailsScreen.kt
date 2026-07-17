@@ -328,6 +328,19 @@ fun MetaDetailsScreen(
             .fillMaxSize()
             .onPreviewKeyEvent { keyEvent ->
                 if (currentIsTrailerPlaying) {
+                    // PlayerView can receive the remote BACK key before Compose's
+                    // BackHandler observes the state update that stops a trailer.
+                    // Consume it here so a single press always returns to this
+                    // detail page instead of popping the detail destination.
+                    val keyCode = keyEvent.nativeKeyEvent.keyCode
+                    if (keyCode == KeyEvent.KEYCODE_BACK || keyCode == KeyEvent.KEYCODE_ESCAPE) {
+                        if (keyEvent.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
+                            restorePlayFocusAfterTrailerBackToken += 1
+                            isTrailerPaused = false
+                            viewModel.onEvent(MetaDetailsEvent.OnTrailerEnded)
+                        }
+                        return@onPreviewKeyEvent true
+                    }
                     if (currentShowTrailerControls) {
                         if (keyEvent.nativeKeyEvent.action != KeyEvent.ACTION_DOWN) {
                             return@onPreviewKeyEvent false
@@ -389,10 +402,9 @@ fun MetaDetailsScreen(
                             else -> false
                         }
                     }
-                    // During auto trailer preview, consume all keys except back/ESC so content doesn't scroll.
-                    val keyCode = keyEvent.nativeKeyEvent.keyCode
-                    return@onPreviewKeyEvent keyCode != KeyEvent.KEYCODE_BACK &&
-                            keyCode != KeyEvent.KEYCODE_ESCAPE
+                    // During auto trailer preview, consume all remaining keys so
+                    // the underlying detail content cannot scroll or activate.
+                    return@onPreviewKeyEvent true
                 }
                 if (keyEvent.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
                     val nativeEvent = keyEvent.nativeKeyEvent
@@ -643,7 +655,20 @@ fun MetaDetailsScreen(
                     trailerSeekToken = trailerSeekToken,
                     trailerSeekDeltaMs = trailerSeekDeltaMs,
                     onTrailerControlKey = { keyCode, action, repeatCount ->
-                        if (!uiState.showTrailerControls || !uiState.isTrailerPlaying) {
+                        // AndroidView owns focus while a trailer is playing, so
+                        // consume Back here as well as in the Compose key path.
+                        // Otherwise PlayerView lets it fall through to navigation
+                        // and exits the detail screen instead of only the trailer.
+                        if (uiState.isTrailerPlaying &&
+                            (keyCode == KeyEvent.KEYCODE_BACK || keyCode == KeyEvent.KEYCODE_ESCAPE)
+                        ) {
+                            if (action == KeyEvent.ACTION_DOWN) {
+                                restorePlayFocusAfterTrailerBackToken += 1
+                                isTrailerPaused = false
+                                viewModel.onEvent(MetaDetailsEvent.OnTrailerEnded)
+                            }
+                            true
+                        } else if (!uiState.showTrailerControls || !uiState.isTrailerPlaying) {
                             false
                         } else if (action != KeyEvent.ACTION_DOWN) {
                             false
@@ -786,6 +811,15 @@ fun MetaDetailsScreen(
             overlayState = trailerSeekOverlayState,
             modifier = Modifier.align(Alignment.BottomCenter)
         )
+    }
+
+    // This handler is deliberately composed after the navigation/content tree.
+    // On Android TV, the focused PlayerView may otherwise allow a remote Back
+    // press to reach NavHost before the earlier detail-level handler is chosen.
+    BackHandler(enabled = uiState.isTrailerPlaying) {
+        restorePlayFocusAfterTrailerBackToken += 1
+        isTrailerPaused = false
+        viewModel.onEvent(MetaDetailsEvent.OnTrailerEnded)
     }
 
     LaunchedEffect(trailerSeekOverlayVisible, uiState.isTrailerPlaying, uiState.showTrailerControls, trailerSeekToken) {
@@ -1199,6 +1233,7 @@ private fun MetaDetailsContent(
     val moreLikeThisSourceLabel = when (moreLikeThisSource) {
         MoreLikeThisSource.TMDB -> stringResource(R.string.detail_more_like_this_powered_by_tmdb)
         MoreLikeThisSource.TRAKT -> stringResource(R.string.detail_more_like_this_powered_by_trakt)
+        MoreLikeThisSource.CATALOG -> stringResource(R.string.detail_more_like_this_from_catalog)
         null -> null
     }
     val peopleTabItems = remember(
@@ -1230,15 +1265,6 @@ private fun MetaDetailsContent(
                         tab = PeopleSectionTab.RATINGS,
                         label = strTabRatings,
                         focusRequester = ratingsTabFocusRequester
-                    )
-                )
-            }
-            if (hasMoreLikeThisSection) {
-                add(
-                    PeopleTabItem(
-                        tab = PeopleSectionTab.MORE_LIKE_THIS,
-                        label = strTabMoreLikeThis,
-                        focusRequester = moreLikeTabFocusRequester
                     )
                 )
             }
@@ -1289,6 +1315,7 @@ private fun MetaDetailsContent(
         else -> PeopleSectionTab.RATINGS
     }
     var activePeopleTab by rememberSaveable(meta.id) { mutableStateOf(initialPeopleTab) }
+    var hasManuallySelectedPeopleTab by rememberSaveable(meta.id) { mutableStateOf(false) }
     var seasonOptionsDialogSeason by remember { mutableStateOf<Int?>(null) }
     // Tracks whether the initial auto-scroll to the "next to play" episode has fired
     // for each season.  Until it fires we must keep passing scrollToEpisodeId even if
@@ -1667,6 +1694,29 @@ private fun MetaDetailsContent(
                 }
             }
 
+            // Surface recommendations in the preview itself, directly under
+            // the hero, instead of burying them below season and episode rows.
+            if (hasMoreLikeThisSection) {
+                item(key = "preview_more_like", contentType = "horizontal_row") {
+                    MoreLikeThisSection(
+                        items = moreLikeThis,
+                        title = strTabMoreLikeThis,
+                        sourceLabel = moreLikeThisSourceLabel,
+                        upFocusRequester = heroPlayFocusRequester,
+                        downFocusRequester = seasonDownFocusRequester,
+                        sectionFocusRequester = moreLikeSectionFocusRequester,
+                        restoreItemId = if (pendingRestoreType == RestoreTarget.MORE_LIKE_THIS) pendingRestoreMoreLikeItemId else null,
+                        restoreFocusToken = if (pendingRestoreType == RestoreTarget.MORE_LIKE_THIS) restoreFocusToken else 0,
+                        onRestoreFocusHandled = { clearPendingRestore() },
+                        onItemClick = { item ->
+                            markMoreLikeThisRestore(item.id)
+                            onNavigateToDetail(item.id, item.apiType, null)
+                        },
+                        onItemLongPress = { item -> onPosterLongPress(item) }
+                    )
+                }
+            }
+
             // Season tabs and episodes for series
             val showSeasonTabs = isSeries && seasons.isNotEmpty() && !(seasons.size == 1 && meta.apiType.equals("other", ignoreCase = true))
             val showEpisodesRow = isSeries && seasons.isNotEmpty()
@@ -1758,6 +1808,7 @@ private fun MetaDetailsContent(
                             upFocusRequester = seasonDownFocusRequester ?: heroPlayFocusRequester,
                             ratingsDownFocusRequester = ratingsContentFocusRequester,
                             onTabFocused = { tab ->
+                                hasManuallySelectedPeopleTab = true
                                 activePeopleTab = tab
                             }
                         )

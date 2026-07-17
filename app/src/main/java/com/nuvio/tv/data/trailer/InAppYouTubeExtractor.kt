@@ -213,7 +213,8 @@ class InAppYouTubeExtractor @Inject constructor() {
             }
 
             val parsed = getWatchConfig(watchResponse.body)
-            val apiKey = parsed.apiKey ?: "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8" // fallback key
+            val apiKey = parsed.apiKey
+                ?: throw IllegalStateException("YouTube watch page did not provide an Innertube API key")
             val newConfig = CachedConfig(
                 apiKey = apiKey,
                 visitorData = parsed.visitorData

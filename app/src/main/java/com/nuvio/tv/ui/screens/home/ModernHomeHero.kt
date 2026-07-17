@@ -50,6 +50,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
+import androidx.tv.material3.Button
+import androidx.tv.material3.ButtonDefaults
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.crossfade
@@ -131,9 +133,11 @@ internal fun ModernHeroMediaLayer(
     // during rapid nav / scroll). Only update when enrichment is not active
     val rawBackdrop by remember { derivedStateOf { heroBackdrop() } }
     val enriching by remember { derivedStateOf { enrichmentActive() } }
-    var displayedBackdrop by remember { mutableStateOf(HeroBackdropState.lastDisplayedUrl ?: heroBackdrop()) }
-    if (rawBackdrop != null && rawBackdrop != displayedBackdrop && !enriching) {
-        displayedBackdrop = rawBackdrop!!
+    var displayedBackdrop by remember { mutableStateOf(heroBackdrop()) }
+    if (!enriching && rawBackdrop != displayedBackdrop) {
+        // A title without artwork must clear the previous title's backdrop.  The
+        // old non-null-only update rule left stale art behind indefinitely.
+        displayedBackdrop = rawBackdrop
     }
     val imageModel = remember(
         localContext,
@@ -150,7 +154,7 @@ internal fun ModernHeroMediaLayer(
     }
     // Keep HeroBackdropState in sync for navigation transitions.
     LaunchedEffect(displayedBackdrop) {
-        displayedBackdrop?.let { HeroBackdropState.update(it) }
+        HeroBackdropState.update(displayedBackdrop)
     }
 
     Box(modifier = modifier) {
@@ -287,6 +291,7 @@ internal fun HeroTitleBlock(
     enrichmentActive: () -> Boolean = { false },
     portraitMode: Boolean,
     trailerPlaying: () -> Boolean = { false },
+    onDetails: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val currentPreview = previewProvider()
@@ -314,7 +319,8 @@ internal fun HeroTitleBlock(
         HeroTitleContent(
             previewProvider = { displayPreview },
             portraitMode = portraitMode,
-            trailerPlaying = trailerPlaying
+            trailerPlaying = trailerPlaying,
+            onDetails = onDetails
         )
     }
 }
@@ -323,11 +329,15 @@ internal fun HeroTitleBlock(
 private fun HeroTitleContent(
     previewProvider: () -> HeroPreview?,
     portraitMode: Boolean,
-    trailerPlaying: () -> Boolean = { false }
+    trailerPlaying: () -> Boolean = { false },
+    onDetails: (() -> Unit)? = null
 ) {
     val preview = previewProvider() ?: return
     val highlighterEnabled = LocalRecompositionHighlighterEnabled.current
-    val descriptionMaxLines = 4
+    // The featured card is intentionally shallow on TV so the first rail stays
+    // visible. Keep the complete synopsis inside that card rather than letting
+    // it spill into the browse surface below it.
+    val descriptionMaxLines = if (portraitMode) 3 else 2
     val descriptionScale = if (portraitMode) 0.90f else 1f
     val titleScale = if (portraitMode) 0.92f else 1f
     val metaScale = 1f
@@ -339,8 +349,10 @@ private fun HeroTitleContent(
     val headlineLarge = MaterialTheme.typography.headlineLarge
     val labelMedium = MaterialTheme.typography.labelMedium
     val bodyMedium = MaterialTheme.typography.bodyMedium
-    val logoMaxWidthPx = remember(density) { with(density) { 220.dp.roundToPx() } }
-    val logoHeightPx = remember(density) { with(density) { 100.dp.roundToPx() } }
+    val logoMaxWidth = if (portraitMode) 220.dp else 200.dp
+    val logoHeight = if (portraitMode) 100.dp else 76.dp
+    val logoMaxWidthPx = remember(density, logoMaxWidth) { with(density) { logoMaxWidth.roundToPx() } }
+    val logoHeightPx = remember(density, logoHeight) { with(density) { logoHeight.roundToPx() } }
 
     val logoModel = remember(context, preview.logo, logoMaxWidthPx, logoHeightPx) {
         preview.logo?.let {
@@ -382,8 +394,8 @@ private fun HeroTitleContent(
                 contentDescription = preview.title,
                 onError = { logoLoadFailed = true },
                 modifier = Modifier
-                    .height(100.dp)
-                    .widthIn(min = 100.dp, max = 220.dp)
+                    .height(logoHeight)
+                    .widthIn(min = 100.dp, max = logoMaxWidth)
                     .fillMaxWidth(),
                 contentScale = ContentScale.Fit,
                 alignment = Alignment.CenterStart
@@ -602,6 +614,24 @@ private fun HeroTitleContent(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.graphicsLayer { alpha = metaAlpha }
             )
+        }
+        onDetails?.let { openDetails ->
+            Button(
+                onClick = openDetails,
+                modifier = Modifier
+                    .height(42.dp)
+                    .graphicsLayer { alpha = metaAlpha },
+                colors = ButtonDefaults.colors(
+                    containerColor = Color.White,
+                    contentColor = Color.Black
+                )
+            ) {
+                Text(
+                    text = "View details",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
         }
     }
 }

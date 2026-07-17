@@ -114,6 +114,7 @@ internal fun HomeViewModel.observeTmdbSettingsPipeline() {
                     prefetchedTmdbIds.clear()
                     prefetchedExternalMetaIds.clear()
                 }
+                loadHomeProgrammingRails(force = languageChanged)
                 scheduleUpdateCatalogRows()
             }
     }
@@ -192,6 +193,9 @@ internal suspend fun HomeViewModel.loadAllCatalogsPipeline(
         }
 
         rebuildCatalogOrder(addons)
+        // Additive and asynchronous: provider catalogs render first while
+        // bounded TMDB genre rails fill in behind them.
+        loadHomeProgrammingRails()
 
         // Hero has its own catalog sources (heroCatalogKeys) configured
         // independently in Layout Settings.  When the user has explicitly
@@ -506,6 +510,12 @@ internal fun HomeViewModel.loadMoreCatalogItemsPipeline(catalogId: String, addon
         return
     }
     if (key in _loadingCatalogs.value) {
+        return
+    }
+
+    if (addonId == HOME_PROGRAMMING_ADDON_ID) {
+        val rail = findHomeProgrammingRail(catalogId) ?: return
+        loadMoreHomeProgrammingRail(rail, currentRow)
         return
     }
 

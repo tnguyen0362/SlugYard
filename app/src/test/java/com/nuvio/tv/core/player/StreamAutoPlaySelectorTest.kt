@@ -241,6 +241,34 @@ class StreamAutoPlaySelectorTest {
     }
 
     @Test
+    fun `first stream can use unknown debrid state when discovery has not completed`() {
+        val checking = stream(
+            addonName = "AddonA",
+            name = "Checking",
+            infoHash = "abc123",
+            cacheState = StreamDebridCacheState.CHECKING
+        )
+        val unknown = stream(
+            addonName = "AddonA",
+            name = "Unknown",
+            infoHash = "def456",
+            cacheState = StreamDebridCacheState.UNKNOWN
+        )
+
+        val selected = StreamAutoPlaySelector.selectAutoPlayStream(
+            streams = listOf(checking, unknown),
+            mode = StreamAutoPlayMode.FIRST_STREAM,
+            regexPattern = "",
+            source = StreamAutoPlaySource.ALL_SOURCES,
+            installedAddonNames = setOf("AddonA"),
+            selectedAddons = emptySet(),
+            selectedPlugins = emptySet()
+        )
+
+        assertEquals(unknown, selected)
+    }
+
+    @Test
     fun `orderAddonStreams keeps cached local torrent groups in installed addon order`() {
         val regular = addonStreams(
             "AddonA",

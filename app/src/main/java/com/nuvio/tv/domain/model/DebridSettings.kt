@@ -11,7 +11,7 @@ data class DebridSettings(
     val premiumizeApiKey: String = "",
     val realDebridApiKey: String = "",
     val preferredResolverProviderId: String = "",
-    val instantPlaybackPreparationLimit: Int = 0,
+    val instantPlaybackPreparationLimit: Int = DEBRID_PREPARE_INSTANT_PLAYBACK_DEFAULT_LIMIT,
     val streamMaxResults: Int = 0,
     val streamSortMode: DebridStreamSortMode = DebridStreamSortMode.DEFAULT,
     val streamMinimumQuality: DebridStreamMinimumQuality = DebridStreamMinimumQuality.ANY,
@@ -57,7 +57,7 @@ data class DebridSettings(
     }
 }
 
-const val DEBRID_PREPARE_INSTANT_PLAYBACK_DEFAULT_LIMIT = 2
+const val DEBRID_PREPARE_INSTANT_PLAYBACK_DEFAULT_LIMIT = 1
 const val DEBRID_PREPARE_INSTANT_PLAYBACK_MAX_LIMIT = 5
 
 enum class DebridStreamSortMode {

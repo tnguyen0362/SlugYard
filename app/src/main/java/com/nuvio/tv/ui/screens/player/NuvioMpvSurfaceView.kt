@@ -7,6 +7,7 @@ import android.view.SurfaceHolder
 import com.nuvio.tv.data.local.MpvHardwareDecodeMode
 import com.nuvio.tv.data.local.SubtitleStyleSettings
 import `is`.xyz.mpv.BaseMPVView
+import `is`.xyz.mpv.MPVNode
 import `is`.xyz.mpv.Utils
 import java.util.Locale
 import kotlin.math.pow
@@ -17,11 +18,36 @@ class NuvioMpvSurfaceView @JvmOverloads constructor(
     attrs: AttributeSet? = null
 ) : BaseMPVView(context, attrs) {
 
+    @Volatile
     private var initialized = false
     private var hasQueuedInitialMedia = false
     private var lastMediaRequestKey: String? = null
     private var pendingInitialMediaUrl: String? = null
     private var pendingInitialStartOption: String? = null
+    private var preferredSubtitleLanguages: List<String> = emptyList()
+    private var subtitleSelectionRetryCount = 0
+    private val subtitleSelectionRunnable = object : Runnable {
+        override fun run() {
+            if (!initialized || preferredSubtitleLanguages.isEmpty()) return
+            // MKV track discovery can complete after the first preference pass.
+            // Do not treat an arbitrary auto-selected track as success: anime
+            // releases often expose an early forced/Japanese track before the
+            // requested ASS/English track is indexed. Keep the bounded retry
+            // only until the selected track actually matches the preference.
+            if (hasSelectedPreferredSubtitleTrack()) return
+            runCatching {
+                mpv.setPropertyString("slang", preferredSubtitleLanguages.joinToString(","))
+                mpv.setPropertyString("sid", "auto")
+                mpv.setPropertyBoolean("sub-visibility", true)
+            }.onFailure {
+                Log.w(TAG, "Failed to apply deferred subtitle preference: ${it.message}")
+            }
+            subtitleSelectionRetryCount += 1
+            if (subtitleSelectionRetryCount < SUBTITLE_SELECTION_RETRY_COUNT) {
+                postDelayed(this, SUBTITLE_SELECTION_RETRY_DELAY_MS)
+            }
+        }
+    }
     private var hardwareDecodeMode: MpvHardwareDecodeMode = MpvHardwareDecodeMode.AUTO_SAFE
     private var currentAspectMode: AspectMode = AspectMode.ORIGINAL
     private var pendingAspectRetryCount = 0
@@ -148,8 +174,12 @@ class NuvioMpvSurfaceView @JvmOverloads constructor(
     }
 
     fun isPausedForCacheNow(): Boolean {
-        if (!initialized) return false
-        return mpv.getPropertyBoolean("paused-for-cache") == true
+        // `paused-for-cache` is not exposed by the bundled mpv 0.41 Android
+        // build.  Polling it from the playback ticker only creates failing JNI
+        // calls during startup and always evaluated to false anyway.  Normal
+        // `pause` plus `core-idle` state still distinguish a user pause from a
+        // not-yet-loaded file on this build.
+        return false
     }
 
     fun isCoreIdleNow(): Boolean {
@@ -165,15 +195,13 @@ class NuvioMpvSurfaceView @JvmOverloads constructor(
 
     fun currentPositionMs(): Long {
         if (!initialized) return 0L
-        val seconds = mpv.getPropertyDouble("time-pos/full")
-            ?: mpv.getPropertyDouble("time-pos")
-            ?: 0.0
+        val seconds = mpv.getPropertyDouble("time-pos") ?: 0.0
         return (seconds * 1000.0).roundToLong().coerceAtLeast(0L)
     }
 
     fun durationMs(): Long {
         if (!initialized) return 0L
-        val seconds = mpv.getPropertyDouble("duration/full") ?: 0.0
+        val seconds = mpv.getPropertyDouble("duration") ?: 0.0
         return (seconds * 1000.0).roundToLong().coerceAtLeast(0L)
     }
 
@@ -323,29 +351,14 @@ class NuvioMpvSurfaceView @JvmOverloads constructor(
     }
 
     private fun isAssOrSsaSubtitleSelectedNow(): Boolean {
-        if (!initialized) return false
-        val trackCount = mpv.getPropertyInt("track-list/count") ?: return false
-        if (trackCount <= 0) return false
-
-        val selectedSubtitleId = mpv.getPropertyString("sid")?.toIntOrNull()
-            ?: mpv.getPropertyInt("current-tracks/sub/id")
-
-        for (i in 0 until trackCount) {
-            val type = mpv.getPropertyString("track-list/$i/type")?.lowercase(Locale.US) ?: continue
-            if (type != "sub") continue
-
-            val isSelectedByFlag = mpv.getPropertyBoolean("track-list/$i/selected") == true
-            val trackId = mpv.getPropertyInt("track-list/$i/id")
-            val isSelected = isSelectedByFlag || (selectedSubtitleId != null && trackId == selectedSubtitleId)
-            if (!isSelected) continue
-
-            val codec = mpv.getPropertyString("track-list/$i/codec")
-                ?.trim()
-                ?.lowercase(Locale.US)
-                ?: return false
-            return codec.contains("ass") || codec.contains("ssa")
-        }
-        return false
+        return readTrackSnapshot()
+            .subtitleTracks
+            .firstOrNull { it.isSelected }
+            ?.codec
+            ?.trim()
+            ?.lowercase(Locale.US)
+            ?.let { it.contains("ass") || it.contains("ssa") }
+            ?: false
     }
 
     fun selectAudioTrackById(trackId: Int): Boolean {
@@ -417,18 +430,101 @@ class NuvioMpvSurfaceView @JvmOverloads constructor(
             secondary?.takeIf { it.isNotBlank() && !it.equals("none", ignoreCase = true) }
         )
         if (languages.isEmpty()) {
+            preferredSubtitleLanguages = emptyList()
+            removeCallbacks(subtitleSelectionRunnable)
             disableSubtitles()
             return
         }
+        preferredSubtitleLanguages = languages
+        subtitleSelectionRetryCount = 0
+        removeCallbacks(subtitleSelectionRunnable)
         runCatching {
             mpv.setPropertyString("slang", languages.joinToString(","))
+            mpv.setPropertyString("sid", "auto")
+            mpv.setPropertyBoolean("sub-visibility", true)
         }.onFailure {
             Log.w(TAG, "Failed to set subtitle language preference: ${it.message}")
+        }
+        postDelayed(subtitleSelectionRunnable, SUBTITLE_SELECTION_RETRY_DELAY_MS)
+    }
+
+    private fun hasSelectedPreferredSubtitleTrack(): Boolean {
+        val selectedTracks = readTrackSnapshot().subtitleTracks.filter { it.isSelected }
+        val selectedLanguages = selectedTracks.mapNotNull { it.language }
+        if (selectedLanguages.isEmpty()) {
+            // A selected track without a language tag cannot be evaluated
+            // safely, so preserve MPV's choice rather than repeatedly toggling
+            // a valid unlabeled ASS subtitle.
+            return selectedTracks.isNotEmpty()
+        }
+        return selectedLanguages.any { language ->
+            preferredSubtitleLanguages.any { preferred ->
+                PlayerSubtitleUtils.matchesLanguageCode(language, preferred)
+            }
         }
     }
 
     fun readTrackSnapshot(): MpvTrackSnapshot {
         if (!initialized) return MpvTrackSnapshot(emptyList(), emptyList())
+        val nodeTracks = runCatching { mpv.getPropertyNode("track-list") }
+            .getOrNull()
+            ?.asArray()
+            ?: return readTrackSnapshotLegacy()
+
+        val audioTracks = mutableListOf<MpvTrack>()
+        val subtitleTracks = mutableListOf<MpvTrack>()
+
+        for (node in nodeTracks) {
+            val values = node.asMap() ?: continue
+            val type = values.stringValue("type")?.lowercase(Locale.US) ?: continue
+            if (type != "audio" && type != "sub") continue
+            val id = values.intValue("id")?.toInt() ?: continue
+            val language = values.stringValue("lang")
+            val title = values.stringValue("title")
+            val codec = values.stringValue("codec")
+            val selected = values.booleanValue("selected") == true
+            val external = values.booleanValue("external") == true
+
+            when (type) {
+                "audio" -> audioTracks += MpvTrack(
+                    id = id,
+                    type = type,
+                    name = title ?: language ?: context.getString(com.nuvio.tv.R.string.player_track_audio_fallback, id),
+                    language = language,
+                    codec = codec,
+                    channelCount = values.intValue("demux-channel-count")?.toInt()
+                        ?: values.intValue("audio-channels")?.toInt()
+                        ?: values.intValue("channels")?.toInt(),
+                    isSelected = selected,
+                    isForced = false,
+                    isExternal = external
+                )
+
+                "sub" -> subtitleTracks += MpvTrack(
+                    id = id,
+                    type = type,
+                    name = title ?: language ?: context.getString(com.nuvio.tv.R.string.player_track_subtitle_fallback, id),
+                    language = language,
+                    codec = codec,
+                    channelCount = null,
+                    isSelected = selected,
+                    isForced = values.booleanValue("forced") == true || listOfNotNull(title, language).any {
+                        it.contains("forced", ignoreCase = true)
+                    },
+                    isExternal = external
+                )
+            }
+        }
+
+        return MpvTrackSnapshot(audioTracks = audioTracks, subtitleTracks = subtitleTracks)
+    }
+
+    /**
+     * Compatibility path for an older libmpv build that cannot expose a node
+     * property. Current builds take the single-node path above, avoiding one JNI
+     * round-trip per field for every embedded subtitle track.
+     */
+    private fun readTrackSnapshotLegacy(): MpvTrackSnapshot {
         val trackCount = runCatching { mpv.getPropertyInt("track-list/count") ?: 0 }
             .getOrDefault(0)
         if (trackCount <= 0) {
@@ -509,6 +605,7 @@ class NuvioMpvSurfaceView @JvmOverloads constructor(
     fun releasePlayer() {
         if (!initialized) return
         removeCallbacks(aspectReapplyRunnable)
+        removeCallbacks(subtitleSelectionRunnable)
         runCatching { destroy() }
             .onFailure { Log.w(TAG, "Failed to destroy libmpv view cleanly: ${it.message}") }
         initialized = false
@@ -519,28 +616,95 @@ class NuvioMpvSurfaceView @JvmOverloads constructor(
     }
 
     override fun initOptions() {
-        mpv.setOptionString("profile", "fast")
+        // Video output — gpu with Android surface context.
         setVo("gpu")
         mpv.setOptionString("gpu-context", "android")
         mpv.setOptionString("opengl-es", "yes")
+        mpv.setOptionString("gpu-sw", "no")
+
+        // HDR tone-mapping — Mobius (clip+linear) for clean SDR display on all Android TVs.
+        mpv.setOptionString("tone-mapping", "mobius")
+        mpv.setOptionString("tone-mapping-max-boost", "2.0")
+        mpv.setOptionString("hdr-compute-peak", "no")
+
+        // Video sync — audio-based for smooth playback without display resampling overhead.
+        mpv.setOptionString("video-sync", "audio")
+        mpv.setOptionString("framedrop", "vo")
+        // This is a VOD player, not a live camera feed.  MPV's latency hacks
+        // save only a frame or two while making timing less conservative on
+        // some Android TV decoders, which shows up as choppiness or A/V drift.
+        mpv.setOptionString("video-latency-hacks", "no")
+
+        // Network / user agent.
         mpv.setOptionString("user-agent", PlayerMediaSourceFactory.DEFAULT_USER_AGENT)
-        // Preserve native ASS/SSA styling behavior on MPV.
+
+        // Subtitles — preserve native ASS/SSA styling, optimized for TV viewing distance.
         mpv.setOptionString("sub-ass-override", "no")
-        mpv.setOptionString("sub-font", "Roboto")
+        mpv.setOptionString("sub-font", "sans-serif")
         mpv.setOptionString("sub-use-margins", "yes")
         mpv.setOptionString("sub-ass-force-margins", "yes")
+        // Replaces the removed `sub-ass-vsfilter-aspect-compat` option in
+        // mpv 0.41 while retaining the intended ASS video-aspect behavior.
+        mpv.setOptionString("sub-ass-use-video-data", "aspect-ratio")
+        mpv.setOptionString("sub-ass-stretch-rects", "yes")
+        mpv.setOptionString("sub-auto", "fuzzy")
+        mpv.setOptionString("sub-font-size", "42")
+
+        // Hardware decoding.
         mpv.setOptionString("hwdec", hardwareDecodeMode.toMpvHwdecValue())
-        mpv.setOptionString("hwdec-codecs", "h264,hevc,mpeg4,mpeg2video,vp8,vp9,av1")
-        mpv.setOptionString("ao", "audiotrack,opensles")
+        // Do not force AV1 or an NV12 image path globally. On lower-end TV
+        // boxes those overrides can select a fragile hardware route instead of
+        // letting mpv reject an unsupported codec and use its safe fallback.
+
+        // Audio — AAudio preferred (lowest latency), fallback chain.
+        mpv.setOptionString("ao", "aaudio,audiotrack,opensles")
         mpv.setOptionString("audio-set-media-role", "yes")
+        mpv.setOptionString("audio-pitch-correction", "yes")
+        mpv.setOptionString("audio-buffer", "0.2")
+
+        // TLS.
         mpv.setOptionString("tls-verify", "yes")
         mpv.setOptionString("tls-ca-file", "${context.filesDir.path}/cacert.pem")
+
+        // Input.
         mpv.setOptionString("input-default-bindings", "yes")
-        mpv.setOptionString("demuxer-max-bytes", "${64 * 1024 * 1024}")
-        mpv.setOptionString("demuxer-max-back-bytes", "${64 * 1024 * 1024}")
+
+        // Demuxer — use a modest, bounded startup cache.  The old 256 MB
+        // forward + 128 MB back cache made low-memory TV boxes wait too long
+        // before first frame and increased MediaCodec resource pressure.
+        val runtime = Runtime.getRuntime()
+        val maxMemory = runtime.maxMemory()
+        val freeMemory = runtime.freeMemory()
+        val availableMemory = maxMemory - (runtime.totalMemory() - freeMemory)
+
+        val (forwardBufferBytes, backBufferBytes, readAheadSecs) = when {
+            // Keep total cache below 96 MB even on roomy devices.  A six-second
+            // forward window covers normal 4K bitrate bursts without delaying
+            // first frame or forcing the system to reclaim a video decoder.
+            availableMemory > 512 * 1024 * 1024 -> Triple(72L, 16L, 6)
+            availableMemory > 256 * 1024 * 1024 -> Triple(40L, 8L, 4)
+            else -> Triple(24L, 4L, 3)
+        }.let { (forwardMb, backMb, seconds) ->
+            Triple(
+                forwardMb * 1024L * 1024L,
+                backMb * 1024L * 1024L,
+                seconds
+            )
+        }
+
+        mpv.setOptionString("cache", "yes")
+        mpv.setOptionString("cache-secs", "$readAheadSecs")
+        mpv.setOptionString("demuxer-max-bytes", "$forwardBufferBytes")
+        mpv.setOptionString("demuxer-max-back-bytes", "$backBufferBytes")
+        mpv.setOptionString("demuxer-readahead-secs", "$readAheadSecs")
+
+        // General.
         mpv.setOptionString("keep-open", "yes")
         mpv.setOptionString("softvol", "yes")
         mpv.setOptionString("volume-max", MPV_MAX_VOLUME_PERCENT.toInt().toString())
+        mpv.setOptionString("osc", "no")
+        mpv.setOptionString("terminal", "no")
+        mpv.setOptionString("msg-level", "all=no")
     }
 
     override fun postInitOptions() {
@@ -548,7 +712,10 @@ class NuvioMpvSurfaceView @JvmOverloads constructor(
     }
 
     override fun observeProperties() {
-        // Progress is polled by PlayerRuntimeController.
+        // Progress is sampled by PlayerRuntimeController.  The bundled MPV
+        // property-observer API does not deliver a reliable initial state on
+        // all Android TV builds, so synchronous reads remain the source of
+        // truth; their cadence is deliberately bounded by the controller.
     }
 
     private fun applyHeaders(headers: Map<String, String>) {
@@ -579,7 +746,12 @@ class NuvioMpvSurfaceView @JvmOverloads constructor(
     private fun MpvHardwareDecodeMode.toMpvHwdecValue(): String {
         return when (this) {
             MpvHardwareDecodeMode.LEGACY_DIRECT_COPY -> "mediacodec,mediacodec-copy"
-            MpvHardwareDecodeMode.AUTO_SAFE -> "auto-safe"
+            // On Android TV `auto-safe` can settle on `mediacodec-copy`, which
+            // round-trips every decoded frame through a ByteBuffer before the
+            // GPU can composite libass. Prefer the zero-copy MediaCodec path
+            // required by vo=gpu/gpu-context=android, then retain auto-safe as
+            // a compatibility fallback for devices where direct output fails.
+            MpvHardwareDecodeMode.AUTO_SAFE -> "mediacodec,auto-safe"
             MpvHardwareDecodeMode.HARDWARE_COPY -> "mediacodec-copy"
             MpvHardwareDecodeMode.HARDWARE_DIRECT -> "mediacodec"
             MpvHardwareDecodeMode.DISABLED -> "no"
@@ -644,6 +816,11 @@ class NuvioMpvSurfaceView @JvmOverloads constructor(
         private const val MPV_MAX_VOLUME_PERCENT = 400.0
         private const val ASPECT_RETRY_DELAY_MS = 120L
         private const val MAX_ASPECT_RETRY_COUNT = 10
+    // Embedded subtitle tracks often appear after the Matroska index has been
+    // read. Keep trying for the short startup window instead of selecting once
+    // before the ASS track exists and silently leaving subtitles off.
+    private const val SUBTITLE_SELECTION_RETRY_DELAY_MS = 500L
+    private const val SUBTITLE_SELECTION_RETRY_COUNT = 8
         private const val SUBTITLE_VERTICAL_OFFSET_MIN = -20
         private const val SUBTITLE_VERTICAL_OFFSET_MAX = 50
         private const val MPV_SUB_POS_AT_BOTTOM = 103.4
@@ -669,3 +846,14 @@ data class MpvTrack(
     val isForced: Boolean,
     val isExternal: Boolean
 )
+
+private fun Map<String, MPVNode>.stringValue(key: String): String? {
+    return this[key]
+        ?.asString()
+        ?.trim()
+        ?.takeIf { it.isNotBlank() }
+}
+
+private fun Map<String, MPVNode>.intValue(key: String): Long? = this[key]?.asInt()
+
+private fun Map<String, MPVNode>.booleanValue(key: String): Boolean? = this[key]?.asBoolean()

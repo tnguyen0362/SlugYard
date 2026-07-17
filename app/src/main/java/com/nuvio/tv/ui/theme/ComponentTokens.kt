@@ -87,42 +87,42 @@ object NuvioComponents {
         posterCard = NuvioCardComponentTokens(
             width = 126.dp,
             height = 189.dp,
-            cornerRadius = 12.dp,
+            cornerRadius = 2.dp,
             contentPadding = 8.dp,
             focusedBorderWidth = 2.dp,
-            focusedScale = 1.02f
+            focusedScale = 1.01f
         ),
         backdropCard = NuvioCardComponentTokens(
             width = 320.dp,
             height = 180.dp,
-            cornerRadius = 16.dp,
+            cornerRadius = 4.dp,
             contentPadding = 16.dp,
             focusedBorderWidth = 2.dp,
-            focusedScale = 1.02f
+            focusedScale = 1.01f
         ),
         collectionCard = NuvioCardComponentTokens(
             width = 320.dp,
             height = 180.dp,
-            cornerRadius = 16.dp,
+            cornerRadius = 4.dp,
             contentPadding = 16.dp,
             focusedBorderWidth = 2.dp,
-            focusedScale = 1.02f
+            focusedScale = 1.01f
         ),
         continueWatchingCard = NuvioCardComponentTokens(
             width = 260.dp,
             height = 146.dp,
-            cornerRadius = 12.dp,
+            cornerRadius = 2.dp,
             contentPadding = 12.dp,
             focusedBorderWidth = 2.dp,
-            focusedScale = 1.02f
+            focusedScale = 1.01f
         ),
         episodeCard = NuvioCardComponentTokens(
             width = 320.dp,
             height = 207.dp,
-            cornerRadius = 16.dp,
+            cornerRadius = 4.dp,
             contentPadding = 16.dp,
             focusedBorderWidth = 2.dp,
-            focusedScale = 1.02f
+            focusedScale = 1.01f
         ),
         row = NuvioRowComponentTokens(
             horizontalPadding = 48.dp,
@@ -145,18 +145,18 @@ object NuvioComponents {
         dialog = NuvioDialogComponentTokens(
             maxWidth = 720.dp,
             contentPadding = 24.dp,
-            cornerRadius = 16.dp,
+            cornerRadius = 8.dp,
             actionSpacing = 12.dp
         ),
         sidePanel = NuvioDialogComponentTokens(
             maxWidth = 420.dp,
             contentPadding = 20.dp,
-            cornerRadius = 20.dp,
+            cornerRadius = 12.dp,
             actionSpacing = 12.dp
         ),
         settings = NuvioSettingsComponentTokens(
-            containerRadius = 28.dp,
-            secondaryCardRadius = 18.dp,
+            containerRadius = 16.dp,
+            secondaryCardRadius = 12.dp,
             railItemHeight = 56.dp,
             workspacePadding = 20.dp,
             rowGap = 16.dp
@@ -172,6 +172,6 @@ object NuvioComponents {
         buttonHeight = 52.dp,
         chipHeight = 32.dp,
         badgeHeight = 20.dp,
-        skeletonCornerRadius = 10.dp
+        skeletonCornerRadius = 4.dp
     )
 }

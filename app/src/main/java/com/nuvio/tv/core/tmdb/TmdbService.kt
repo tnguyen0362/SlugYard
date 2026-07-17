@@ -44,6 +44,7 @@ class TmdbService @Inject constructor(
      * @return The TMDB ID, or null if not found
      */
     suspend fun imdbToTmdb(imdbId: String, mediaType: String): Int? = withContext(Dispatchers.IO) {
+        if (TMDB_API_KEY.isBlank()) return@withContext null
         // Validate IMDB ID format
         if (!imdbId.startsWith("tt")) {
             Log.w(TAG, "Invalid IMDB ID format: $imdbId")
@@ -129,6 +130,7 @@ class TmdbService @Inject constructor(
      * @return The IMDB ID, or null if not found
      */
     suspend fun tmdbToImdb(tmdbId: Int, mediaType: String): String? = withContext(Dispatchers.IO) {
+        if (TMDB_API_KEY.isBlank()) return@withContext null
         // Check cache first
         tmdbToImdbCache[tmdbId]?.let { cached ->
             Log.d(TAG, "Cache hit: TMDB $tmdbId -> IMDB $cached")
@@ -273,6 +275,7 @@ class TmdbService @Inject constructor(
      */
     suspend fun fetchImdbImages(imdbId: String, mediaType: String): TmdbImages? =
         withContext(Dispatchers.IO) {
+            if (TMDB_API_KEY.isBlank()) return@withContext null
             if (!imdbId.startsWith("tt")) return@withContext null
             val tmdbId = imdbToTmdb(imdbId, mediaType) ?: return@withContext null
             runCatching {

@@ -1,4 +1,12 @@
 *.iml
+.idea/
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.pfx
+*.key
 .gradle
 /local.properties
 /local.dev.properties

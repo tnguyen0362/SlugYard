@@ -212,8 +212,8 @@ enum class AudioOutputChannels(
  */
 data class PlayerSettings(
     val playerPreference: PlayerPreference = PlayerPreference.INTERNAL,
-    val internalPlayerEngine: InternalPlayerEngine = InternalPlayerEngine.EXOPLAYER,
-    val autoSwitchInternalPlayerOnError: Boolean = false,
+    val internalPlayerEngine: InternalPlayerEngine = InternalPlayerEngine.AUTO,
+    val autoSwitchInternalPlayerOnError: Boolean = true,
     val useLibass: Boolean = false,
     val libassRenderType: LibassRenderType = LibassRenderType.OVERLAY_OPEN_GL,
     val subtitleStyle: SubtitleStyleSettings = SubtitleStyleSettings(),
@@ -256,7 +256,7 @@ data class PlayerSettings(
     val frameRateMatchingMode: FrameRateMatchingMode = FrameRateMatchingMode.OFF,
     val resolutionMatchingEnabled: Boolean = false,
     // Stream selection settings
-    val streamAutoPlayMode: StreamAutoPlayMode = StreamAutoPlayMode.MANUAL,
+    val streamAutoPlayMode: StreamAutoPlayMode = StreamAutoPlayMode.SCORED,
     val streamAutoPlaySource: StreamAutoPlaySource = StreamAutoPlaySource.ALL_SOURCES,
     val streamAutoPlaySelectedAddons: Set<String> = emptySet(),
     val streamAutoPlaySelectedPlugins: Set<String> = emptySet(),
@@ -291,7 +291,9 @@ data class PlayerSettings(
     val parallelChunkSizeKb: Int = DEFAULT_PARALLEL_CHUNK_SIZE_KB,
     val enableHttp2: Boolean = DEFAULT_ENABLE_HTTP2,
 
-    val addonSubtitleStartupMode: AddonSubtitleStartupMode = AddonSubtitleStartupMode.ALL_SUBTITLES,
+    // Subtitle providers are optional enrichment. Start video immediately and
+    // populate/auto-select provider subtitles in the background by default.
+    val addonSubtitleStartupMode: AddonSubtitleStartupMode = AddonSubtitleStartupMode.FAST_STARTUP,
     val enableBufferLogs: Boolean = false,
     val resizeMode: Int = 0,
     // Nuvio ExoPlayer Performance Mode
@@ -340,7 +342,7 @@ data class PlayerSettings(
 }
 
 enum class StreamAutoPlayMode {
-    MANUAL, FIRST_STREAM, REGEX_MATCH
+    MANUAL, FIRST_STREAM, REGEX_MATCH, SCORED
 }
 
 enum class StreamAutoPlaySource {
@@ -555,6 +557,11 @@ class PlayerSettingsDataStore @Inject constructor(
     private val subtitleOutlineEnabledKey = booleanPreferencesKey("subtitle_outline_enabled")
     private val subtitleOutlineColorKey = intPreferencesKey("subtitle_outline_color")
     private val subtitleOutlineWidthKey = intPreferencesKey("subtitle_outline_width")
+
+    // OpenSubtitles keys
+    private val openSubtitlesEnabledKey = booleanPreferencesKey("open_subtitles_enabled")
+    private val openSubtitlesApiKeyKey = stringPreferencesKey("open_subtitles_api_key")
+    private val openSubtitlesAutoDownloadKey = booleanPreferencesKey("open_subtitles_auto_download")
 
     // Buffer settings keys
     private val minBufferMsKey = intPreferencesKey("min_buffer_ms")
@@ -784,10 +791,12 @@ class PlayerSettingsDataStore @Inject constructor(
                 playerPreference = prefs[playerPreferenceKey]?.let {
                     runCatching { PlayerPreference.valueOf(it) }.getOrDefault(PlayerPreference.INTERNAL)
                 } ?: PlayerPreference.INTERNAL,
-                internalPlayerEngine = prefs[internalPlayerEngineKey]?.let {
-                    runCatching { InternalPlayerEngine.valueOf(it) }.getOrDefault(InternalPlayerEngine.EXOPLAYER)
-                } ?: InternalPlayerEngine.EXOPLAYER,
-                autoSwitchInternalPlayerOnError = prefs[autoSwitchInternalPlayerOnErrorKey] ?: false,
+                // StreamFlix owns the engine policy: AUTO selects MPV where
+                // ASS/SSA rendering matters and falls back between engines on
+                // startup errors.  Do not resurrect stale per-profile choices
+                // that silently pinned customers to ExoPlayer with failover off.
+                internalPlayerEngine = InternalPlayerEngine.AUTO,
+                autoSwitchInternalPlayerOnError = true,
                 useLibass = prefs[useLibassKey] ?: false,
                 libassRenderType = prefs[libassRenderTypeKey]?.let {
                     try { LibassRenderType.valueOf(it) } catch (e: Exception) { LibassRenderType.OVERLAY_OPEN_GL }
@@ -850,9 +859,9 @@ class PlayerSettingsDataStore @Inject constructor(
                     runCatching { FrameRateMatchingMode.valueOf(it) }.getOrNull()
                 } ?: if (prefs[frameRateMatchingKey] == true) FrameRateMatchingMode.START_STOP else FrameRateMatchingMode.OFF,
                 resolutionMatchingEnabled = prefs[resolutionMatchingEnabledKey] ?: false,
-                streamAutoPlayMode = prefs[streamAutoPlayModeKey]?.let {
-                    runCatching { StreamAutoPlayMode.valueOf(it) }.getOrDefault(StreamAutoPlayMode.MANUAL)
-                } ?: StreamAutoPlayMode.MANUAL,
+                // Consumer builds have one intentional selection policy. Do not
+                // revive a legacy manual/first/regex preference from a profile.
+                streamAutoPlayMode = StreamAutoPlayMode.SCORED,
                 streamAutoPlaySource = prefs[streamAutoPlaySourceKey]?.let {
                     runCatching { StreamAutoPlaySource.valueOf(it) }.getOrDefault(StreamAutoPlaySource.ALL_SOURCES)
                 } ?: StreamAutoPlaySource.ALL_SOURCES,
@@ -1185,7 +1194,7 @@ class PlayerSettingsDataStore @Inject constructor(
 
     suspend fun setStreamAutoPlayMode(mode: StreamAutoPlayMode) {
         store().edit { prefs ->
-            prefs[streamAutoPlayModeKey] = mode.name
+            prefs[streamAutoPlayModeKey] = StreamAutoPlayMode.SCORED.name
         }
     }
 
@@ -1332,7 +1341,11 @@ class PlayerSettingsDataStore @Inject constructor(
     }
 
     private fun parseAddonSubtitleStartupMode(value: String?): AddonSubtitleStartupMode {
-        return when (value) { "PREFERRED_ONLY" -> AddonSubtitleStartupMode.PREFERRED_ONLY; "FAST_STARTUP" -> AddonSubtitleStartupMode.FAST_STARTUP; else -> AddonSubtitleStartupMode.ALL_SUBTITLES }
+        return when (value) {
+            "PREFERRED_ONLY" -> AddonSubtitleStartupMode.PREFERRED_ONLY
+            "ALL_SUBTITLES" -> AddonSubtitleStartupMode.ALL_SUBTITLES
+            else -> AddonSubtitleStartupMode.FAST_STARTUP
+        }
     }
 
     private fun parseMpvHardwareDecodeMode(value: String?): MpvHardwareDecodeMode {
@@ -1417,6 +1430,15 @@ class PlayerSettingsDataStore @Inject constructor(
     suspend fun setSubtitleOutlineEnabled(enabled: Boolean) { store().edit { it[subtitleOutlineEnabledKey] = enabled } }
     suspend fun setSubtitleOutlineColor(color: Int) { store().edit { it[subtitleOutlineColorKey] = color } }
     suspend fun setSubtitleOutlineWidth(width: Int) { store().edit { it[subtitleOutlineWidthKey] = width.coerceIn(1, 5) } }
+
+    // OpenSubtitles settings functions
+    suspend fun setOpenSubtitlesEnabled(enabled: Boolean) { store().edit { it[openSubtitlesEnabledKey] = enabled } }
+    suspend fun setOpenSubtitlesApiKey(apiKey: String) { store().edit { it[openSubtitlesApiKeyKey] = apiKey } }
+    suspend fun setOpenSubtitlesAutoDownload(enabled: Boolean) { store().edit { it[openSubtitlesAutoDownloadKey] = enabled } }
+
+    val openSubtitlesEnabled: Flow<Boolean> = store().data.map { it[openSubtitlesEnabledKey] ?: false }
+    val openSubtitlesApiKey: Flow<String> = store().data.map { it[openSubtitlesApiKeyKey] ?: "" }
+    val openSubtitlesAutoDownload: Flow<Boolean> = store().data.map { it[openSubtitlesAutoDownloadKey] ?: false }
 
     suspend fun setUseForcedSubtitles(enabled: Boolean) {
         store().edit { prefs ->

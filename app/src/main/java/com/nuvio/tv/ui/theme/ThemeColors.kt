@@ -16,14 +16,33 @@ data class ThemeColorPalette(
     val surface: Color = NuvioPrimitives.neutral875,
     val surfaceVariant: Color = NuvioPrimitives.neutral800,
     val panel: Color = NuvioPrimitives.neutral900,
-    val overlay: Color = Color(0xD9000000),
+    val overlay: Color = Color(0xE6000000),
     val field: Color = NuvioPrimitives.neutral850,
     val menu: Color = NuvioPrimitives.neutral875,
     val modal: Color = NuvioPrimitives.neutral900,
-    val playerOverlay: Color = Color(0xCC000000)
+    val playerOverlay: Color = Color(0xB3000000)
 )
 
 object ThemeColors {
+    val SlugYard = ThemeColorPalette(
+        // A restrained, cinema-first palette: the accent is for intent, never decoration.
+        secondary = Color(0xFFF5C518),
+        secondaryVariant = Color(0xFFC99B00),
+        onSecondary = NuvioPrimitives.neutral925,
+        onSecondaryVariant = NuvioPrimitives.neutral925,
+        focusRing = Color(0xFFF5F5F1),
+        focusBackground = Color(0xFF333333),
+        background = Color(0xFF141414),
+        backgroundElevated = Color(0xFF181818),
+        backgroundCard = Color(0xFF242424),
+        surface = Color(0xFF202020),
+        surfaceVariant = Color(0xFF2B2B2B),
+        panel = Color(0xFF181818),
+        field = Color(0xFF2A2A2A),
+        menu = Color(0xFF202020),
+        modal = Color(0xFF202020)
+    )
+
     val Crimson = ThemeColorPalette(
         secondary = NuvioPrimitives.red500,
         secondaryVariant = NuvioPrimitives.red600,
@@ -90,6 +109,7 @@ object ThemeColors {
 
     fun getColorPalette(theme: AppTheme): ThemeColorPalette {
         return when (theme) {
+            AppTheme.SLUGYARD -> SlugYard
             AppTheme.CRIMSON -> Crimson
             AppTheme.OCEAN -> Ocean
             AppTheme.VIOLET -> Violet

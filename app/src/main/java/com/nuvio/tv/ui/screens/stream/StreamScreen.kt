@@ -698,6 +698,7 @@ private fun RightStreamSection(
     var shouldFocusFirstStream by remember { mutableStateOf(false) }
     var wasLoading by remember { mutableStateOf(true) }
     var listHasFocus by remember { mutableStateOf(false) }
+    var listHadFocusBeforeLoading by remember { mutableStateOf(true) }
     val scope = rememberCoroutineScope()
     var focusJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     val orderedAddonNames = remember(availableAddons, sourceChips) {
@@ -726,7 +727,10 @@ private fun RightStreamSection(
     }
     LaunchedEffect(isLoading, streams.size) {
         if (wasLoading && !isLoading && streams.isNotEmpty()) {
-            shouldFocusFirstStream = true
+            if (listHadFocusBeforeLoading) {
+                shouldFocusFirstStream = true
+                listHadFocusBeforeLoading = false
+            }
         }
         wasLoading = isLoading
     }
@@ -805,7 +809,14 @@ private fun RightStreamSection(
                             onAddonFilterSelected = { onAddonFilterSelectedGuarded(it) },
                             chipFocusRequesters = chipFocusRequesters,
                             orderedAddonNames = orderedAddonNames,
-                            onFocusChanged = { listHasFocus = it }
+                            onFocusChanged = { 
+                                listHasFocus = it
+                                if (it) {
+                                    listHadFocusBeforeLoading = true
+                                } else if (!isLoading) {
+                                    listHadFocusBeforeLoading = false
+                                }
+                            }
                         )
                     }
                 }
@@ -1023,6 +1034,17 @@ private fun StreamsList(
     val firstCardFocusRequester = remember { FocusRequester() }
     val lastKeyRepeatDispatchRef = remember { java.util.concurrent.atomic.AtomicLong(0L) }
     val restoreFocusRequester = remember { FocusRequester() }
+    var hasFocus by remember { mutableStateOf(false) }
+
+    val streamKeys = remember(streams) {
+        val seen = mutableMapOf<String, Int>()
+        streams.map { stream ->
+            val base = stream.stableKey(0)
+            val count = seen.getOrDefault(base, 0)
+            seen[base] = count + 1
+            stream.stableKey(count)
+        }
+    }
     val firstStreamKey = streams.firstOrNull()?.let { first ->
         "${first.addonName}_${first.url ?: first.infoHash ?: first.ytId ?: "unknown"}"
     }
@@ -1051,11 +1073,23 @@ private fun StreamsList(
         onRestoreFocusedStreamHandled()
     }
 
+    LaunchedEffect(selectedAddonFilter) {
+        if (hasFocus && streams.isNotEmpty()) {
+            repeat(2) { withFrameNanos { } }
+            try {
+                firstCardFocusRequester.requestFocus()
+            } catch (_: Exception) {}
+        }
+    }
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .padding(NuvioTheme.spacing.lg)
-            .onFocusChanged { onFocusChanged(it.hasFocus) }
+            .onFocusChanged { 
+                hasFocus = it.hasFocus
+                onFocusChanged(it.hasFocus)
+            }
             .onKeyEvent { event ->
                 if (event.nativeKeyEvent.action != KeyEvent.ACTION_DOWN) return@onKeyEvent false
 
@@ -1089,8 +1123,8 @@ private fun StreamsList(
         verticalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.md),
         contentPadding = PaddingValues(start = NuvioTheme.spacing.sm, end = NuvioTheme.spacing.sm, top = NuvioTheme.spacing.sm, bottom = NuvioTheme.spacing.xxl)
     ) {
-        itemsIndexed(streams, key = { index, stream ->
-            stream.stableKey(index)
+        itemsIndexed(streams, key = { index, _ ->
+            streamKeys.getOrElse(index) { index.toString() }
         }) { index, stream ->
             Box(modifier = Modifier.padding(vertical = NuvioTheme.spacing.xs)) {
                 StreamCard(

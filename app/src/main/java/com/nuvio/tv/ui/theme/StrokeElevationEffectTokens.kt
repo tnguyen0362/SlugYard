@@ -58,27 +58,27 @@ object NuvioStrokes {
 object NuvioElevations {
     val tokens = NuvioElevationTokens(
         none = 0.dp,
-        card = 2.dp,
-        focused = 8.dp,
-        menu = 8.dp,
-        dialog = 12.dp,
-        overlay = 16.dp
+        card = 1.dp,
+        focused = 4.dp,
+        menu = 6.dp,
+        dialog = 8.dp,
+        overlay = 12.dp
     )
 }
 
 object NuvioEffects {
     val tokens = NuvioEffectTokens(
-        blurSoft = 12.dp,
-        blurPanel = 26.dp,
-        blurStrong = 40.dp,
-        scrimLightAlpha = 0.28f,
-        scrimMediumAlpha = 0.52f,
-        scrimStrongAlpha = 0.78f,
-        glowSoftAlpha = 0.18f,
-        glowStrongAlpha = 0.38f,
-        imageOverlayAlpha = 0.62f,
-        disabledAlpha = 0.42f,
-        shimmerLowAlpha = 0.08f,
-        shimmerHighAlpha = 0.18f
+        blurSoft = 8.dp,
+        blurPanel = 16.dp,
+        blurStrong = 24.dp,
+        scrimLightAlpha = 0.24f,
+        scrimMediumAlpha = 0.48f,
+        scrimStrongAlpha = 0.72f,
+        glowSoftAlpha = 0.12f,
+        glowStrongAlpha = 0.24f,
+        imageOverlayAlpha = 0.56f,
+        disabledAlpha = 0.38f,
+        shimmerLowAlpha = 0.06f,
+        shimmerHighAlpha = 0.14f
     )
 }

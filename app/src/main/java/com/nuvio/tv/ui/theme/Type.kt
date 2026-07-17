@@ -32,8 +32,12 @@ val OpenSansFamily = FontFamily(
     Font(R.font.opensans_variable, FontWeight.Bold)
 )
 
+// Android's neutral system sans is a better TV-display match for the restrained
+// streaming-app hierarchy than the more geometric legacy type choices.
+val StreamingSansFamily = FontFamily.SansSerif
+
 fun getFontFamily(appFont: AppFont): FontFamily = when (appFont) {
-    AppFont.INTER -> InterFamily
+    AppFont.INTER -> StreamingSansFamily
     AppFont.DM_SANS -> DMSansFamily
     AppFont.OPEN_SANS -> OpenSansFamily
 }

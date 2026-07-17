@@ -40,18 +40,18 @@ val LocalNuvioExtendedColors = staticCompositionLocalOf {
 
 val LocalNuvioTextStyles = staticCompositionLocalOf { NuvioTextStyles }
 
-val LocalAppTheme = staticCompositionLocalOf { AppTheme.WHITE }
+val LocalAppTheme = staticCompositionLocalOf { AppTheme.SLUGYARD }
 
-val LocalSettingsUiStyle = staticCompositionLocalOf { SettingsUiStyle.CLASSIC }
+val LocalSettingsUiStyle = staticCompositionLocalOf { SettingsUiStyle.ZEN }
 
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
 fun NuvioTheme(
-    appTheme: AppTheme = AppTheme.WHITE,
+    appTheme: AppTheme = AppTheme.SLUGYARD,
     appFont: AppFont = AppFont.INTER,
     amoledMode: Boolean = false,
     amoledSurfacesMode: Boolean = false,
-    settingsUiStyle: SettingsUiStyle = SettingsUiStyle.CLASSIC,
+    settingsUiStyle: SettingsUiStyle = SettingsUiStyle.ZEN,
     content: @Composable () -> Unit
 ) {
     val palette = ThemeColors.getColorPalette(appTheme)

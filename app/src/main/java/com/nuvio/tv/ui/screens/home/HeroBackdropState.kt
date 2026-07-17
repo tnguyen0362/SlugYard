@@ -11,9 +11,9 @@ object HeroBackdropState {
 
     fun update(url: String?) {
         currentHeroBackdropUrl = url
-        if (!url.isNullOrBlank()) {
-            lastDisplayedUrl = url
-        }
+        // Keep this in lockstep with the actual hero.  Retaining a prior non-null
+        // URL here made a failed/missing backdrop look like the next title's art.
+        lastDisplayedUrl = url
     }
 
     fun consumeAndClear(): String? {

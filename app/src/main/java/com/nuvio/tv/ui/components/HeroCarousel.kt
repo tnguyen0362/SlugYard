@@ -227,6 +227,12 @@ private fun HeroCarouselSlide(
     var logoLoadFailed by remember(item.logo) { mutableStateOf(false) }
     val showLogo = !item.logo.isNullOrBlank() && !logoLoadFailed
 
+    val releaseYear = remember(item.releaseInfo) {
+        item.releaseInfo?.let { releaseInfo ->
+            YEAR_REGEX.find(releaseInfo)?.value ?: releaseInfo.split("-").firstOrNull()
+        }?.trim()?.takeIf { it.isNotEmpty() }
+    }
+
     val bgColor = NuvioTheme.colors.Background
     val bottomGradient = remember(bgColor) {
         Brush.verticalGradient(
@@ -331,11 +337,6 @@ private fun HeroCarouselSlide(
                     }
                 }
 
-                val releaseYear = remember(item.releaseInfo) {
-                    item.releaseInfo?.let { releaseInfo ->
-                        YEAR_REGEX.find(releaseInfo)?.value ?: releaseInfo.split("-").firstOrNull()
-                    }?.trim()?.takeIf { it.isNotEmpty() }
-                }
                 releaseYear?.let { year ->
                     Text(
                         text = year,
@@ -345,20 +346,87 @@ private fun HeroCarouselSlide(
                 }
             }
 
-            if (item.genres.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(6.dp))
+            // Action buttons - Netflix style
+            Spacer(modifier = Modifier.height(NuvioTheme.spacing.md))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.sm)
+            ) {
+                // Play button
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(NuvioTheme.radii.md))
+                        .background(Color.White)
+                        .padding(horizontal = NuvioTheme.spacing.lg, vertical = NuvioTheme.spacing.sm)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.xs)
+                    ) {
+                        Text(
+                            text = "▶",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = Color.Black
+                        )
+                        Text(
+                            text = stringResource(R.string.hero_play),
+                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold),
+                            color = Color.Black
+                        )
+                    }
+                }
+
+                // More Info button
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(NuvioTheme.radii.md))
+                        .background(Color.White.copy(alpha = 0.2f))
+                        .padding(horizontal = NuvioTheme.spacing.lg, vertical = NuvioTheme.spacing.sm)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.xs)
+                    ) {
+                        Text(
+                            text = "ℹ",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = Color.White
+                        )
+                        Text(
+                            text = stringResource(R.string.hero_more_info),
+                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold),
+                            color = Color.White
+                        )
+                    }
+                }
+            }
+
+            // Maturity rating and metadata
+            if (item.ageRating != null || item.releaseInfo != null) {
+                Spacer(modifier = Modifier.height(NuvioTheme.spacing.sm))
                 Row(
+                    verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.sm)
                 ) {
-                    item.genres.take(3).forEach { genre ->
-                        Text(
-                            text = genre,
-                            style = MaterialTheme.typography.labelMedium,
-                            color = Color.White.copy(alpha = 0.7f),
+                    item.ageRating?.let { rating ->
+                        Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(NuvioTheme.radii.xs))
-                                .background(Color.White.copy(alpha = 0.1f))
-                                .padding(horizontal = NuvioTheme.spacing.sm, vertical = NuvioTheme.spacing.xs)
+                                .clip(RoundedCornerShape(2.dp))
+                                .background(Color.Black.copy(alpha = 0.6f))
+                                .padding(horizontal = NuvioTheme.spacing.xs, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = rating,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.White.copy(alpha = 0.9f)
+                            )
+                        }
+                    }
+                    
+                    releaseYear?.let { year ->
+                        Text(
+                            text = year,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = Color.White.copy(alpha = 0.8f)
                         )
                     }
                 }

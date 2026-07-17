@@ -63,6 +63,9 @@ class TrailerService(
         tmdbId: String? = null,
         type: String? = null
     ): TrailerPlaybackSource? = withContext(Dispatchers.IO) {
+        // A blank build-time credential otherwise turns every focused card
+        // into a doomed TMDB /videos request and visibly slows the home UI.
+        if (tmdbService.apiKey().isBlank()) return@withContext null
         // Read the TMDB settings once and reuse for both the "Disable Trailers"
         // gate and the trailer language lookup below. The gate respects the
         // user's "Disable Trailers in TMDB Enrichment" toggle: the TMDB path

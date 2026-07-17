@@ -1,6 +1,7 @@
 package com.nuvio.tv.core.torrent
 
 import android.content.Context
+import android.os.Build
 import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -141,10 +142,10 @@ class TorrServerBinary @Inject constructor(
             try {
                 Thread.sleep(3000)
                 if (isProcessAlive(proc)) {
-                    proc.destroyForcibly()
+                    terminateProcess(proc)
                 }
             } catch (_: Exception) {
-                proc.destroyForcibly()
+                terminateProcess(proc)
             }
         }
         process = null
@@ -160,6 +161,13 @@ class TorrServerBinary @Inject constructor(
             true
         } catch (_: Exception) {
             false
+        }
+    }
+
+    private fun terminateProcess(proc: Process) {
+        proc.destroy()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && isProcessAlive(proc)) {
+            proc.destroyForcibly()
         }
     }
 }

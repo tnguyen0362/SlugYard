@@ -1,6 +1,7 @@
 package com.nuvio.tv.data.repository
 
 import android.util.Log
+import com.nuvio.tv.BuildConfig
 import com.nuvio.tv.data.remote.api.ImdbTapframeApi
 import com.nuvio.tv.data.remote.api.SeriesGraphApi
 import kotlinx.coroutines.CoroutineScope
@@ -29,11 +30,18 @@ class ImdbEpisodeRatingsRepository @Inject constructor(
     private val inFlight = mutableMapOf<String, kotlinx.coroutines.Deferred<Map<Pair<Int, Int>, Double>>>()
     private val inFlightMutex = Mutex()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    // The APIs are optional deployment integrations. A blank BuildConfig value
+    // must mean "feature unavailable", not a 30-second localhost request on
+    // every series detail page.
+    private val tapframeConfigured = BuildConfig.IMDB_TAPFRAME_API_BASE_URL.isNotBlank()
+    private val seriesGraphConfigured = BuildConfig.IMDB_RATINGS_API_BASE_URL.isNotBlank()
 
     suspend fun getEpisodeRatings(
         imdbId: String?,
         tmdbId: Int?
     ): Map<Pair<Int, Int>, Double> {
+        if (!tapframeConfigured && !seriesGraphConfigured) return emptyMap()
+
         val normalizedImdbId = imdbId
             ?.trim()
             ?.takeIf { it.startsWith("tt", ignoreCase = true) }
@@ -81,13 +89,15 @@ class ImdbEpisodeRatingsRepository @Inject constructor(
         imdbId: String?,
         tmdbId: Int?
     ): Map<Pair<Int, Int>, Double> {
-        if (!imdbId.isNullOrBlank()) {
+        if (tapframeConfigured && !imdbId.isNullOrBlank()) {
             val primary = fetchFromImdbTapframe(imdbId)
             if (primary.isNotEmpty()) return primary
-            Log.w(tag, "Primary episode ratings empty for imdbId=$imdbId, trying fallback.")
+            if (seriesGraphConfigured) {
+                Log.w(tag, "Primary episode ratings empty for imdbId=$imdbId, trying fallback.")
+            }
         }
 
-        if (tmdbId != null && tmdbId > 0) {
+        if (seriesGraphConfigured && tmdbId != null && tmdbId > 0) {
             return fetchFromSeriesGraph(tmdbId)
         }
 

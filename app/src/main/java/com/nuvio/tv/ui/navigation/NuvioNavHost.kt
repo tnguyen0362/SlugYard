@@ -16,6 +16,10 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import com.nuvio.tv.BuildConfig
 import com.nuvio.tv.core.build.AppFeaturePolicy
 import com.nuvio.tv.domain.model.ExperienceMode
@@ -50,12 +54,14 @@ import com.nuvio.tv.ui.screens.profile.ProfileSelectionMode
 import com.nuvio.tv.ui.screens.profile.ProfileSelectionScreen
 import com.nuvio.tv.ui.screens.tmdb.TmdbEntityBrowseScreen
 import com.nuvio.tv.ui.screens.home.HeroBackdropState
+import androidx.hilt.navigation.compose.hiltViewModel
 
 @Composable
 fun NuvioNavHost(
     navController: NavHostController,
     startDestination: String = Screen.Home.route,
-    hideBuiltInHeaders: Boolean = false
+    hideBuiltInHeaders: Boolean = false,
+    contentTopInset: Dp = 0.dp
 ) {
     fun isStreamToPlayer(from: String, to: String): Boolean {
         return from.startsWith("stream/") && to.startsWith("player/")
@@ -68,6 +74,7 @@ fun NuvioNavHost(
     NavHost(
         navController = navController,
         startDestination = startDestination,
+        modifier = Modifier.padding(top = contentTopInset),
         enterTransition = {
             val from = initialState.destination.route.orEmpty()
             val to = targetState.destination.route.orEmpty()
@@ -117,31 +124,6 @@ fun NuvioNavHost(
             }
         }
     ) {
-        composable(Screen.ExperienceModeSelection.route) {
-            ExperienceModeSelectionScreen(
-                onContinue = { mode ->
-                    val destination = if (mode == ExperienceMode.ESSENTIAL) {
-                        Screen.Home.route
-                    } else {
-                        Screen.LayoutSelection.route
-                    }
-                    navController.navigate(destination) {
-                        popUpTo(Screen.ExperienceModeSelection.route) { inclusive = true }
-                    }
-                }
-            )
-        }
-
-        composable(Screen.LayoutSelection.route) {
-            LayoutSelectionScreen(
-                onContinue = {
-                    navController.navigate(Screen.Home.route) {
-                        popUpTo(Screen.LayoutSelection.route) { inclusive = true }
-                    }
-                }
-            )
-        }
-
         composable(Screen.Home.route) {
             fun createContinueWatchingRoute(
                 item: ContinueWatchingItem,
@@ -544,6 +526,7 @@ fun NuvioNavHost(
                                 infoHash = playbackInfo.infoHash,
                                 fileIdx = playbackInfo.fileIdx,
                                 sources = playbackInfo.sources,
+                                contentGenres = playbackInfo.contentGenres,
                                 contentLanguage = playbackInfo.contentLanguage
                             )
                         )
@@ -584,6 +567,7 @@ fun NuvioNavHost(
                                 infoHash = playbackInfo.infoHash,
                                 fileIdx = playbackInfo.fileIdx,
                                 sources = playbackInfo.sources,
+                                contentGenres = playbackInfo.contentGenres,
                                 contentLanguage = playbackInfo.contentLanguage
                             )
                         ) {
@@ -720,6 +704,11 @@ fun NuvioNavHost(
                     defaultValue = null
                 },
                 navArgument("contentLanguage") {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                },
+                navArgument("contentGenres") {
                     type = NavType.StringType
                     nullable = true
                     defaultValue = null
@@ -1060,7 +1049,7 @@ fun NuvioNavHost(
                 onNavigateToTrakt = { navController.navigate(Screen.Trakt.route) },
                 onNavigateToAddons = { navController.navigate(Screen.AddonManager.route) },
                 onNavigateToPlugins = { navController.navigate(Screen.Plugins.route) },
-                onNavigateToAuthQrSignIn = { navController.navigate(Screen.AuthQrSignIn.route) },
+                onNavigateToAuthQrSignIn = { navController.navigate(Screen.AuthSignIn.route) },
                 onNavigateToManageProfiles = { navController.navigate(Screen.ManageProfiles.route) },
                 onNavigateToSupportersContributors = {
                     navController.navigate(Screen.SupportersContributors.route)
@@ -1196,23 +1185,32 @@ fun NuvioNavHost(
             )
         }
 
-        composable(Screen.AuthSignIn.route) {
-            if (BuildConfig.SELF_HOSTED) {
-                AuthQrSignInScreen(
-                    onBackPress = { navController.popBackStack() }
-                )
-            } else {
-                AuthSignInScreen(
-                    onBackPress = { navController.popBackStack() },
-                    onNavigateToQrSignIn = { navController.navigate(Screen.AuthQrSignIn.route) },
-                    onSuccess = { navController.popBackStack() }
-                )
-            }
-        }
-
+        // Settings routes here directly. Keeping this explicit destination avoids
+        // navigating to an unregistered route and crashing the app on sign-in.
         composable(Screen.AuthQrSignIn.route) {
             AuthQrSignInScreen(
                 onBackPress = { navController.popBackStack() }
+            )
+        }
+
+        composable(Screen.AuthSignIn.route) {
+            val accountViewModel: com.nuvio.tv.ui.screens.account.AccountViewModel = hiltViewModel()
+            val accountUiState by accountViewModel.uiState.collectAsState()
+            androidx.compose.runtime.LaunchedEffect(accountUiState.authState) {
+                if (accountUiState.authState is com.nuvio.tv.domain.model.AuthState.FullAccount) {
+                    // Settings launches the email screen as a one-shot flow.
+                    // Return to the restored Account section on success instead
+                    // of leaving the signed-in viewer on an active form.
+                    navController.popBackStack()
+                }
+            }
+
+            AuthSignInScreen(
+                onBackPress = { navController.popBackStack() },
+                onSignIn = { email, password -> accountViewModel.signIn(email, password) },
+                onSignUp = { email, password -> accountViewModel.signUp(email, password) },
+                isLoading = accountUiState.isLoading,
+                errorMessage = accountUiState.error
             )
         }
 

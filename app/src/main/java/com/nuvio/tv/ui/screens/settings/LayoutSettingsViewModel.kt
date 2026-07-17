@@ -8,6 +8,7 @@ import com.nuvio.tv.R
 import com.nuvio.tv.core.qr.QrCodeGenerator
 import com.nuvio.tv.core.server.DeviceIpAddress
 import com.nuvio.tv.core.server.StreamBadgeConfigServer
+import com.nuvio.tv.ui.util.loadAppLogoPngBytes
 import com.nuvio.tv.core.streams.StreamBadgePlacement
 import com.nuvio.tv.core.streams.StreamBadgeRules
 import com.nuvio.tv.core.streams.StreamBadgeSettings
@@ -46,8 +47,8 @@ data class LayoutSettingsUiState(
     val discoverLocation: DiscoverLocation = DiscoverLocation.IN_SEARCH,
     val lastNonOffDiscoverLocation: DiscoverLocation = DiscoverLocation.IN_SEARCH,
     val posterLabelsEnabled: Boolean = true,
-    val catalogAddonNameEnabled: Boolean = true,
-    val catalogTypeSuffixEnabled: Boolean = true,
+    val catalogAddonNameEnabled: Boolean = false,
+    val catalogTypeSuffixEnabled: Boolean = false,
     val classicFocusGradientEnabled: Boolean = false,
     val focusedPosterBackdropExpandEnabled: Boolean = true,
     val focusedPosterBackdropExpandDelaySeconds: Int = 3,
@@ -426,11 +427,7 @@ class LayoutSettingsViewModel @Inject constructor(
     }
 
     private fun loadLogoBytes() {
-        try {
-            val inputStream = context.resources.openRawResource(R.drawable.app_logo_wordmark)
-            logoBytes = inputStream.use { it.readBytes() }
-        } catch (_: Exception) {
-        }
+        logoBytes = context.loadAppLogoPngBytes()
     }
 
     private fun stopStreamBadgeServer() {

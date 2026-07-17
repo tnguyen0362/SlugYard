@@ -125,7 +125,10 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.debounce
 
 private const val MODERN_HORIZONTAL_FOCUS_DEBOUNCE_MS = 140L
-private const val POSTER_PREFETCH_DISTANCE = 2
+// A 16:9 Android TV rail commonly exposes five or six cards at once.  Keeping
+// this equal to the first viewport avoids the visible left-to-right thumbnail
+// cascade without turning every catalog row into an unbounded image download.
+private const val POSTER_PREFETCH_DISTANCE = 6
 private const val NESTED_PREFETCH_COUNT = 2
 
 internal val LocalVerticalRowsScrolling = compositionLocalOf<State<Boolean>> { mutableStateOf(false) }
@@ -249,6 +252,7 @@ private fun ModernCatalogRowItem(
     }
     val enrichedLogoUrl = enrichedMeta?.logo
     val enrichedBackdropUrl = enrichedMeta?.backdropUrl
+    val enrichedPosterUrl = enrichedMeta?.poster
 
     var focusEventId by remember { mutableIntStateOf(0) }
     var isCardFocused by remember { mutableStateOf(false) }
@@ -367,6 +371,7 @@ private fun ModernCatalogRowItem(
         isWatched = isWatched,
         enrichedLogoUrl = enrichedLogoUrl,
         enrichedBackdropUrl = enrichedBackdropUrl,
+        enrichedPosterUrl = enrichedPosterUrl,
         focusRequester = requester,
         onFocused = {
             focusEventId += 1
@@ -458,6 +463,10 @@ internal fun ModernRowSection(
     @Suppress("NAME_SHADOWING") val loadMoreRequestedTotals = loadMoreRequestedTotals.value
     @Suppress("NAME_SHADOWING") val itemFocusRequesters = itemFocusRequesters.value
     val rowKey = row.key
+    // Read the active-row state in composition. The previous stable lambda was
+    // used as a LaunchedEffect key, so a rail composed while inactive never
+    // restarted its artwork prefetch after it became focused.
+    val isActiveNow = isActiveRow()
 
     // Per-row derived state: only invalidates when THIS row's focused index
     // changes, not when any other row's index changes in the shared map.
@@ -508,7 +517,7 @@ internal fun ModernRowSection(
         val wasPlaceholderRef = remember { mutableStateOf(row.isLoading && firstItemImageUrl == "placeholder://empty") }
         val needsFocusRestore = remember { mutableStateOf(false) }
         
-        LaunchedEffect(row.isLoading, firstItemImageUrl, isActiveRow) {
+        LaunchedEffect(row.isLoading, firstItemImageUrl, isActiveNow) {
             val wasPlaceholder = wasPlaceholderRef.value
             val isNowReal = !row.isLoading || firstItemImageUrl != "placeholder://empty"
             if (wasPlaceholder && isNowReal && isActiveRow()) {
@@ -588,12 +597,15 @@ internal fun ModernRowSection(
         val rowStartPadding = 52.dp
         val context = LocalContext.current
         val imageLoader = context.imageLoader
+        // Read the value in composition so prefetch restarts after a vertical
+        // D-pad scroll settles; a State object's identity never changes.
+        val isVerticalRowsScrolling = isVerticalRowsScrollingState.value
 
         val rowItemCount = row.items.list.size
         LaunchedEffect(
             row.key,
-            isActiveRow,
-            isVerticalRowsScrollingState,
+            isActiveNow,
+            isVerticalRowsScrolling,
             rowItemCount,
             portraitCatalogCardWidth,
             portraitCatalogCardHeight,
@@ -602,7 +614,7 @@ internal fun ModernRowSection(
             continueWatchingCardWidth,
             continueWatchingCardHeight
         ) {
-            if (!isActiveRow() || isVerticalRowsScrollingState.value) return@LaunchedEffect
+            if (!isActiveNow || isVerticalRowsScrolling) return@LaunchedEffect
             delay(150) // Wait before spamming image requests to survive rapid vertical D-pad scrolls!
             val cwWidthPx = with(density) { continueWatchingCardWidth.roundToPx() }
             val cwHeightPx = with(density) { continueWatchingCardHeight.roundToPx() }
@@ -980,6 +992,7 @@ private fun ModernCarouselCard(
     isWatched: Boolean,
     enrichedLogoUrl: String? = null,
     enrichedBackdropUrl: String? = null,
+    enrichedPosterUrl: String? = null,
     focusRequester: FocusRequester,
     onFocused: () -> Unit,
     onFocusStateChanged: (Boolean) -> Unit = {},
@@ -1033,13 +1046,14 @@ private fun ModernCarouselCard(
         }
     }
     val effectiveLogoUrl = frozenLogoUrl.value
-    // Freeze the backdrop URL for landscape cards - prevents image reload when enrichment updates backdrop.
+    // Keep an initial backdrop while a card is composed, but accept enrichment:
+    // a source manifest can provide an expired/invalid artwork URL.
     val dataFrozenBackdrop = item.heroPreview.frozenBackdropUrl
     val frozenBackdropUrl = remember(item.key) { mutableStateOf(dataFrozenBackdrop ?: item.heroPreview.backdrop) }
     if (frozenBackdropUrl.value.isNullOrBlank() && !item.heroPreview.backdrop.isNullOrBlank()) {
         frozenBackdropUrl.value = item.heroPreview.backdrop
     }
-    if (!useLandscapeOverlayTreatment && !enrichedBackdropUrl.isNullOrBlank() && frozenBackdropUrl.value != enrichedBackdropUrl) {
+    if (!enrichedBackdropUrl.isNullOrBlank() && frozenBackdropUrl.value != enrichedBackdropUrl) {
         frozenBackdropUrl.value = enrichedBackdropUrl
     }
     val effectiveBackdropUrl = frozenBackdropUrl.value
@@ -1058,7 +1072,7 @@ private fun ModernCarouselCard(
         // Emoji cover folders: never fall back to backdrop for the card poster
         item.imageUrl
     } else {
-        item.imageUrl ?: item.heroPreview.poster ?: item.heroPreview.backdrop
+        enrichedPosterUrl ?: item.imageUrl ?: item.heroPreview.poster ?: enrichedBackdropUrl ?: item.heroPreview.backdrop
     }
     val imageUrl = when {
         payload == null -> baseImageUrl
@@ -1094,7 +1108,9 @@ private fun ModernCarouselCard(
         imageUrl?.let {
             ImageRequest.Builder(context)
                 .data(it)
-                .crossfade(true)
+                // Artwork is already decoded off the UI thread.  A fade on every
+                // card makes a warm cache look slow while navigating with DPAD.
+                .crossfade(false)
                 .memoryCacheKey("${it}_${requestWidthPx}x${requestHeightPx}")
                 .size(width = requestWidthPx, height = requestHeightPx)
                 .build()

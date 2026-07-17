@@ -45,6 +45,8 @@ import androidx.media3.container.NalUnitUtil;
 import androidx.media3.extractor.AacUtil;
 import androidx.media3.extractor.AvcConfig;
 import androidx.media3.extractor.ChunkIndex;
+import androidx.media3.extractor.ChunkIndexProvider;
+import androidx.media3.extractor.DtsUtil;
 import androidx.media3.extractor.Extractor;
 import androidx.media3.extractor.ExtractorInput;
 import androidx.media3.extractor.ExtractorOutput;
@@ -54,12 +56,13 @@ import androidx.media3.extractor.MpegAudioUtil;
 import androidx.media3.extractor.PositionHolder;
 import androidx.media3.extractor.SeekMap;
 import androidx.media3.extractor.SeekPoint;
+import androidx.media3.extractor.TrackAwareSeekMap;
 import androidx.media3.extractor.TrackOutput;
 import androidx.media3.extractor.TrueHdSampleRechunker;
+import androidx.media3.extractor.metadata.ThumbnailMetadata;
 import androidx.media3.extractor.text.SubtitleParser;
 import androidx.media3.extractor.text.SubtitleTranscodingExtractorOutput;
 import com.google.common.collect.ImmutableList;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.lang.annotation.Documented;
 import java.lang.annotation.Retention;
@@ -1136,9 +1139,6 @@ public class MatroskaExtractor implements Extractor {
           if (isCodecSupported(currentTrack.codecId)) {
             currentTrack.initializeFormat(currentTrack.number, dolbyVisionSampleTransformer);
             currentTrack.output = extractorOutput.track(currentTrack.number, currentTrack.type);
-            if (!currentTrack.waitingForDtsAnalysis) {
-              currentTrack.output.format(checkNotNull(currentTrack.format));
-            }
             tracks.put(currentTrack.number, currentTrack);
           }
         }
@@ -1762,41 +1762,6 @@ public class MatroskaExtractor implements Extractor {
     }
   }
 
-  /**
-   * Vendored copy of {@code DtsUtil.isSampleDtsHd} (a post-1.8.0 API not present in the stock
-   * media3 this app links against in AAR mode). Relies only on long-standing public {@link DtsUtil}
-   * APIs ({@code getFrameType}, {@code getDtsFrameSize}, {@code FRAME_TYPE_*}). Peeks the sample to
-   * decide whether a DTS track carries a DTS-HD extension substream.
-   */
-  private static boolean isSampleDtsHd(ExtractorInput input, int sampleSize) throws IOException {
-    ParsableByteArray sampleData = new ParsableByteArray(sampleSize);
-    if (!input.peekFully(
-        sampleData.getData(), /* offset= */ 0, sampleSize, /* allowEndOfInput= */ true)) {
-      return false;
-    }
-    input.resetPeekPosition();
-    // Equivalent to the post-1.8.0 ParsableByteArray.peekInt(): read the leading
-    // int without consuming it (the 10-byte header is read from position 0 next).
-    int word = sampleData.readInt();
-    sampleData.setPosition(0);
-    if (androidx.media3.extractor.DtsUtil.getFrameType(word) == androidx.media3.extractor.DtsUtil.FRAME_TYPE_CORE) {
-      if (sampleData.bytesLeft() < 10) {
-        return false;
-      }
-      byte[] header = new byte[10];
-      sampleData.readBytes(header, /* offset= */ 0, /* length= */ 10);
-      sampleData.setPosition(0);
-      int frameSize = androidx.media3.extractor.DtsUtil.getDtsFrameSize(header);
-      if (frameSize <= 0 || sampleData.bytesLeft() < frameSize + 4) {
-        return false;
-      }
-      sampleData.skipBytes(frameSize);
-      word = sampleData.readInt();
-      return androidx.media3.extractor.DtsUtil.getFrameType(word) == androidx.media3.extractor.DtsUtil.FRAME_TYPE_EXTENSION_SUBSTREAM;
-    }
-    return false;
-  }
-
   protected void handleBlockAdditionalData(
       Track track, int blockAdditionalId, ExtractorInput input, int contentSize)
       throws IOException {
@@ -1953,11 +1918,8 @@ public class MatroskaExtractor implements Extractor {
 
     if (track.waitingForDtsAnalysis) {
       checkNotNull(track.format);
-      byte[] peekedData = new byte[size];
-      if (input.peekFully(peekedData, 0, size, true)) {
-        input.resetPeekPosition();
-        String mimeType = com.nuvio.tv.core.player.dvmkv.DtsUtil.getDtsAudioMimeType(peekedData);
-        track.format = track.format.buildUpon().setSampleMimeType(mimeType).build();
+      if (DtsUtil.isSampleDtsHd(input, size)) {
+        track.format = track.format.buildUpon().setSampleMimeType(MimeTypes.AUDIO_DTS_HD).build();
       }
       track.output.format(track.format);
       track.waitingForDtsAnalysis = false;
@@ -2253,37 +2215,6 @@ public class MatroskaExtractor implements Extractor {
       offset += nalUnitLengthFieldLength + nalLength;
     }
     return annexBSize;
-  }
-
-  private byte[] convertLengthDelimitedSampleToAnnexB(
-      byte[] sampleLengthDelimitedData, int dataLength, int nalUnitLengthFieldLength, String codecId)
-      throws ParserException {
-    if (nalUnitLengthFieldLength <= 0 || nalUnitLengthFieldLength > 4) {
-      throw ParserException.createForMalformedContainer(
-          "Invalid NAL length field size for " + codecId + ": " + nalUnitLengthFieldLength,
-          /* cause= */ null);
-    }
-
-    ParsableByteArray source = new ParsableByteArray(sampleLengthDelimitedData, dataLength);
-    ByteArrayOutputStream output = new ByteArrayOutputStream(dataLength + 64);
-    while (source.bytesLeft() > 0) {
-      if (source.bytesLeft() < nalUnitLengthFieldLength) {
-        throw ParserException.createForMalformedContainer(
-            "Truncated NAL length for " + codecId, /* cause= */ null);
-      }
-      int nalLength = 0;
-      for (int i = 0; i < nalUnitLengthFieldLength; i++) {
-        nalLength = (nalLength << 8) | source.readUnsignedByte();
-      }
-      if (nalLength < 0 || source.bytesLeft() < nalLength) {
-        throw ParserException.createForMalformedContainer(
-            "Invalid NAL length for " + codecId + ": " + nalLength, /* cause= */ null);
-      }
-      output.write(NalUnitUtil.NAL_START_CODE, 0, NalUnitUtil.NAL_START_CODE.length);
-      output.write(source.getData(), source.getPosition(), nalLength);
-      source.skipBytes(nalLength);
-    }
-    return output.toByteArray();
   }
 
   private void writeSupplementalMainSampleSizePrefix(TrackOutput output, int sampleSize) {

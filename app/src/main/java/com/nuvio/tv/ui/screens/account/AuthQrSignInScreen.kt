@@ -246,11 +246,12 @@ private fun AuthQrBrandPanel(
         horizontalAlignment = Alignment.Start,
         verticalArrangement = Arrangement.Center
     ) {
-        Image(
-            painter = painterResource(id = R.drawable.app_logo_wordmark),
-            contentDescription = stringResource(R.string.cd_nuvio),
-            modifier = Modifier.height(60.dp),
-            contentScale = ContentScale.Fit
+        Text(
+            text = "SLUGYARD",
+            color = NuvioTheme.colors.Secondary,
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Black,
+            letterSpacing = 2.sp
         )
         Spacer(modifier = Modifier.height(32.dp))
         Text(
@@ -591,7 +592,7 @@ private fun AuthTermsAcknowledgement() {
         Text(
             text = stringResource(R.string.auth_qr_terms_link),
             modifier = Modifier.clickable {
-                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://nuvio.tv/terms")))
+                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://playflix.tv/terms")))
             },
             style = MaterialTheme.typography.bodyMedium.copy(
                 color = AuthTextPrimary,

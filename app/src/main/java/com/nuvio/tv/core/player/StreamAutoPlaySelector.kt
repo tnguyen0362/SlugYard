@@ -35,8 +35,13 @@ object StreamAutoPlaySelector {
         if (stream.isExternal()) return false
         when (stream.debridCacheStatus?.state) {
             StreamDebridCacheState.CHECKING,
-            StreamDebridCacheState.NOT_CACHED,
-            StreamDebridCacheState.UNKNOWN -> return false
+            StreamDebridCacheState.NOT_CACHED -> return false
+            // Add-ons commonly emit their first result before the cache probe
+            // completes. UNKNOWN is therefore a valid fallback, not a failure:
+            // cached/direct links still win in selectBestScoredStream below,
+            // while this lets a configured debrid resolver start immediately
+            // instead of waiting for an update that some add-ons never send.
+            StreamDebridCacheState.UNKNOWN,
             StreamDebridCacheState.CACHED,
             null -> Unit
         }
@@ -55,7 +60,8 @@ object StreamAutoPlaySelector {
         selectedPlugins: Set<String>,
         preferredBingeGroup: String? = null,
         preferBingeGroupInSelection: Boolean = false,
-        bingeGroupOnly: Boolean = false
+        bingeGroupOnly: Boolean = false,
+        contentContext: StreamScoringEngine.ContentContext? = null
     ): Stream? {
         if (streams.isEmpty()) return null
 
@@ -80,8 +86,10 @@ object StreamAutoPlaySelector {
         }
         if (candidateStreams.isEmpty()) return null
 
-        // Binge group matching takes priority over mode — even in MANUAL mode,
-        // a persisted binge group should auto-play without showing the picker.
+        // Manual must always show the stream picker; a remembered binge group
+        // may only refine an automatic choice.
+        if (mode == StreamAutoPlayMode.MANUAL) return null
+
         val targetBingeGroup = preferredBingeGroup?.trim().orEmpty()
         if (preferBingeGroupInSelection && targetBingeGroup.isNotEmpty()) {
             val bingeGroupMatch = candidateStreams.firstOrNull { stream ->
@@ -94,11 +102,9 @@ object StreamAutoPlaySelector {
             if (bingeGroupOnly) return null
         }
 
-        if (mode == StreamAutoPlayMode.MANUAL) return null
-
         return when (mode) {
             StreamAutoPlayMode.MANUAL -> null
-            StreamAutoPlayMode.FIRST_STREAM -> candidateStreams.firstOrNull { isPlayable(it) }
+            StreamAutoPlayMode.FIRST_STREAM -> selectReadyFirst(candidateStreams)
             StreamAutoPlayMode.REGEX_MATCH -> {
                 val pattern = regexPattern.trim()
  
@@ -144,9 +150,50 @@ object StreamAutoPlaySelector {
                 }
 
                 if (matchingStreams.isEmpty()) return null
-                matchingStreams.firstOrNull { isPlayable(it) }
+                selectReadyFirst(matchingStreams)
             }
-
+            StreamAutoPlayMode.SCORED -> selectBestScoredStream(
+                candidateStreams,
+                contentContext ?: StreamScoringEngine.ContentContext(null, null, null, null, null, null)
+            )
         }
+    }
+
+    /**
+     * Retains add-on order while preferring sources that are ready immediately.
+     * Unknown cache state stays a fallback because some providers never publish
+     * a later cache-status update.
+     */
+    private fun selectReadyFirst(candidates: List<Stream>): Stream? {
+        val playable = candidates.filter(::isPlayable)
+        return playable.firstOrNull { stream ->
+            stream.isDirectDebrid() || stream.debridCacheStatus?.state == StreamDebridCacheState.CACHED
+        } ?: playable.firstOrNull()
+    }
+
+    /**
+     * Select the best stream using multi-dimensional scoring.
+     * Applies hard filters first, then scores remaining candidates.
+     */
+    private fun selectBestScoredStream(
+        candidates: List<Stream>,
+        ctx: StreamScoringEngine.ContentContext
+    ): Stream? {
+        val playableCandidates = candidates.filter { isPlayable(it) && !StreamScoringEngine.isHardDisqualified(it) }
+        if (playableCandidates.isEmpty()) return null
+
+        // Playback certainty comes first. A cached or already-resolved stream is
+        // more valuable than a nominally higher-resolution torrent that can
+        // still stall, fail, or wait for a debrid download.
+        val instantCandidates = playableCandidates.filter { stream ->
+            stream.isDirectDebrid() || stream.debridCacheStatus?.state == StreamDebridCacheState.CACHED
+        }
+        val selectionPool = instantCandidates.ifEmpty { playableCandidates }
+
+        // Score all candidates and pick the highest
+        return selectionPool
+            .map { it to StreamScoringEngine.scoreStream(it, ctx) }
+            .maxByOrNull { it.second.total }
+            ?.first
     }
 }

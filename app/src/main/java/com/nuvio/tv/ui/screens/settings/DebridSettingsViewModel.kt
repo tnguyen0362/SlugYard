@@ -15,12 +15,15 @@ import com.nuvio.tv.core.qr.QrCodeGenerator
 import com.nuvio.tv.core.server.DebridFormatterConfigServer
 import com.nuvio.tv.core.server.DebridFormatterSettings
 import com.nuvio.tv.core.server.DeviceIpAddress
+import com.nuvio.tv.ui.util.loadAppLogoPngBytes
+import com.nuvio.tv.data.local.AddonPreferences
 import com.nuvio.tv.data.local.DebridSettingsDataStore
 import com.nuvio.tv.data.remote.dto.PremiumizeDeviceTokenDto
 import com.nuvio.tv.data.remote.dto.TorboxDeviceTokenDto
 import com.nuvio.tv.data.remote.dto.TorboxDeviceTokenRequestDto
 import com.nuvio.tv.data.remote.dto.TorboxEnvelopeDto
 import com.nuvio.tv.data.remote.api.PremiumizeApi
+import com.nuvio.tv.data.remote.api.RealDebridApi
 import com.nuvio.tv.data.remote.api.TorboxApi
 import com.nuvio.tv.domain.model.DEBRID_PREPARE_INSTANT_PLAYBACK_DEFAULT_LIMIT
 import com.nuvio.tv.domain.model.DebridSettings
@@ -38,6 +41,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -46,8 +50,10 @@ import javax.inject.Inject
 class DebridSettingsViewModel @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val dataStore: DebridSettingsDataStore,
+    private val addonPreferences: AddonPreferences,
     private val torboxApi: TorboxApi,
-    private val premiumizeApi: PremiumizeApi
+    private val premiumizeApi: PremiumizeApi,
+    private val realDebridApi: RealDebridApi
 ) : ViewModel() {
     private var formatterServer: DebridFormatterConfigServer? = null
     private var logoBytes: ByteArray? = null
@@ -71,10 +77,7 @@ class DebridSettingsViewModel @Inject constructor(
     }
 
     private fun loadLogoBytes() {
-        try {
-            val inputStream = context.resources.openRawResource(R.drawable.app_logo_wordmark)
-            logoBytes = inputStream.use { it.readBytes() }
-        } catch (_: Exception) { }
+        logoBytes = context.loadAppLogoPngBytes()
     }
 
     fun onEvent(event: DebridSettingsEvent) {
@@ -201,6 +204,24 @@ class DebridSettingsViewModel @Inject constructor(
 
     fun saveProviderCredential(providerId: String, value: String) {
         update { dataStore.setProviderApiKey(providerId, value.trim()) }
+        // Add content source addons when debrid credentials are saved
+        viewModelScope.launch {
+            val settings = dataStore.settings.first()
+            addonPreferences.addContentSourceAddons(settings)
+        }
+    }
+
+    /** Stores a user-owned Stremio manifest locally; it is never bundled in the APK. */
+    fun addPrivateContentSourceManifest(manifestUrl: String, onSuccess: () -> Unit) {
+        val url = manifestUrl.trim()
+        if (!url.startsWith("https://") || !url.endsWith("/manifest.json")) {
+            _validationError.tryEmit("Enter a secure Stremio manifest URL")
+            return
+        }
+        viewModelScope.launch {
+            addonPreferences.addAddon(url)
+            onSuccess()
+        }
     }
 
     fun validateAndSaveTorboxApiKey(value: String, onSuccess: () -> Unit) {
@@ -218,8 +239,14 @@ class DebridSettingsViewModel @Inject constructor(
             _validating.value = true
             val valid = validateProviderApiKey(providerId, trimmed)
             _validating.value = false
-            if (valid) {
-                dataStore.setProviderApiKey(providerId, trimmed)
+        if (valid) {
+            dataStore.setProviderApiKey(providerId, trimmed)
+            dataStore.setPreferredResolverProviderId(providerId)
+            // Saving a valid key is the complete consumer setup flow.
+            dataStore.setEnabled(true)
+                // Add content source addons when debrid credentials are saved
+                val settings = dataStore.settings.first()
+                addonPreferences.addContentSourceAddons(settings)
                 onSuccess()
             } else {
                 _validationError.tryEmit(context.getString(R.string.debrid_key_invalid))
@@ -241,6 +268,12 @@ class DebridSettingsViewModel @Inject constructor(
                     response.errorBody()?.close()
                     response.isSuccessful && !response.body()?.status.equals("error", ignoreCase = true)
                 }
+                DebridProviders.REAL_DEBRID_ID -> {
+                    val response = realDebridApi.getUser("Bearer $apiKey")
+                    response.body()?.close()
+                    response.errorBody()?.close()
+                    response.isSuccessful
+                }
                 else -> false
             }
         } catch (error: Exception) {
@@ -251,7 +284,7 @@ class DebridSettingsViewModel @Inject constructor(
     suspend fun startDeviceAuthorization(providerId: String): DebridDeviceAuthorization? {
         return when (DebridProviders.byId(providerId)?.id) {
             DebridProviders.TORBOX_ID -> {
-                val response = torboxApi.startDeviceAuthorization("Nuvio")
+                val response = torboxApi.startDeviceAuthorization("PlayFlix")
                 val data = response.body()?.takeIf { response.isSuccessful && it.success != false }?.data
                     ?: return null
                 val deviceCode = data.deviceCode?.takeIf { it.isNotBlank() } ?: return null

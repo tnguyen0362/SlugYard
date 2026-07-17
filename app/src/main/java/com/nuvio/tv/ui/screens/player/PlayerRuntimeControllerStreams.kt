@@ -7,6 +7,7 @@ import androidx.media3.common.util.UnstableApi
 import com.nuvio.tv.core.debrid.DirectDebridPlayableResult
 import com.nuvio.tv.core.network.NetworkResult
 import com.nuvio.tv.core.player.StreamAutoPlaySelector
+import com.nuvio.tv.core.player.StreamScoringEngine
 import com.nuvio.tv.data.local.PlayerSettings
 import com.nuvio.tv.data.local.StreamAutoPlayMode
 import com.nuvio.tv.data.local.StreamAutoPlaySource
@@ -332,7 +333,16 @@ private fun PlayerRuntimeController.launchSourceDebridPreparationIfNeeded(
             season = season,
             episode = episode,
             playerSettings = playerSettings,
-            installedAddonNames = installedAddonNames
+            installedAddonNames = installedAddonNames,
+            preferredBingeGroup = currentStreamBingeGroup,
+            contentContext = StreamScoringEngine.ContentContext(
+                contentType = contentType,
+                genres = contentGenres,
+                contentLanguage = contentLanguage,
+                title = title,
+                season = season,
+                episode = episode
+            )
         ) { original, prepared ->
             replacePreparedSourceStream(original, prepared)
         }
@@ -1017,7 +1027,34 @@ internal fun PlayerRuntimeController.loadStreamsForEpisode(video: Video, forceRe
         val installedAddons = addonRepository.getInstalledAddons().first().enabledAddons()
         val installedAddonOrder = installedAddons.map { it.displayName }
         val installedAddonNames = installedAddonOrder.toSet()
+        val playerSettings = playerSettingsDataStore.playerSettings.first()
         var debridPreparationLaunched = false
+        var lastSuccessfulStreams: List<AddonStreams>? = null
+        var autoPlayStarted = false
+
+        fun selectEpisodeAutoPlayCandidate(groups: List<AddonStreams>): Stream? {
+            val streams = StreamAutoPlaySelector.orderAddonStreams(groups, installedAddonOrder)
+                .flatMap { it.streams }
+            return StreamAutoPlaySelector.selectAutoPlayStream(
+                streams = streams,
+                mode = playerSettings.streamAutoPlayMode,
+                regexPattern = playerSettings.streamAutoPlayRegex,
+                source = playerSettings.streamAutoPlaySource,
+                installedAddonNames = installedAddonNames,
+                selectedAddons = playerSettings.streamAutoPlaySelectedAddons,
+                selectedPlugins = playerSettings.streamAutoPlaySelectedPlugins,
+                preferredBingeGroup = currentStreamBingeGroup,
+                preferBingeGroupInSelection = currentStreamBingeGroup != null,
+                contentContext = StreamScoringEngine.ContentContext(
+                    contentType = contentType,
+                    genres = metaGenres?.joinToString(","),
+                    contentLanguage = contentLanguage,
+                    title = title,
+                    season = video.season,
+                    episode = video.episode
+                )
+            )
+        }
 
         streamRepository.getStreamsFromAllAddons(
             type = type,
@@ -1027,6 +1064,7 @@ internal fun PlayerRuntimeController.loadStreamsForEpisode(video: Video, forceRe
         ).collect { result ->
             when (result) {
                 is NetworkResult.Success -> {
+                    lastSuccessfulStreams = result.data
                     val addonStreams = StreamAutoPlaySelector.orderAddonStreams(result.data, installedAddonOrder)
                     val allStreams = addonStreams.flatMap { it.streams }
                     val availableAddons = addonStreams.map { it.addonName }
@@ -1054,6 +1092,24 @@ internal fun PlayerRuntimeController.loadStreamsForEpisode(video: Video, forceRe
                         installedAddonNames = installedAddonNames,
                     ) { debridPreparationLaunched = true }
                     scheduleEpisodeBadgeApplication()
+
+                    // A direct-debrid or cache-confirmed candidate is already
+                    // safe to play. Do not make it wait behind an unrelated
+                    // dead addon and its HTTP timeout; non-validated torrents
+                    // still wait for the final scorer below.
+                    if (!autoPlayStarted) {
+                        val candidate = selectEpisodeAutoPlayCandidate(result.data)
+                        val isValidated = candidate?.isDirectDebrid() == true ||
+                            candidate?.debridCacheStatus?.state == com.nuvio.tv.domain.model.StreamDebridCacheState.CACHED
+                        if (candidate != null && isValidated) {
+                            autoPlayStarted = true
+                            switchToEpisodeStream(
+                                stream = candidate,
+                                forcedTargetVideo = video,
+                                isAutoPlay = true
+                            )
+                        }
+                    }
                 }
 
                 is NetworkResult.Error -> {
@@ -1069,6 +1125,19 @@ internal fun PlayerRuntimeController.loadStreamsForEpisode(video: Video, forceRe
                     _uiState.update { it.copy(isLoadingEpisodeStreams = true) }
                 }
             }
+        }
+
+        // If no validated candidate arrived incrementally, preserve the full
+        // final-scoring fallback for formats that need all providers.
+        val selectedStream = if (!autoPlayStarted) {
+            lastSuccessfulStreams?.let(::selectEpisodeAutoPlayCandidate)
+        } else null
+        if (selectedStream != null && !autoPlayStarted) {
+            switchToEpisodeStream(
+                stream = selectedStream,
+                forcedTargetVideo = video,
+                isAutoPlay = true
+            )
         }
     }
 }
@@ -1092,7 +1161,16 @@ private fun PlayerRuntimeController.launchEpisodeDebridPreparationIfNeeded(
             season = season,
             episode = episode,
             playerSettings = playerSettings,
-            installedAddonNames = installedAddonNames
+            installedAddonNames = installedAddonNames,
+            preferredBingeGroup = currentStreamBingeGroup,
+            contentContext = StreamScoringEngine.ContentContext(
+                contentType = contentType,
+                genres = contentGenres,
+                contentLanguage = contentLanguage,
+                title = title,
+                season = season,
+                episode = episode
+            )
         ) { original, prepared ->
             replacePreparedEpisodeStream(original, prepared)
         }
@@ -1601,7 +1679,15 @@ internal fun PlayerRuntimeController.playNextEpisode(userInitiated: Boolean = fa
                         null
                     },
                     preferBingeGroupInSelection = playerSettings.streamAutoPlayPreferBingeGroupForNextEpisode,
-                    bingeGroupOnly = bingeGroupOnlyManualMode
+                    bingeGroupOnly = bingeGroupOnlyManualMode,
+                    contentContext = StreamScoringEngine.ContentContext(
+                        contentType = contentType,
+                        genres = contentGenres,
+                        contentLanguage = contentLanguage,
+                        title = title,
+                        season = nextVideo.season,
+                        episode = nextVideo.episode
+                    )
                 )
             }
 
@@ -1619,7 +1705,15 @@ internal fun PlayerRuntimeController.playNextEpisode(userInitiated: Boolean = fa
                     selectedPlugins = effectiveSelectedPlugins,
                     preferredBingeGroup = currentStreamBingeGroup,
                     preferBingeGroupInSelection = true,
-                    bingeGroupOnly = true
+                    bingeGroupOnly = true,
+                    contentContext = StreamScoringEngine.ContentContext(
+                        contentType = contentType,
+                        genres = contentGenres,
+                        contentLanguage = contentLanguage,
+                        title = title,
+                        season = nextVideo.season,
+                        episode = nextVideo.episode
+                    )
                 )
             }
 

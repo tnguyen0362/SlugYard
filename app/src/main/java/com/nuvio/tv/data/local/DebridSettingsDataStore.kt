@@ -20,6 +20,7 @@ import com.nuvio.tv.domain.model.DebridStreamSortDirection
 import com.nuvio.tv.domain.model.DebridStreamSortKey
 import com.nuvio.tv.domain.model.DebridStreamSortMode
 import com.nuvio.tv.domain.model.DebridStreamVisualTag
+import com.nuvio.tv.domain.model.DEBRID_PREPARE_INSTANT_PLAYBACK_DEFAULT_LIMIT
 import com.nuvio.tv.domain.model.normalizeDebridInstantPlaybackPreparationLimit
 import com.nuvio.tv.domain.model.normalizeDebridStreamMaxResults
 import kotlinx.coroutines.flow.Flow
@@ -88,7 +89,11 @@ class DebridSettingsDataStore @Inject constructor(
                     realDebridApiKey = prefs[realDebridApiKeyKey] ?: ""
                 ),
                 instantPlaybackPreparationLimit = normalizeDebridInstantPlaybackPreparationLimit(
-                    prefs[instantPlaybackPreparationLimitKey] ?: 0
+                    // One prewarm overlaps a slow provider download-link request
+                    // with stream discovery. A persisted zero remains the explicit
+                    // opt-out, so existing user choices are never overridden.
+                    prefs[instantPlaybackPreparationLimitKey]
+                        ?: DEBRID_PREPARE_INSTANT_PLAYBACK_DEFAULT_LIMIT
                 ),
                 streamMaxResults = normalizeDebridStreamMaxResults(prefs[streamMaxResultsKey] ?: 0),
                 streamSortMode = streamSortMode,

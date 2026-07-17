@@ -1080,7 +1080,7 @@ ${tabButtons}
 <body>
 <div class="page">
   <div class="header">
-    <img src="/logo.png" alt="NuvioTV" class="header-logo">
+    <img src="/logo.png" alt="PlayFlix" class="header-logo">
     <p>$pageSubtitle</p>
   </div>
 
@@ -3208,7 +3208,7 @@ function exportCollections() {
   var url = URL.createObjectURL(blob);
   var a = document.createElement('a');
   a.href = url;
-  a.download = 'nuvio-collections.json';
+  a.download = 'slugyard-collections.json';
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);

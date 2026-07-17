@@ -4,8 +4,10 @@ import android.content.Context
 import android.util.Log
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import com.nuvio.tv.core.addon.PureFireBundledAddons
 import com.nuvio.tv.core.network.NetworkResult
 import com.nuvio.tv.core.network.safeApiCall
+import com.nuvio.tv.core.logging.urlForLog
 import com.nuvio.tv.data.local.AddonPreferences
 import com.nuvio.tv.data.mapper.toDomain
 import com.nuvio.tv.data.remote.api.AddonApi
@@ -223,12 +225,12 @@ class AddonRepositoryImpl @Inject constructor(
             is NetworkResult.Success -> {
                 val addon = result.data.toDomain(cleanBaseUrl)
                 if (putCachedManifestIfChanged(cleanBaseUrl, addon)) {
-                    Log.d(TAG, "Updated addon manifest cache url=$cleanBaseUrl version=${addon.version} configVersion=${addon.configVersion}")
+                    Log.d(TAG, "Updated addon manifest cache url=${cleanBaseUrl.urlForLog()} version=${addon.version} configVersion=${addon.configVersion}")
                 }
                 NetworkResult.Success(addon)
             }
             is NetworkResult.Error -> {
-                Log.w(TAG, "Failed to fetch addon manifest for url=$manifestUrl code=${result.code} message=${result.message}")
+                Log.w(TAG, "Failed to fetch addon manifest for url=${manifestUrl.urlForLog()} code=${result.code} message=${result.message}")
                 result
             }
             NetworkResult.Loading -> NetworkResult.Loading
@@ -243,6 +245,10 @@ class AddonRepositoryImpl @Inject constructor(
 
     override suspend fun removeAddon(url: String) {
         val cleanUrl = canonicalizeUrl(url)
+        if (PureFireBundledAddons.isDefaultAddon(cleanUrl)) {
+            Log.w(TAG, "removeAddon: blocked — $cleanUrl is a bundled addon")
+            return
+        }
         if (removeCachedManifest(cleanUrl)) {
             persistManifestCacheToDisk()
             bumpManifestCacheRevision()
@@ -258,6 +264,10 @@ class AddonRepositoryImpl @Inject constructor(
 
     override suspend fun setAddonEnabled(url: String, enabled: Boolean) {
         val cleanUrl = canonicalizeUrl(url)
+        if (!enabled && PureFireBundledAddons.isDefaultAddon(cleanUrl)) {
+            Log.w(TAG, "setAddonEnabled: blocked — cannot disable bundled addon $cleanUrl")
+            return
+        }
         preferences.setAddonEnabled(cleanUrl, enabled)
         if (enabled && getCachedManifest(cleanUrl) == null) {
             fetchAddon(cleanUrl)
@@ -306,9 +316,19 @@ class AddonRepositoryImpl @Inject constructor(
             remoteOrdered + extras
         }
 
+        val bundledUrls = PureFireBundledAddons.INFRASTRUCTURE_ADDONS.map { canonicalizeUrl(it) }
+        val finalListWithBundled = bundledUrls.fold(finalList) { acc, bundledUrl ->
+            if (acc.none { normalizeUrl(it) == normalizeUrl(bundledUrl) }) {
+                acc + bundledUrl
+            } else {
+                acc
+            }
+        }
+
         if (shouldRemoveMissingLocal) {
             val removedAny = initialLocalUrls
                 .filter { normalizeUrl(it) !in remoteSet }
+                .filter { !PureFireBundledAddons.isDefaultAddon(it) }
                 .map { canonicalizeUrl(it) }
                 .fold(false) { removed, url -> removeCachedManifest(url) || removed }
             if (removedAny) {
@@ -319,8 +339,8 @@ class AddonRepositoryImpl @Inject constructor(
 
 
         val currentCanonical = initialLocalUrls.map { canonicalizeUrl(it) }
-        if (finalList != currentCanonical) {
-            preferences.setAddonOrder(finalList)
+        if (finalListWithBundled != currentCanonical) {
+            preferences.setAddonOrder(finalListWithBundled)
         }
     }
 

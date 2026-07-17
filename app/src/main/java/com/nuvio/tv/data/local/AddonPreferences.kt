@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import com.nuvio.tv.core.profile.ProfileManager
+import com.nuvio.tv.domain.model.DebridSettings
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -21,7 +22,8 @@ import javax.inject.Singleton
 @OptIn(ExperimentalCoroutinesApi::class)
 class AddonPreferences @Inject constructor(
     private val factory: ProfileDataStoreFactory,
-    private val profileManager: ProfileManager
+    private val profileManager: ProfileManager,
+    private val debridSettingsDataStore: DebridSettingsDataStore
 ) {
     companion object {
         private const val FEATURE = "addon_preferences"
@@ -48,6 +50,9 @@ class AddonPreferences @Inject constructor(
     private val legacyUrlsKey = stringSetPreferencesKey("installed_addon_urls")
     private val userSetNamesKey = stringPreferencesKey("addon_user_set_names")
     private val addonEnabledStatesKey = stringPreferencesKey("installed_addon_enabled_states")
+    // URLs provisioned by the one-key setup flow. Keep these separate from
+    // user addons so a key rotation can replace them atomically.
+    private val managedContentSourceUrlsKey = stringPreferencesKey("managed_content_source_urls")
     private val manifestSuffix = "/manifest.json"
 
     private fun canonicalizeUrl(url: String): String {
@@ -221,8 +226,45 @@ class AddonPreferences @Inject constructor(
         }
     }
 
-    private fun getDefaultAddons(): Set<String> = setOf(
-        "https://v3-cinemeta.strem.io",
-        "https://opensubtitles-v3.strem.io"
-    )
+    private fun getDefaultAddons(): Set<String> =
+        com.nuvio.tv.core.addon.PureFireBundledAddons.INFRASTRUCTURE_ADDONS.toSet()
+
+    /**
+     * Add content source addons with debrid credentials.
+     * Called when debrid credentials are saved.
+     */
+    suspend fun addContentSourceAddons(debridSettings: DebridSettings) {
+        val active = profileManager.activeProfile
+        if (active != null && !active.isPrimary && active.usesPrimaryAddons) return
+        val contentUrls = com.nuvio.tv.core.addon.PureFireBundledAddons
+            .buildConfiguredContentSourceUrls(debridSettings)
+
+        store().edit { preferences ->
+            val current = getCurrentList(preferences).toMutableList()
+            val states = getCurrentEnabledStates(preferences).toMutableMap()
+
+            // Remove the previously generated config (and the pre-tracking
+            // legacy managed sources) before adding the current credential.
+            val managed = preferences[managedContentSourceUrlsKey]
+                ?.let(::parseUrlList)
+                .orEmpty()
+                .ifEmpty { current.filter(com.nuvio.tv.core.addon.PureFireBundledAddons::isContentSourceAddon) }
+                .map(::canonicalizeUrl)
+                .toSet()
+            current.removeAll { canonicalizeUrl(it) in managed }
+            managed.forEach(states::remove)
+
+            contentUrls.forEach { url ->
+                val normalizedUrl = canonicalizeUrl(url)
+                if (!current.any { canonicalizeUrl(it).equals(normalizedUrl, ignoreCase = true) }) {
+                    current.add(normalizedUrl)
+                    states[normalizedUrl] = true
+                }
+            }
+
+            preferences[orderedUrlsKey] = gson.toJson(current)
+            preferences[addonEnabledStatesKey] = gson.toJson(states)
+            preferences[managedContentSourceUrlsKey] = gson.toJson(contentUrls.map(::canonicalizeUrl))
+        }
+    }
 }

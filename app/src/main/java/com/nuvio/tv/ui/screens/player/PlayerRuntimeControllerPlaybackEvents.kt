@@ -163,27 +163,27 @@ internal fun PlayerRuntimeController.startProgressUpdates() {
                     val playingNow = view.isPlayingNow()
                     val cacheBuffering = view.isPausedForCacheNow() || view.isCoreIdleNow()
                     var firstFrameReady = hasRenderedFirstFrame
-                        if (!firstFrameReady) {
-                            firstFrameReady = pos > 0L || (playingNow && !cacheBuffering && playerDuration > 0L)
-                            if (firstFrameReady) {
-                                hasRenderedFirstFrame = true
-                                val clickToFirstFrameMs = launchStartedAtElapsedMs
-                                    ?.let { (android.os.SystemClock.elapsedRealtime() - it).coerceAtLeast(0L) }
-                                    ?: -1L
-                                val initToFirstFrameMs = (System.currentTimeMillis() - playerInitializationStartedAtMs)
-                                    .coerceAtLeast(0L)
-                                playbackAnalyticsDiagnostics.recordRawEventLine(
-                                    "PLAYBACK_STARTUP: clickToFirstFrameMs=$clickToFirstFrameMs " +
-                                        "initToFirstFrameMs=$initToFirstFrameMs playbackSpeed=${_uiState.value.playbackSpeed} " +
-                                        "currentPositionMs=$pos durationMs=$playerDuration engine=MPV " +
-                                        "host=${currentStreamUrl.safePlaybackEventsHost()}"
-                                )
-                                finishLoadingDiagnostics("mpv_first_frame_ready")
-                                if (_uiState.value.postPlayDismissedForCurrentEpisode) {
-                                    _uiState.update { it.copy(postPlayDismissedForCurrentEpisode = false) }
-                                }
+                    if (!firstFrameReady) {
+                        firstFrameReady = pos > 0L || (playingNow && !cacheBuffering && playerDuration > 0L)
+                        if (firstFrameReady) {
+                            hasRenderedFirstFrame = true
+                            val clickToFirstFrameMs = launchStartedAtElapsedMs
+                                ?.let { (android.os.SystemClock.elapsedRealtime() - it).coerceAtLeast(0L) }
+                                ?: -1L
+                            val initToFirstFrameMs = (System.currentTimeMillis() - playerInitializationStartedAtMs)
+                                .coerceAtLeast(0L)
+                            playbackAnalyticsDiagnostics.recordRawEventLine(
+                                "PLAYBACK_STARTUP: clickToFirstFrameMs=$clickToFirstFrameMs " +
+                                    "initToFirstFrameMs=$initToFirstFrameMs playbackSpeed=${_uiState.value.playbackSpeed} " +
+                                    "currentPositionMs=$pos durationMs=$playerDuration engine=MPV " +
+                                    "host=${currentStreamUrl.safePlaybackEventsHost()}"
+                            )
+                            finishLoadingDiagnostics("mpv_first_frame_ready")
+                            if (_uiState.value.postPlayDismissedForCurrentEpisode) {
+                                _uiState.update { it.copy(postPlayDismissedForCurrentEpisode = false) }
                             }
                         }
+                    }
                     if (playerDuration > lastKnownDuration) {
                         lastKnownDuration = playerDuration
                     }
@@ -205,7 +205,13 @@ internal fun PlayerRuntimeController.startProgressUpdates() {
                             playbackEnded = ended
                         )
                     }
-                    updateMpvAvailableTracks()
+                    // Tracks arrive shortly after loadfile. Refresh only in a
+                    // bounded discovery window; explicit audio/subtitle actions
+                    // still request an immediate snapshot when the user opens a
+                    // track picker.
+                    if (android.os.SystemClock.elapsedRealtime() <= mpvTrackDiscoveryDeadlineElapsedMs) {
+                        updateMpvAvailableTracks()
+                    }
                     updateActiveSkipInterval(pos)
                     evaluatePostPlayOverlayVisibility(
                         positionMs = pos,
@@ -217,7 +223,14 @@ internal fun PlayerRuntimeController.startProgressUpdates() {
                         resetPostPlayStateAfterPlaybackEnded()
                     }
                 }
-                delay(500)
+                // libmpv property reads are synchronous JNI calls.  Sampling at
+                // 2 Hz made the main/UI coroutine repeatedly walk the native
+                // track list while the decoder was configuring, producing
+                // visible jank on lower-power Android TV hardware.  A 750 ms
+                // startup cadence still discovers delayed ASS tracks promptly;
+                // after first frame a 1 Hz clock is sufficient for the TV
+                // progress UI and halves steady-state JNI/UI work.
+                delay(if (hasRenderedFirstFrame) 1_000L else 750L)
                 continue
             }
 
@@ -287,15 +300,19 @@ internal fun PlayerRuntimeController.startProgressUpdates() {
                         Log.d(PlayerRuntimeController.TAG, "BUFFER: ahead=${bufAhead}s, loading=$loading, heap=$usedMb/${maxMb}MB, pos=${pos / 1000}s")
                         
                         if (NuvioExoPlayerPerformanceHelper.shouldLogMemoryFootprint()) {
-                            val defaultAllocator = _loadControl?.allocator as? androidx.media3.exoplayer.upstream.DefaultAllocator
+                            val defaultAllocator = try {
+                                val field = _loadControl?.javaClass?.getDeclaredField("allocator")
+                                field?.isAccessible = true
+                                field?.get(_loadControl) as? androidx.media3.exoplayer.upstream.DefaultAllocator
+                            } catch (e: Exception) { null }
                             val totalFootprintBytes = defaultAllocator?.let { allocator ->
                                 try {
                                     val method = allocator.javaClass.getMethod("getMemoryFootprint")
-                                    method.invoke(allocator) as? Int ?: 0
+                                    method.invoke(allocator) as? Long ?: 0L
                                 } catch (e: Exception) {
-                                    0
+                                    0L
                                 }
-                            } ?: 0
+                            } ?: 0L
                             val totalActiveBytes = defaultAllocator?.totalBytesAllocated ?: 0
                             val footprintMb = totalFootprintBytes / (1024 * 1024)
                             val activeMb = totalActiveBytes / (1024 * 1024)

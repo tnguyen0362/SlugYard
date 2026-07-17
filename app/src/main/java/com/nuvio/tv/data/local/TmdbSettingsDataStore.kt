@@ -42,8 +42,10 @@ class TmdbSettingsDataStore @Inject constructor(
     val settings: Flow<TmdbSettings> = profileManager.activeProfileId.flatMapLatest { pid ->
         factory.get(pid, FEATURE).data.map { prefs ->
             TmdbSettings(
-                enabled = prefs[enabledKey] ?: false,
-                modernHomeEnabled = prefs[modernHomeEnabledKey] ?: false,
+                // TMDB provides the artwork, logos, metadata, and trailers that
+                // make the home experience feel like a finished streaming app.
+                enabled = prefs[enabledKey] ?: true,
+                modernHomeEnabled = prefs[modernHomeEnabledKey] ?: true,
                 enrichContinueWatching = prefs[enrichContinueWatchingKey] ?: true,
                 language = prefs[languageKey] ?: "en",
                 useArtwork = prefs[useArtworkKey] ?: true,

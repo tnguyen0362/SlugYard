@@ -4,8 +4,8 @@ import android.content.Context
 import android.util.Log
 import com.nuvio.tv.BuildConfig
 import com.nuvio.tv.data.remote.api.AddonApi
+import com.nuvio.tv.data.remote.api.OpenSubtitlesApi
 import com.nuvio.tv.data.remote.api.AniSkipApi
-import com.nuvio.tv.data.remote.api.AnimeSkipApi
 import com.nuvio.tv.data.remote.api.ArmApi
 import com.nuvio.tv.data.remote.api.AuthDiagnosticReportApi
 import com.nuvio.tv.data.remote.api.DonationsApi
@@ -113,7 +113,7 @@ object NetworkModule {
             .addInterceptor { chain ->
                 val version = BuildConfig.VERSION_NAME.ifBlank { "dev" }
                 val request = chain.request().newBuilder()
-                    .header("User-Agent", "Nuvio/$version")
+                    .header("User-Agent", "PlayFlix/$version")
                     .header("Accept-Language", buildAcceptLanguageHeader())
                     .build()
                 chain.proceed(request)
@@ -148,7 +148,7 @@ object NetworkModule {
             .addInterceptor { chain ->
                 val version = BuildConfig.VERSION_NAME.ifBlank { "dev" }
                 val request = chain.request().newBuilder()
-                    .header("User-Agent", "Nuvio/$version")
+                    .header("User-Agent", "PlayFlix/$version")
                     .header("Accept-Language", buildAcceptLanguageHeader())
                     .build()
                 chain.proceed(request)
@@ -221,7 +221,7 @@ object NetworkModule {
     @Singleton
     fun provideRetrofit(okHttpClient: OkHttpClient, moshi: Moshi): Retrofit =
         Retrofit.Builder()
-            .baseUrl("https://placeholder.nuvio.tv/")
+            .baseUrl("https://placeholder.playflix.tv/")
             .client(okHttpClient)
             .addConverterFactory(MoshiConverterFactory.create(moshi))
             .build()
@@ -253,6 +253,21 @@ object NetworkModule {
     @Singleton
     fun provideAddonApi(retrofit: Retrofit): AddonApi =
         retrofit.create(AddonApi::class.java)
+
+    @Provides
+    @Singleton
+    @Named("openSubtitles")
+    fun provideOpenSubtitlesRetrofit(okHttpClient: OkHttpClient, moshi: Moshi): Retrofit =
+        Retrofit.Builder()
+            .baseUrl("https://api.opensubtitles.com/api/v1/")
+            .client(okHttpClient)
+            .addConverterFactory(MoshiConverterFactory.create(moshi))
+            .build()
+
+    @Provides
+    @Singleton
+    fun provideOpenSubtitlesApi(@Named("openSubtitles") retrofit: Retrofit): OpenSubtitlesApi =
+        retrofit.create(OpenSubtitlesApi::class.java)
 
     @Provides
     @Singleton
@@ -379,21 +394,6 @@ object NetworkModule {
     @Singleton
     fun provideArmApi(@Named("arm") retrofit: Retrofit): ArmApi =
         retrofit.create(ArmApi::class.java)
-
-    @Provides
-    @Singleton
-    @Named("animeSkipGql")
-    fun provideAnimeSkipGqlRetrofit(okHttpClient: OkHttpClient, moshi: Moshi): Retrofit =
-        Retrofit.Builder()
-            .baseUrl("https://api.anime-skip.com/")
-            .client(okHttpClient)
-            .addConverterFactory(MoshiConverterFactory.create(moshi))
-            .build()
-
-    @Provides
-    @Singleton
-    fun provideAnimeSkipApi(@Named("animeSkipGql") retrofit: Retrofit): AnimeSkipApi =
-        retrofit.create(AnimeSkipApi::class.java)
 
     // --- GitHub Releases API (in-app updates) ---
 

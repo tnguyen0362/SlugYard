@@ -21,6 +21,7 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -61,6 +62,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @OptIn(
@@ -150,6 +152,7 @@ internal fun ModernHomeRowsList(
 
     val rowFocusRequesters = remember { mutableMapOf<String, FocusRequester>() }
     val stableItemFocusRequestersByRow = remember { mutableMapOf<String, StableRef<MutableMap<Int, FocusRequester>>>() }
+    val focusScope = rememberCoroutineScope()
 
     val density = LocalDensity.current
     val context = LocalContext.current
@@ -169,7 +172,11 @@ internal fun ModernHomeRowsList(
         landscapeCatalogCardHeight
     ) {
         val prefetchAheadRows = 1
-        val prefetchItemsPerRow = 1
+        // A TV viewport reveals several cards at once. One prefetched image
+        // still leaves the next row visibly filling in during focus-driven
+        // vertical navigation; six covers the initial viewport without
+        // eagerly decoding an entire rail.
+        val prefetchItemsPerRow = 6
         snapshotFlow {
             verticalRowListState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
         }
@@ -261,6 +268,32 @@ internal fun ModernHomeRowsList(
         }
     }
 
+    // TV focus search can jump to the app chrome when a LazyRow above is no
+    // longer composed.  Make row-to-row movement explicit once a browse row
+    // owns focus, while preserving the header as the only Up destination from
+    // the first row.
+    fun moveFocusToAdjacentRow(direction: Int): Boolean {
+        val currentIndex = carouselRows.list.indexOfFirst { it.key == activeRowKey.value }
+        val targetIndex = currentIndex + direction
+        val targetRow = carouselRows.list.getOrNull(targetIndex) ?: return false
+        val savedIndex = (focusedItemByRowMap[targetRow.key] ?: 0)
+            .coerceIn(0, (targetRow.items.list.size - 1).coerceAtLeast(0))
+        focusScope.launch {
+            verticalRowListState.animateScrollToItem(targetIndex)
+            // The target row may only enter composition after the scroll.
+            delay(48L)
+            latestOnActiveRowKeyChange.value(targetRow.key)
+            latestOnActiveItemIndexChange.value(savedIndex)
+            val itemRequester = stableItemFocusRequestersByRow[targetRow.key]
+                ?.value
+                ?.get(savedIndex)
+            runCatching {
+                (itemRequester ?: rowFocusRequesters[targetRow.key])?.requestFocus()
+            }
+        }
+        return true
+    }
+
     val defaultBringIntoViewSpec = LocalBringIntoViewSpec.current
 
     val sharedPlaceholderShimmerOffsetState = rememberPlaceholderShimmerOffsetState(label = "sharedRowShimmer")
@@ -284,6 +317,16 @@ internal fun ModernHomeRowsList(
                 .onPreviewKeyEvent { event ->
                     val firstRowKey = carouselRows.list.firstOrNull()?.key
                     val lastRowKey = carouselRows.list.lastOrNull()?.key
+                    if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionUp &&
+                        activeRowKey.value != null && activeRowKey.value != firstRowKey
+                    ) {
+                        return@onPreviewKeyEvent moveFocusToAdjacentRow(direction = -1)
+                    }
+                    if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionDown &&
+                        activeRowKey.value != null && activeRowKey.value != lastRowKey
+                    ) {
+                        return@onPreviewKeyEvent moveFocusToAdjacentRow(direction = 1)
+                    }
                     if (event.type == KeyEventType.KeyDown &&
                         event.key == Key.DirectionUp &&
                         effectiveExpandEnabled &&

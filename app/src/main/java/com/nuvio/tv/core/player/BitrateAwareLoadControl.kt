@@ -32,11 +32,16 @@ class BitrateAwareLoadControl(
 ) : DefaultLoadControl(
     allocator,
     minBufferMs,
+    /* minBufferForLocalPlaybackMs= */ minBufferMs,
     maxBufferMs,
+    /* maxBufferForLocalPlaybackMs= */ maxBufferMs,
     bufferForPlaybackMs,
+    /* bufferForPlaybackForLocalPlaybackMs= */ bufferForPlaybackMs,
     bufferForPlaybackAfterRebufferMs,
+    /* bufferForPlaybackAfterRebufferForLocalPlaybackMs= */ bufferForPlaybackAfterRebufferMs,
     /* targetBufferBytes= */ C.LENGTH_UNSET,
     prioritizeTimeOverSizeThresholds,
+    /* prioritizeTimeOverSizeThresholdsForLocalPlayback= */ prioritizeTimeOverSizeThresholds,
     backBufferDurationMs,
     retainBackBufferFromKeyframe
 ) {

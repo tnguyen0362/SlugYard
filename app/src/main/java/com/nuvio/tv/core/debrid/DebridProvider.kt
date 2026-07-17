@@ -63,7 +63,6 @@ object DebridProviders {
         id = REAL_DEBRID_ID,
         displayName = "Real-Debrid",
         shortName = "RD",
-        visibleInUi = false,
         capabilities = setOf(DebridProviderCapability.ClientResolve)
     )
 

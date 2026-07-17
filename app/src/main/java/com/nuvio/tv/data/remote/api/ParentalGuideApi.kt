@@ -29,7 +29,9 @@ data class ImdbApiParentsGuideCategory(
 @JsonClass(generateAdapter = true)
 data class ImdbApiSeverityBreakdown(
     @Json(name = "severityLevel") val severityLevel: String,
-    @Json(name = "voteCount") val voteCount: Int
+    // IMDb occasionally omits this field for an empty severity bucket.  Treat
+    // that as zero votes instead of rejecting the entire optional guide.
+    @Json(name = "voteCount") val voteCount: Int = 0
 )
 
 @JsonClass(generateAdapter = true)

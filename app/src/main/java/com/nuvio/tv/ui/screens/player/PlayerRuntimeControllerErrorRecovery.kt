@@ -273,8 +273,9 @@ internal fun PlayerRuntimeController.attemptAutoRetry(
 
         delay(RETRY_DELAY_MS)
 
-        if (isFirstAttempt) {
+        if (isFirstAttempt && !error.errorCode.isCorruptStateError()) {
             // Lightweight recovery: re-prepare the same source without destroying the player.
+            // Skip this for corrupt state errors (decoding/parsing failures) which need full teardown.
             val player = _exoPlayer
             if (player != null) {
                 if (savedPosition > 0L) {
@@ -451,4 +452,17 @@ private fun PlayerRuntimeController.handleParsingErrorFallback(error: PlaybackEx
             currentStreamResponseHeaders = emptyMap()
         }
     }
+}
+
+/**
+ * Returns true if the error code suggests corrupt internal state that requires full teardown.
+ * Lightweight recovery (seekTo + prepare) is insufficient for these errors.
+ */
+private fun Int.isCorruptStateError(): Boolean {
+    return this == PlaybackException.ERROR_CODE_DECODING_FAILED ||
+           this == PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED ||
+           this == PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED ||
+           this == PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED ||
+           this == PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED ||
+           this == PlaybackException.ERROR_CODE_PARSING_MANIFEST_UNSUPPORTED
 }

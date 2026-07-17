@@ -11,6 +11,7 @@ import com.nuvio.tv.domain.model.enabledAddons
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
@@ -45,8 +46,12 @@ internal suspend fun PlayerRuntimeController.fetchAddonSubtitlesNow(
         .orEmpty()
     _uiState.update { it.copy(installedSubtitleAddonOrder = installedAddonOrder) }
 
-    // Compute hash lazily for providers that support OpenSubtitles-style matching.
-    if (currentVideoHash == null && currentStreamUrl.isNotBlank()) {
+    // Hashing a remote stream performs multiple range requests. It is useful
+    // only for configured OpenSubtitles, and must not delay normal playback.
+    val openSubsEnabled = playerSettingsDataStore.openSubtitlesEnabled.first()
+    val openSubsConfigured = openSubsEnabled &&
+        playerSettingsDataStore.openSubtitlesApiKey.first().isNotBlank()
+    if (openSubsConfigured && currentVideoHash == null && currentStreamUrl.isNotBlank()) {
         val result = OpenSubtitlesHasher.compute(currentStreamUrl, currentHeaders)
         if (result != null) {
             currentVideoHash = result.hash
@@ -94,7 +99,7 @@ internal suspend fun PlayerRuntimeController.fetchAddonSubtitlesNow(
         }
     }
 
-    return subtitleRepository.getSubtitles(
+    val addonSubtitles = subtitleRepository.getSubtitles(
         type = request.type,
         id = request.id,
         videoId = request.videoId,
@@ -103,6 +108,25 @@ internal suspend fun PlayerRuntimeController.fetchAddonSubtitlesNow(
         filename = currentFilename,
         onProgress = onProgress
     )
+
+    // OpenSubtitles fallback: if enabled and no addon subs match preferred language
+    if (!openSubsConfigured) return addonSubtitles
+
+    val preferredLang = playerSettingsDataStore.playerSettings.first().subtitleStyle.preferredLanguage
+    val hasMatchingAddon = addonSubtitles.any { PlayerSubtitleUtils.matchesLanguageCode(it.lang, preferredLang) }
+    if (hasMatchingAddon) return addonSubtitles
+
+    val openSubsSubtitles = openSubtitlesRepository.searchSubtitles(
+        movieHash = currentVideoHash,
+        imdbId = null,
+        query = currentFilename,
+        languages = listOf(preferredLang),
+        type = request.type,
+        season = null,
+        episode = null
+    )
+
+    return addonSubtitles + openSubsSubtitles
 }
 
 internal fun PlayerRuntimeController.fetchAddonSubtitles() {
@@ -632,6 +656,15 @@ internal fun PlayerRuntimeController.retryCurrentStreamAfterMediaPeriodHolderCra
     scheduleDeferredPlayerReinitialize(fromPositionMs = fromPositionMs)
 }
 
+internal fun PlayerRuntimeController.retryCurrentStreamAfterDecoderResourcesReclaimed(fromPositionMs: Long) {
+    if (decoderResourcesReclaimedRecoveryUrl == currentStreamUrl) return
+    decoderResourcesReclaimedRecoveryUrl = currentStreamUrl
+    // MediaCodec has explicitly reclaimed the decoder. Releasing the player and
+    // recreating the same stream once is cheaper and more compatible than
+    // immediately abandoning playback or forcing MPV for every AV1 stream.
+    scheduleDeferredPlayerReinitialize(fromPositionMs = fromPositionMs)
+}
+
 internal fun PlayerRuntimeController.retryCurrentStreamWithSafeAudioFallback(fromPositionMs: Long) {
     scheduleDeferredPlayerReinitialize(fromPositionMs = fromPositionMs)
 }
@@ -807,12 +840,21 @@ private fun PlayerRuntimeController.scheduleDeferredPlayerReinitialize(
             showLoadingOverlay = it.loadingOverlayEnabled
         )
     }
-    scope.launch {
+    deferredPlayerRecoveryJob?.cancel()
+    val recoveryGeneration = playbackRecoveryGeneration + 1L
+    playbackRecoveryGeneration = recoveryGeneration
+    val recoveryUrl = currentStreamUrl
+    val recoveryHeaders = currentHeaders
+    deferredPlayerRecoveryJob = scope.launch {
         yield()
+        if (recoveryGeneration != playbackRecoveryGeneration || recoveryUrl != currentStreamUrl) return@launch
         runCatching {
             releasePlayer()
-            initializePlayer(currentStreamUrl, currentHeaders)
+            if (recoveryGeneration == playbackRecoveryGeneration && recoveryUrl == currentStreamUrl) {
+                initializePlayer(recoveryUrl, recoveryHeaders)
+            }
         }.onFailure { e ->
+            if (recoveryGeneration != playbackRecoveryGeneration || recoveryUrl != currentStreamUrl) return@onFailure
             _uiState.update {
                 it.copy(
                     error = e.toDisplayMessage(context),

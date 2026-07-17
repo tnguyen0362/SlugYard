@@ -1,5 +1,6 @@
 package com.nuvio.tv.data.mapper
 
+import androidx.core.text.HtmlCompat
 import com.nuvio.tv.data.remote.dto.AppExtrasCastMemberDto
 import com.nuvio.tv.data.remote.dto.MetaBehaviorHintsDto
 import com.nuvio.tv.data.remote.dto.MetaReleaseDateCountryDto
@@ -28,8 +29,19 @@ internal fun coerceStringList(value: Any?): List<String> {
             if (!name.isNullOrBlank()) listOf(name) else emptyList()
         }
         else -> emptyList()
-    }.mapNotNull { it.trim().takeIf(String::isNotBlank) }
+    }.mapNotNull(::decodeMetadataText)
 }
+
+/**
+ * Providers occasionally send visible metadata with HTML entities (for
+ * example `D&apos;Arcy`). Decode it once at the mapper boundary so every Compose
+ * surface receives human-readable text without trying to parse markup itself.
+ */
+internal fun decodeMetadataText(value: String): String? =
+    HtmlCompat.fromHtml(value, HtmlCompat.FROM_HTML_MODE_LEGACY)
+        .toString()
+        .trim()
+        .takeIf(String::isNotBlank)
 
 internal fun mapPeople(
     people: List<AppExtrasCastMemberDto>?,
@@ -37,11 +49,14 @@ internal fun mapPeople(
     forceRole: Boolean = false
 ): List<MetaCastMember> {
     return people.orEmpty().mapNotNull { person ->
-        val name = person.name.trim()
-        if (name.isBlank()) return@mapNotNull null
+        val name = decodeMetadataText(person.name) ?: return@mapNotNull null
         MetaCastMember(
             name = name,
-            character = if (forceRole) roleFallback else person.character?.takeIf { it.isNotBlank() } ?: roleFallback,
+            character = if (forceRole) {
+                roleFallback
+            } else {
+                person.character?.let(::decodeMetadataText) ?: roleFallback
+            },
             photo = person.photo?.takeIf { it.isNotBlank() },
             tmdbId = person.tmdbId
         )

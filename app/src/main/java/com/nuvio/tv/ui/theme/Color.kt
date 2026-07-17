@@ -211,10 +211,10 @@ class NuvioColorScheme(
         imageScrim = ImageScrim,
         posterFallback = PosterFallback,
         videoControlsScrim = VideoControlsScrim,
-        glassPanelTop = Color(0xD64A4F59),
-        glassPanelMiddle = Color(0xCC3F454F),
-        glassPanelBottom = Color(0xC640474F),
-        glow = FocusRing.copy(alpha = 0.32f)
+        glassPanelTop = Color(0xCC141414),
+        glassPanelMiddle = Color(0xB8141414),
+        glassPanelBottom = Color(0xA3141414),
+        glow = FocusRing.copy(alpha = 0.24f)
     )
 
     val status = NuvioStatusColors(

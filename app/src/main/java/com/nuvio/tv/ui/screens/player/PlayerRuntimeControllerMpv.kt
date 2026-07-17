@@ -4,11 +4,9 @@ import android.util.Log
 import androidx.media3.exoplayer.SeekParameters
 import com.nuvio.tv.data.local.InternalPlayerEngine
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import kotlin.math.abs
 
 private const val MPV_RESUME_SEEK_TOLERANCE_MS = 1500L
@@ -39,6 +37,7 @@ internal fun PlayerRuntimeController.attachMpvView(view: NuvioMpvSurfaceView?) {
         view.setPaused(false)
         applyPendingMpvSeekIfNeeded(view)
         hasRenderedFirstFrame = false
+        mpvTrackDiscoveryDeadlineElapsedMs = android.os.SystemClock.elapsedRealtime() + 6_000L
         _uiState.update {
             it.copy(
                 isBuffering = true,
@@ -77,15 +76,8 @@ internal fun PlayerRuntimeController.initializeMpvPlayer(
     headers: Map<String, String>,
     allowEngineFailover: Boolean = true
 ) {
-    _exoPlayer?.release()
-    _exoPlayer = null
+    disposeExoPlayerBeforeRebuild()
     trackSelector = null
-    try {
-        currentMediaSession?.release()
-    } catch (_: Exception) {
-    }
-    currentMediaSession = null
-    notifyAudioSessionUpdate(false)
 
     val view = mpvView
     if (view == null) {
@@ -115,6 +107,9 @@ internal fun PlayerRuntimeController.initializeMpvPlayer(
         view.applyHardwareDecodeMode(mpvHardwareDecodeModeSetting)
         val initialResumePosition = resolvePendingInitialResumePosition()
         playbackAnalyticsDiagnostics.setStartupStartPosition(initialResumePosition)
+        // A single MPV surface is retained while episodes change. Reset the
+        // bounded discovery window for every load, not only when attaching it.
+        mpvTrackDiscoveryDeadlineElapsedMs = android.os.SystemClock.elapsedRealtime() + 6_000L
         view.setMedia(url, headers, initialResumePosition)
         playbackAnalyticsDiagnostics.recordRawEventLine(
             "PLAYER_INIT: engine=MPV host=${url.safeMpvTraceHost()} " +
@@ -219,6 +214,8 @@ internal fun PlayerRuntimeController.pauseForLifecycle() {
         player.playWhenReady = false
         player.pause()
     }
+    stopWatchProgressSaving()
+    stopProgressUpdates()
 }
 
 internal fun PlayerRuntimeController.resumeForLifecycle() {
@@ -265,9 +262,10 @@ internal fun PlayerRuntimeController.updateMpvAvailableTracks() {
     mpvTrackRefreshInProgress = true
     mpvTrackRefreshJob = scope.launch {
         try {
-            val snapshot = withContext(Dispatchers.IO) {
-                view.readTrackSnapshot()
-            }
+            // BaseMPVView and libmpv are attached to the Android view/native
+            // owner. Reading its properties from Dispatchers.IO caused a full
+            // JNI scan to race video rendering every 500 ms.
+            val snapshot = view.readTrackSnapshot()
             if (!isUsingMpvEngine() || mpvView !== view || currentStreamUrl != streamUrlAtRefresh) return@launch
             applyMpvTrackSnapshot(snapshot)
             tryAutoSelectPreferredSubtitleFromAvailableTracks()
@@ -562,7 +560,7 @@ internal fun PlayerRuntimeController.pauseForStillWatchingPrompt() {
 internal fun PlayerRuntimeController.keepMpvPlayingIfNeeded(wasPlaying: Boolean) {
     if (!wasPlaying || !isUsingMpvEngine()) return
     scope.launch {
-        // If track switch forces a pause, nudge playback back only when needed.
+        var resumed = false
         repeat(6) {
             if (!isUsingMpvEngine()) return@launch
             val view = mpvView ?: return@launch
@@ -572,11 +570,15 @@ internal fun PlayerRuntimeController.keepMpvPlayingIfNeeded(wasPlaying: Boolean)
                 _uiState.update { state ->
                     if (state.isPlaying) state else state.copy(isPlaying = true, isBuffering = false)
                 }
+                resumed = true
                 return@launch
             }
             view.setPaused(false)
-            _uiState.update { it.copy(isPlaying = true, isBuffering = false) }
+            _uiState.update { it.copy(isPlaying = true, isBuffering = true) }
             delay(120L)
+        }
+        if (!resumed && isUsingMpvEngine()) {
+            _uiState.update { it.copy(isPlaying = false, isBuffering = true) }
         }
     }
 }

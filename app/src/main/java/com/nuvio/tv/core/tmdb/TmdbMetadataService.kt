@@ -64,6 +64,7 @@ class TmdbMetadataService(
         language: String = "en"
     ): TmdbEnrichment? =
         withContext(ioDispatcher) {
+            if (TMDB_API_KEY.isBlank()) return@withContext null
             val normalizedLanguage = normalizeTmdbLanguage(language)
             val cacheKey = "$tmdbId:${contentType.name}:$normalizedLanguage"
             enrichmentCache[cacheKey]?.let { return@withContext it }
@@ -490,6 +491,7 @@ class TmdbMetadataService(
         seasonNumbers: List<Int>,
         language: String = "en"
     ): Map<Pair<Int, Int>, TmdbEpisodeEnrichment> = withContext(ioDispatcher) {
+        if (TMDB_API_KEY.isBlank()) return@withContext emptyMap()
         val normalizedLanguage = normalizeTmdbLanguage(language)
         val cacheKey = "$tmdbId:${seasonNumbers.sorted().joinToString(",")}:$normalizedLanguage"
         episodeCache[cacheKey]?.let { return@withContext it }
@@ -539,6 +541,7 @@ class TmdbMetadataService(
         language: String = "en",
         maxItems: Int = 12
     ): List<MetaPreview> = withContext(ioDispatcher) {
+        if (TMDB_API_KEY.isBlank()) return@withContext emptyList()
         val normalizedLanguage = normalizeTmdbLanguage(language)
         val cacheKey = "$tmdbId:${contentType.name}:$normalizedLanguage:more_like"
         moreLikeThisCache[cacheKey]?.let { return@withContext it }
@@ -663,6 +666,7 @@ class TmdbMetadataService(
         collectionId: Int,
         language: String = "en"
     ): List<MetaPreview> = withContext(ioDispatcher) {
+        if (TMDB_API_KEY.isBlank()) return@withContext emptyList()
         val normalizedLanguage = normalizeTmdbLanguage(language)
         val cacheKey = "$collectionId:$normalizedLanguage:collection"
         collectionCache[cacheKey]?.let { return@withContext it }
@@ -732,6 +736,7 @@ class TmdbMetadataService(
         fallbackName: String? = null,
         language: String = "en"
     ): TmdbEntityBrowseData? = withContext(ioDispatcher) {
+        if (TMDB_API_KEY.isBlank()) return@withContext null
         val normalizedLanguage = normalizeTmdbLanguage(language)
         val normalizedSourceType = normalizeEntitySourceType(sourceType)
         val cacheKey = "${entityKind.routeValue}:$entityId:$normalizedSourceType:$normalizedLanguage"
@@ -867,6 +872,9 @@ class TmdbMetadataService(
         language: String,
         page: Int
     ): TmdbEntityRailPageResult {
+        if (TMDB_API_KEY.isBlank()) {
+            return TmdbEntityRailPageResult(items = emptyList(), hasMore = false)
+        }
         if (entityKind == TmdbEntityKind.NETWORK && mediaType == TmdbEntityMediaType.MOVIE) {
             return TmdbEntityRailPageResult(items = emptyList(), hasMore = false)
         }
@@ -1087,6 +1095,7 @@ class TmdbMetadataService(
         language: String = "en"
     ): PersonDetail? =
         withContext(ioDispatcher) {
+            if (TMDB_API_KEY.isBlank()) return@withContext null
             val normalizedLanguage = normalizeTmdbLanguage(language)
             val cacheKey = "$personId:${preferCrewCredits?.toString() ?: "auto"}:$normalizedLanguage"
             personCache[cacheKey]?.let { return@withContext it }

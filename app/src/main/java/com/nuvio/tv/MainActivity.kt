@@ -48,6 +48,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -106,6 +107,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.tv.material3.Card
 import androidx.tv.material3.CardDefaults
+import androidx.tv.material3.Border
 import androidx.tv.material3.DrawerValue
 import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.tv.material3.Icon
@@ -183,7 +185,7 @@ data class DrawerItem(
 )
 
 private data class MainUiPrefs(
-    val theme: AppTheme = AppTheme.WHITE,
+    val theme: AppTheme = AppTheme.SLUGYARD,
     val font: AppFont = AppFont.INTER,
     val amoledMode: Boolean = false,
     val amoledSurfacesMode: Boolean = false,
@@ -501,49 +503,11 @@ class MainActivity : ComponentActivity() {
                     }
 
                     if (
-                        hasSeenAuthQrOnFirstLaunch == false &&
                         authState !is AuthState.FullAccount &&
                         !onboardingCompletedThisSession
                     ) {
-                        AuthQrSignInScreen(
-                            onBackPress = { finish() },
-                            onContinue = {
-                                lifecycleScope.launch {
-                                    val shouldRunRemoteOnboardingSync =
-                                        authManager.authState.value is AuthState.FullAccount
-
-                                    if (shouldRunRemoteOnboardingSync) {
-                                        if (onboardingProfileSyncInProgress) return@launch
-                                        onboardingProfileSyncInProgress = true
-                                        val maxAttempts = 3
-                                        var synced = false
-                                        for (attempt in 0 until maxAttempts) {
-                                            val result = profileSyncService.pullFromRemote()
-                                            if (result.isSuccess) {
-                                                synced = true
-                                                break
-                                            }
-                                            if (attempt < maxAttempts - 1) {
-                                                delay(1_000)
-                                            }
-                                        }
-                                        if (!synced) {
-                                            android.util.Log.w(
-                                                "MainActivity",
-                                                "Onboarding profile sync failed after retries; continuing"
-                                            )
-                                        }
-                                    }
-                                    appOnboardingDataStore.setHasSeenAuthQrOnFirstLaunch(true)
-                                    onboardingCompletedThisSession = true
-                                    onboardingProfileSyncInProgress = false
-                                }
-                                if (authManager.authState.value is AuthState.FullAccount) {
-                                    startupSyncService.requestSyncNow()
-                                }
-                            }
-                        )
-                        return@Surface
+                        // Skip auth for now - will be handled by AuthSignInScreen in NavHost
+                        onboardingCompletedThisSession = true
                     }
 
                     val shouldShowProfileSelection =
@@ -561,22 +525,10 @@ class MainActivity : ComponentActivity() {
                         return@Surface
                     }
 
-                    val layoutChosen = mainUiPrefs.hasChosenLayout
-                    if (layoutChosen == null || !mainUiPrefs.experienceModeLoaded || installedAddons == null) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(NuvioTheme.colors.Background)
-                        )
-                        return@Surface
-                    }
-                    val effectiveExperienceMode = mainUiPrefs.experienceMode
-                        ?: if (layoutChosen) ExperienceMode.ADVANCED else null
-                    val needsExperienceSelection = effectiveExperienceMode == null
-                    val needsEssentialAddonSetup =
-                        effectiveExperienceMode == ExperienceMode.ESSENTIAL &&
-                            installedAddons.orEmpty().isEmpty() &&
-                            !mainUiPrefs.addonSetupSkipped
+                    val layoutChosen = true // Skip layout selection - always use modern layout
+                    val effectiveExperienceMode = ExperienceMode.ADVANCED // Always advanced mode
+                    val needsExperienceSelection = false // Skip experience selection
+                    val needsEssentialAddonSetup = false // Skip essential addon setup
                     val pendingDeepLink by pendingDeepLinkUrl.collectAsState()
 
                     LaunchedEffect(pendingDeepLink) {
@@ -799,51 +751,22 @@ class MainActivity : ComponentActivity() {
                     }?.route
                     val selectedDrawerItem = drawerItems.firstOrNull { it.route == selectedDrawerRoute } ?: drawerItems.first()
 
-                    if (modernSidebarEnabled) {
-                        ModernSidebarScaffold(
-                            navController = navController,
-                            startDestination = startDestination,
-                            currentRoute = currentRoute,
-                            rootRoutes = rootRoutes,
-                            drawerItems = drawerItems,
-                            selectedDrawerRoute = selectedDrawerRoute,
-                            selectedDrawerItem = selectedDrawerItem,
-                            sidebarCollapsed = sidebarCollapsed,
-                            modernSidebarBlurEnabled = modernSidebarBlurEnabled,
-                            hideBuiltInHeaders = hideBuiltInHeadersForFloatingPill,
-                            activeProfileName = activeProfile?.name ?: "",
-                            activeProfileColorHex = activeProfile?.avatarColorHex ?: "#1E88E5",
-                            activeProfileAvatarImageUrl = activeProfileAvatarImageUrl,
-                            showProfileSelector = profiles.size > 1,
-                            onSwitchProfile = { hasSelectedProfileThisSession = false },
-                            onNavigate = { optimisticRoute = it },
-                            onExitApp = {
-                                finishAffinity()
-                                finishAndRemoveTask()
-                            }
-                        )
-                    } else {
-                        LegacySidebarScaffold(
-                            navController = navController,
-                            startDestination = startDestination,
-                            currentRoute = currentRoute,
-                            rootRoutes = rootRoutes,
-                            drawerItems = drawerItems,
-                            selectedDrawerRoute = selectedDrawerRoute,
-                            sidebarCollapsed = sidebarCollapsed,
-                            hideBuiltInHeaders = false,
-                            activeProfileName = activeProfile?.name ?: "",
-                            activeProfileColorHex = activeProfile?.avatarColorHex ?: "#1E88E5",
-                            activeProfileAvatarImageUrl = activeProfileAvatarImageUrl,
-                            showProfileSelector = profiles.size > 1,
-                            onSwitchProfile = { hasSelectedProfileThisSession = false },
-                            onNavigate = { optimisticRoute = it },
-                            onExitApp = {
-                                finishAffinity()
-                                finishAndRemoveTask()
-                            }
-                        )
-                    }
+                    // The primary TV experience uses a Netflix-style top navigation. The old
+                    // Nuvio drawers remain in the source for migration safety, but are no
+                    // longer part of the user-facing default shell.
+                    NetflixTopNavigationScaffold(
+                        navController = navController,
+                        startDestination = startDestination,
+                        currentRoute = currentRoute,
+                        rootRoutes = rootRoutes,
+                        drawerItems = drawerItems,
+                        selectedRoute = selectedDrawerRoute,
+                        onNavigate = { optimisticRoute = it },
+                        onExitApp = {
+                            finishAffinity()
+                            finishAndRemoveTask()
+                        }
+                    )
 
                     if (AppFeaturePolicy.inAppUpdatesEnabled && !BuildConfig.IS_DEBUG_BUILD) {
                         val updateViewModel: UpdateViewModel = hiltViewModel(this@MainActivity)
@@ -978,6 +901,212 @@ private fun SidebarFocusRecoveryEffect(
         val requester = drawerItemFocusRequesters[fallbackRoute] ?: return@LaunchedEffect
         repeat(2) { withFrameNanos { } }
         runCatching { requester.requestFocus() }
+    }
+}
+
+/**
+ * The default TV shell.  It deliberately keeps navigation in one quiet top row
+ * instead of making the viewer open a drawer before browsing anything.
+ */
+@OptIn(ExperimentalTvMaterial3Api::class)
+@Composable
+private fun NetflixTopNavigationScaffold(
+    navController: NavHostController,
+    startDestination: String,
+    currentRoute: String?,
+    rootRoutes: Set<String>,
+    drawerItems: List<DrawerItem>,
+    selectedRoute: String?,
+    onNavigate: (String) -> Unit,
+    onExitApp: () -> Unit
+) {
+    // The browse header belongs to Home. Search, Library and Settings already
+    // own their focus and headers; overlaying a second bar caused the duplicate
+    // Search control shown on TV.
+    val showTopNavigation = currentRoute == Screen.Home.route
+    val contentFocusRequester = remember { FocusRequester() }
+    val topItems = remember(drawerItems) {
+        drawerItems.filter { item ->
+            item.route != Screen.Settings.route && item.route != Screen.Search.route
+        }.map { item ->
+            when (item.route) {
+                Screen.Discover.route -> item.copy(label = "Movies")
+                Screen.Library.route -> item.copy(label = "My List")
+                else -> item
+            }
+        }
+    }
+
+    BackHandler(enabled = showTopNavigation) { onExitApp() }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+    ) {
+        CompositionLocalProvider(
+            LocalSidebarExpanded provides false,
+            LocalContentFocusRequester provides contentFocusRequester
+        ) {
+            NuvioNavHost(
+                navController = navController,
+                startDestination = startDestination,
+                hideBuiltInHeaders = true,
+                // The top bar is outside NavHost. Reserve its exact height so
+                // Home never guesses at overlay spacing across TV resolutions.
+                contentTopInset = if (showTopNavigation) 64.dp else 0.dp
+            )
+        }
+
+        if (showTopNavigation) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .background(Color.Black.copy(alpha = 0.92f))
+                    .padding(horizontal = 52.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Text(
+                    text = "SLUGYARD",
+                    color = NuvioTheme.colors.Secondary,
+                    style = androidx.tv.material3.MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = 1.8.sp
+                )
+                Box(
+                    modifier = Modifier.weight(1f),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(24.dp))
+                            .background(Color.White.copy(alpha = 0.11f))
+                            .padding(horizontal = 5.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        topItems.forEach { item ->
+                            NetflixTopNavItem(
+                                label = item.label,
+                                selected = selectedRoute == item.route,
+                                onClick = {
+                                    onNavigate(item.route)
+                                    navigateToDrawerRoute(navController, currentRoute, item.route)
+                                }
+                            )
+                        }
+                    }
+                }
+                drawerItems.firstOrNull { it.route == Screen.Search.route }?.let { item ->
+                    NetflixTopNavIconAction(
+                        imageVector = Icons.Default.Search,
+                        contentDescription = "Search",
+                        onClick = {
+                            onNavigate(item.route)
+                            navigateToDrawerRoute(navController, currentRoute, item.route)
+                        }
+                    )
+                }
+                drawerItems.firstOrNull { it.route == Screen.Settings.route }?.let { item ->
+                    NetflixTopNavIconAction(
+                        imageVector = Icons.Default.Settings,
+                        contentDescription = "Settings",
+                        onClick = {
+                            onNavigate(item.route)
+                            navigateToDrawerRoute(navController, currentRoute, item.route)
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalTvMaterial3Api::class)
+@Composable
+private fun NetflixTopNavItem(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    var focused by remember { mutableStateOf(false) }
+    val isActive = selected || focused
+    Card(
+        onClick = onClick,
+        modifier = Modifier
+            .height(34.dp)
+            .onFocusChanged { focused = it.isFocused },
+        colors = CardDefaults.colors(
+            containerColor = if (selected) Color.White.copy(alpha = 0.20f) else Color.Transparent,
+            focusedContainerColor = Color.White,
+            contentColor = if (selected) Color.White else Color.White.copy(alpha = 0.86f),
+            focusedContentColor = Color.Black
+        ),
+        border = CardDefaults.border(
+            border = androidx.tv.material3.Border.None,
+            focusedBorder = Border(
+                border = androidx.compose.foundation.BorderStroke(2.dp, Color.White),
+                shape = RoundedCornerShape(18.dp)
+            )
+        ),
+        shape = CardDefaults.shape(RoundedCornerShape(18.dp)),
+        scale = CardDefaults.scale(focusedScale = 1.02f)
+    ) {
+        Box(
+            modifier = Modifier.padding(
+                horizontal = 13.dp,
+                vertical = 6.dp
+            ),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = label,
+                style = androidx.tv.material3.MaterialTheme.typography.labelMedium,
+                fontWeight = if (isActive) FontWeight.Bold else FontWeight.Medium,
+                maxLines = 1
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalTvMaterial3Api::class)
+@Composable
+private fun NetflixTopNavIconAction(
+    imageVector: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit
+) {
+    var focused by remember { mutableStateOf(false) }
+    Card(
+        onClick = onClick,
+        modifier = Modifier
+            .size(36.dp)
+            .onFocusChanged { focused = it.isFocused },
+        colors = CardDefaults.colors(
+            containerColor = Color.White.copy(alpha = if (focused) 0.20f else 0.10f),
+            focusedContainerColor = Color.White,
+            contentColor = Color.White.copy(alpha = 0.92f),
+            focusedContentColor = Color.Black
+        ),
+        border = CardDefaults.border(
+            border = androidx.tv.material3.Border.None,
+            focusedBorder = Border(
+                border = androidx.compose.foundation.BorderStroke(2.dp, Color.White),
+                shape = CircleShape
+            )
+        ),
+        shape = CardDefaults.shape(CircleShape),
+        scale = CardDefaults.scale(focusedScale = 1.06f)
+    ) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Icon(
+                imageVector = imageVector,
+                contentDescription = contentDescription,
+                modifier = Modifier.size(18.dp)
+            )
+        }
     }
 }
 

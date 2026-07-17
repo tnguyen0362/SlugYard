@@ -118,6 +118,16 @@ internal fun HomeViewModel.replaceCatalogRow(key: String, row: CatalogRow) {
     }
 }
 
+internal fun HomeViewModel.removeCatalogRow(key: String) {
+    synchronized(catalogStateLock) {
+        val previousRow = catalogsMap.remove(key)
+        if (previousRow != null) {
+            reindexCatalogRow(key, previousRow, updatedRow = null)
+        }
+        truncatedRowCache.remove(key)
+    }
+}
+
 internal inline fun HomeViewModel.updateCatalogRow(
     key: String,
     transform: (CatalogRow) -> CatalogRow
@@ -203,7 +213,16 @@ internal fun HomeViewModel.removeTruncatedRowCacheEntry(key: String) {
 }
 
 internal fun HomeViewModel.rebuildCatalogOrder(addons: List<Addon>) {
-    val defaultOrder = buildDefaultCatalogOrder(addons)
+    val addonOrder = buildDefaultCatalogOrder(addons)
+    // Keep the provider's familiar first rails near the hero, then introduce
+    // real genre programming before the remaining generic addon catalogs.
+    val defaultOrder = buildList {
+        addAll(addonOrder.take(2))
+        addAll(homeProgrammingRails.map { rail ->
+            catalogKey(HOME_PROGRAMMING_ADDON_ID, rail.source.mediaType.value, rail.catalogId)
+        })
+        addAll(addonOrder.drop(2))
+    }
     val collectionKeys = collectionsCache.map { "collection_${it.id}" }
     val allAvailable = (defaultOrder + collectionKeys).toSet()
 

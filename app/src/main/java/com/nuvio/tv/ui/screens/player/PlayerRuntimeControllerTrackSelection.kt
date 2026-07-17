@@ -380,6 +380,36 @@ internal fun PlayerRuntimeController.selectAddonSubtitle(subtitle: Subtitle) {
         stage = "select-addon-subtitle",
         message = "usingMpv=${isUsingMpvEngine()} addonId=${subtitle.id} addonLang=${subtitle.lang} addonName=${subtitle.addonName}"
     )
+    // OpenSubtitles search responses identify a file rather than exposing a
+    // media URL. Resolve it only when selected; an empty URL is not playable.
+    if (subtitle.url.isBlank() && subtitle.id.startsWith("file:")) {
+        scope.launch {
+            _uiState.update { it.copy(isLoadingAddonSubtitles = true, addonSubtitlesError = null) }
+            val downloaded = openSubtitlesRepository.downloadSubtitle(subtitle)
+            if (downloaded == null) {
+                autoSubtitleSelected = false
+                _uiState.update {
+                    it.copy(
+                        isLoadingAddonSubtitles = false,
+                        addonSubtitlesError = "Unable to download the selected OpenSubtitles track"
+                    )
+                }
+                return@launch
+            }
+            val resolvedSubtitle = subtitle.copy(url = android.net.Uri.fromFile(downloaded).toString())
+            _uiState.update { state ->
+                state.copy(
+                    addonSubtitles = state.addonSubtitles.map { candidate ->
+                        if (candidate.id == subtitle.id && candidate.url == subtitle.url) resolvedSubtitle else candidate
+                    },
+                    isLoadingAddonSubtitles = false,
+                    addonSubtitlesError = null
+                )
+            }
+            selectAddonSubtitle(resolvedSubtitle)
+        }
+        return
+    }
     if (isUsingMpvEngine()) {
         val currentlySelected = _uiState.value.selectedAddonSubtitle
         if (

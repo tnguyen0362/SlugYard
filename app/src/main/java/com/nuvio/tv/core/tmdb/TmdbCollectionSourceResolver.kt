@@ -45,6 +45,10 @@ class TmdbCollectionSourceResolver @Inject constructor(
     private fun string(resId: Int): String = appContext.getString(resId)
 
     fun resolve(source: TmdbCollectionSource, page: Int = 1): Flow<NetworkResult<CatalogRow>> = flow {
+        if (BuildConfig.TMDB_API_KEY.isBlank()) {
+            emit(NetworkResult.Error("TMDB is not configured for this build."))
+            return@flow
+        }
         emit(NetworkResult.Loading)
         val result = runCatching {
             withContext(Dispatchers.IO) {

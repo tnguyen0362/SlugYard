@@ -45,34 +45,34 @@ object NuvioRadii {
     val tokens = NuvioRadiusTokens(
         none = 0.dp,
         xxs = 2.dp,
-        xs = 4.dp,
-        sm = 8.dp,
-        md = 12.dp,
-        lg = 14.dp,
-        xl = 16.dp,
-        xxl = 20.dp,
-        panel = 28.dp,
+        xs = 3.dp,
+        sm = 4.dp,
+        md = 6.dp,
+        lg = 8.dp,
+        xl = 12.dp,
+        xxl = 16.dp,
+        panel = 20.dp,
         full = 999.dp
     )
 }
 
 object NuvioShapes {
     val tokens = NuvioShapeTokens(
-        posterCard = RoundedCornerShape(NuvioRadii.tokens.md),
-        backdropCard = RoundedCornerShape(NuvioRadii.tokens.xl),
-        collectionCard = RoundedCornerShape(NuvioRadii.tokens.xl),
-        button = RoundedCornerShape(NuvioRadii.tokens.md),
+        posterCard = RoundedCornerShape(NuvioRadii.tokens.xxs),
+        backdropCard = RoundedCornerShape(NuvioRadii.tokens.sm),
+        collectionCard = RoundedCornerShape(NuvioRadii.tokens.sm),
+        button = RoundedCornerShape(NuvioRadii.tokens.sm),
         iconButton = RoundedCornerShape(NuvioRadii.tokens.md),
         chip = RoundedCornerShape(NuvioRadii.tokens.full),
-        badge = RoundedCornerShape(NuvioRadii.tokens.xs),
-        dialog = RoundedCornerShape(NuvioRadii.tokens.xl),
-        sidePanel = RoundedCornerShape(NuvioRadii.tokens.xxl),
-        sidebar = RoundedCornerShape(30.dp),
+        badge = RoundedCornerShape(NuvioRadii.tokens.xxs),
+        dialog = RoundedCornerShape(NuvioRadii.tokens.lg),
+        sidePanel = RoundedCornerShape(NuvioRadii.tokens.xl),
+        sidebar = RoundedCornerShape(NuvioRadii.tokens.xl),
         navItem = RoundedCornerShape(NuvioRadii.tokens.full),
         progress = RoundedCornerShape(NuvioRadii.tokens.xxs),
         slider = RoundedCornerShape(NuvioRadii.tokens.full),
-        field = RoundedCornerShape(NuvioRadii.tokens.md),
-        menu = RoundedCornerShape(NuvioRadii.tokens.lg),
+        field = RoundedCornerShape(NuvioRadii.tokens.sm),
+        menu = RoundedCornerShape(NuvioRadii.tokens.md),
         circle = CircleShape
     )
 }

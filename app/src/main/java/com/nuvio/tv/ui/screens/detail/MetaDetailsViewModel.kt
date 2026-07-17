@@ -19,6 +19,8 @@ import com.nuvio.tv.data.repository.TraktCommentsService
 import com.nuvio.tv.data.repository.TraktRelatedService
 import com.nuvio.tv.data.repository.parseContentIds
 import com.nuvio.tv.domain.model.ContentType
+import com.nuvio.tv.domain.model.enabledAddons
+import com.nuvio.tv.domain.model.supportsExtra
 import com.nuvio.tv.domain.model.LibraryEntryInput
 import com.nuvio.tv.domain.model.LibrarySourceMode
 import com.nuvio.tv.domain.model.ListMembershipChanges
@@ -30,6 +32,8 @@ import com.nuvio.tv.domain.model.TraktCommentReview
 import com.nuvio.tv.domain.model.Video
 import com.nuvio.tv.domain.model.WatchProgress
 import com.nuvio.tv.domain.repository.LibraryRepository
+import com.nuvio.tv.domain.repository.AddonRepository
+import com.nuvio.tv.domain.repository.CatalogRepository
 import com.nuvio.tv.domain.repository.MetaRepository
 import com.nuvio.tv.domain.repository.WatchProgressRepository
 import com.nuvio.tv.data.local.WatchedItemsPreferences
@@ -72,6 +76,8 @@ private const val TAG = "MetaDetailsViewModel"
 class MetaDetailsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val metaRepository: MetaRepository,
+    private val addonRepository: AddonRepository,
+    private val catalogRepository: CatalogRepository,
     private val tmdbSettingsDataStore: TmdbSettingsDataStore,
     private val tmdbService: TmdbService,
     private val tmdbMetadataService: TmdbMetadataService,
@@ -599,12 +605,12 @@ class MetaDetailsViewModel @Inject constructor(
                 )
             }
 
-            val metaLookupId = resolveMetaLookupId(itemId = itemId, itemType = itemType)
-            // Update effective content ID as early as possible so watch-progress
-            // observers use the canonical (usually IMDB) ID, not the navigation ID.
-            if (metaLookupId != itemId) {
-                _effectiveContentId.value = metaLookupId
-            }
+            // The originating catalog identifier is already routable by meta
+            // addons (and lets their id-prefix routing select the right source).
+            // Do not block the first visible detail frame on an optional TMDB →
+            // IMDb translation; applyMeta() promotes a canonical ID as soon as
+            // the provider returns one.
+            val metaLookupId = itemId
             val preferExternal = layoutPreferenceDataStore.preferExternalMetaAddonDetail.first()
 
             if (preferExternal) {
@@ -723,24 +729,6 @@ class MetaDetailsViewModel @Inject constructor(
         return true
     }
 
-    private suspend fun resolveMetaLookupId(itemId: String, itemType: String): String {
-        val raw = itemId.trim()
-        if (!raw.startsWith("tmdb:", ignoreCase = true)) return raw
-
-        val tmdbNumericId = raw
-            .substringAfter(':', missingDelimiterValue = "")
-            .substringBefore(':')
-            .toIntOrNull()
-            ?: return raw
-
-        // Use a short timeout so a blocked TMDB API doesn't stall the detail screen.
-        return kotlinx.coroutines.withTimeoutOrNull(5_000L) {
-            tmdbService.tmdbToImdb(tmdbNumericId, itemType)
-        }
-            ?.takeIf { it.isNotBlank() }
-            ?: raw
-    }
-
     private fun applyMeta(meta: Meta) {
         // Update the effective content ID so watch-progress observers pick up
         // the canonical ID (e.g. IMDB "tt0396375") instead of the navigation ID
@@ -810,8 +798,13 @@ class MetaDetailsViewModel @Inject constructor(
 
     private suspend fun applyMetaWithEnrichment(meta: Meta) {
         // Fire all independent async jobs immediately — they run in parallel.
+        // Publish a usable detail surface before optional network enrichment.
+        applyMeta(meta)
         loadMoreLikeThisAsync(meta)
+        val requestedMetaId = meta.id
+        viewModelScope.launch {
         val enriched = enrichMeta(meta)
+        if (_uiState.value.meta?.id != requestedMetaId) return@launch
 
         // Pre-compute nextToWatch before applyMeta so the PlayButton text is stable
         // from the first composition — prevents focus invalidation from late recomposition.
@@ -821,13 +814,15 @@ class MetaDetailsViewModel @Inject constructor(
         val watchedEpisodes = watchedItemsPreferences
             .getWatchedEpisodesForContent(_effectiveContentId.value)
             .first()
+        if (_uiState.value.meta?.id != requestedMetaId) return@launch
         val precomputedNextToWatch = computeNextToWatch(enriched, progressMap, watchedEpisodes)
         updateNextToWatch(precomputedNextToWatch)
 
         applyMeta(enriched)
         // Episode ratings and MDBList are independent — launch both without waiting.
         loadEpisodeRatingsAsync(enriched)
-        viewModelScope.launch { loadMDBListRatings(enriched) }
+        loadMDBListRatings(enriched)
+        }
     }
 
     private fun loadComments(meta: Meta, forceRefresh: Boolean = false) {
@@ -1035,7 +1030,7 @@ class MetaDetailsViewModel @Inject constructor(
     private fun loadMoreLikeThisAsync(meta: Meta) {
         moreLikeThisJob?.cancel()
         moreLikeThisJob = viewModelScope.launch {
-            val source = if (shouldLoadTraktMoreLikeThis(meta)) {
+            var source = if (shouldLoadTraktMoreLikeThis(meta)) {
                 MoreLikeThisSource.TRAKT
             } else {
                 val settings = tmdbSettingsDataStore.settings.first()
@@ -1046,7 +1041,7 @@ class MetaDetailsViewModel @Inject constructor(
                 MoreLikeThisSource.TMDB
             }
 
-            val rawRecommendations = when (source) {
+            var rawRecommendations = when (source) {
                 MoreLikeThisSource.TRAKT -> {
                     runCatching {
                         traktRelatedService.getRelated(
@@ -1066,12 +1061,7 @@ class MetaDetailsViewModel @Inject constructor(
                     val tmdbLookupType = tmdbContentType.toApiString()
                     val tmdbId = tmdbService.ensureTmdbId(meta.id, tmdbLookupType)
                         ?: tmdbService.ensureTmdbId(itemId, itemType)
-                    if (tmdbId.isNullOrBlank()) {
-                        _uiState.update { it.copy(moreLikeThis = emptyList(), moreLikeThisSource = null) }
-                        return@launch
-                    }
-
-                    runCatching {
+                    if (tmdbId.isNullOrBlank()) emptyList() else runCatching {
                         tmdbMetadataService.fetchMoreLikeThis(
                             tmdbId = tmdbId,
                             contentType = tmdbContentType,
@@ -1081,6 +1071,20 @@ class MetaDetailsViewModel @Inject constructor(
                         Log.w(TAG, "Failed to load More like this for ${meta.id}: ${it.message}")
                         emptyList()
                     }
+                }
+
+                MoreLikeThisSource.CATALOG -> emptyList()
+            }
+
+            // A commercial build must not embed a private TMDB token. When an
+            // authenticated recommender is unavailable, present a provider
+            // genre rail instead of leaving the detail surface empty. The UI
+            // exposes this as a catalog fallback, never as TMDB/Trakt data.
+            if (rawRecommendations.isEmpty() && source != MoreLikeThisSource.TRAKT) {
+                val catalogRecommendations = loadGenreCatalogFallback(meta)
+                if (catalogRecommendations.isNotEmpty()) {
+                    source = MoreLikeThisSource.CATALOG
+                    rawRecommendations = catalogRecommendations
                 }
             }
 
@@ -1102,6 +1106,47 @@ class MetaDetailsViewModel @Inject constructor(
                 }
             }
         }
+    }
+
+    private suspend fun loadGenreCatalogFallback(meta: Meta): List<com.nuvio.tv.domain.model.MetaPreview> {
+        val genre = meta.genres.firstOrNull { it.isNotBlank() } ?: return emptyList()
+        val targetType = when (meta.type) {
+            ContentType.SERIES, ContentType.TV -> "series"
+            else -> "movie"
+        }
+        val provider = addonRepository.getInstalledAddons().first()
+            .enabledAddons()
+            .asSequence()
+            .flatMap { addon ->
+                addon.catalogs.asSequence()
+                    .filter { catalog ->
+                        catalog.apiType.equals(targetType, ignoreCase = true) &&
+                            catalog.supportsExtra("genre")
+                    }
+                    .map { catalog -> addon to catalog }
+            }
+            // Cinemeta is the stable built-in catalog and has the same genre
+            // vocabulary used by the home fallback rails.
+            .sortedBy { (addon, _) -> if (addon.id.contains("cinemeta", ignoreCase = true)) 0 else 1 }
+            .firstOrNull()
+            ?: return emptyList()
+
+        val (addon, catalog) = provider
+        val result = catalogRepository.getCatalog(
+            addonBaseUrl = addon.baseUrl,
+            addonId = addon.id,
+            addonName = addon.displayName,
+            catalogId = catalog.id,
+            catalogName = genre,
+            type = catalog.apiType,
+            extraArgs = mapOf("genre" to genre),
+            supportsSkip = false
+        ).first { it !is NetworkResult.Loading }
+
+        return (result as? NetworkResult.Success)?.data?.items
+            ?.filterNot { item -> item.id == meta.id || item.imdbId == meta.imdbId }
+            ?.take(20)
+            .orEmpty()
     }
 
     private fun shouldLoadMoreLikeThis(settings: TmdbSettings): Boolean {

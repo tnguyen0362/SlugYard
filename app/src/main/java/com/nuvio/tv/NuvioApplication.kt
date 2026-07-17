@@ -103,7 +103,11 @@ class NuvioApplication : Application(), SingletonImageLoader.Factory {
             }
             .memoryCache {
                 MemoryCache.Builder()
-                    .maxSizePercent(context, 0.33)
+                    // TV boxes often have only a small heap available beside
+                    // MediaCodec. A 33% image cache can starve the decoder
+                    // during a hero + rail burst; keep artwork responsive
+                    // without competing with video playback.
+                    .maxSizePercent(context, 0.20)
                     .build()
             }
             .diskCache {
@@ -116,7 +120,9 @@ class NuvioApplication : Application(), SingletonImageLoader.Factory {
             .precision(coil3.size.Precision.INEXACT)
             .allowHardware(true)
             .allowRgb565(true)
-            .bitmapFactoryMaxParallelism(2)
+            // Three bounded decodes let the first visible rail populate faster
+            // without flooding low-RAM Android TV devices.
+            .bitmapFactoryMaxParallelism(3)
             .build()
     }
 }

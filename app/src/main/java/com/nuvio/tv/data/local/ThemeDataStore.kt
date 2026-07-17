@@ -33,11 +33,11 @@ class ThemeDataStore @Inject constructor(
 
     val selectedTheme: Flow<AppTheme> = profileManager.activeProfileId.flatMapLatest { pid ->
         factory.get(pid, FEATURE).data.map { prefs ->
-            val themeName = prefs[themeKey] ?: AppTheme.WHITE.name
+            val themeName = prefs[themeKey] ?: AppTheme.SLUGYARD.name
             try {
                 AppTheme.valueOf(themeName)
             } catch (e: IllegalArgumentException) {
-                AppTheme.WHITE
+                AppTheme.SLUGYARD
             }
         }
     }
@@ -66,13 +66,11 @@ class ThemeDataStore @Inject constructor(
     }
 
     val settingsUiStyle: Flow<SettingsUiStyle> = profileManager.activeProfileId.flatMapLatest { pid ->
-        factory.get(pid, FEATURE).data.map { prefs ->
-            val styleName = prefs[settingsUiStyleKey] ?: SettingsUiStyle.CLASSIC.name
-            try {
-                SettingsUiStyle.valueOf(styleName)
-            } catch (e: IllegalArgumentException) {
-                SettingsUiStyle.CLASSIC
-            }
+        factory.get(pid, FEATURE).data.map {
+            // Consumer mode has one intentional settings language.  Keeping this
+            // independent of an older profile preference prevents legacy UI
+            // styles from leaking back into the simplified experience.
+            SettingsUiStyle.ZEN
         }
     }
 

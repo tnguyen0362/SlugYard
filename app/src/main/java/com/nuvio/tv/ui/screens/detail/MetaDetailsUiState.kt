@@ -13,7 +13,13 @@ import com.nuvio.tv.domain.model.MDBListRatings
 
 enum class MoreLikeThisSource {
     TMDB,
-    TRAKT
+    TRAKT,
+    /**
+     * A clearly labelled fallback used when TMDB/Trakt recommendations are
+     * unavailable. It keeps the detail page useful without representing a
+     * genre catalog as a personalised recommendation service.
+     */
+    CATALOG
 }
 
 enum class CommentsMode {

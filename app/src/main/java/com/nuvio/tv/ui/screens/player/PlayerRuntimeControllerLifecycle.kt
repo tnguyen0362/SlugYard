@@ -19,6 +19,27 @@ internal fun PlayerRuntimeController.releasePlayer(flushPlaybackState: Boolean) 
     notifyAudioSessionUpdate(false)
     unregisterAudioDelayRouteCallback()
 
+    firstFrameWatchdogJob?.cancel()
+    firstFrameWatchdogJob = null
+    stallWatchdogJob?.cancel()
+    stallWatchdogJob = null
+    pauseOverlayJob?.cancel()
+    pauseOverlayJob = null
+    seekBufferingUiJob?.cancel()
+    seekBufferingUiJob = null
+    hideSeekOverlayJob?.cancel()
+    hideSeekOverlayJob = null
+    hideAspectRatioIndicatorJob?.cancel()
+    hideAspectRatioIndicatorJob = null
+    bufferLogJob?.cancel()
+    bufferLogJob = null
+
+    try {
+        loudnessEnhancer?.release()
+    } catch (_: Exception) {
+    }
+    loudnessEnhancer = null
+
     try {
         currentMediaSession?.release()
         currentMediaSession = null

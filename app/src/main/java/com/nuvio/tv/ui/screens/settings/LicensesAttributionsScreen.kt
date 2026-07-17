@@ -65,7 +65,7 @@ import com.nuvio.tv.core.cloud.PremiumizeCloudLibraryPosterUrl
 import com.nuvio.tv.core.cloud.TorboxCloudLibraryPosterUrl
 import com.nuvio.tv.core.cloud.cloudLibraryDisplayArtworkUrl
 
-private const val NuvioRepositoryUrl = "https://github.com/NuvioMedia/NuvioTV"
+private const val PlayFlixRepositoryUrl = "https://github.com/tnguyen0362/PlayFlix"
 private const val TmdbUrl = "https://www.themoviedb.org"
 private const val TraktUrl = "https://trakt.tv"
 private const val PremiumizeUrl = "https://www.premiumize.me"
@@ -353,7 +353,7 @@ private fun rememberUrlSvgPainter(url: String): Painter {
 private fun appLicenseItem() = LicenseAttributionItem(
     title = stringResource(R.string.licenses_attributions_nuvio_title),
     body = stringResource(R.string.licenses_attributions_nuvio_body),
-    url = NuvioRepositoryUrl
+    url = PlayFlixRepositoryUrl
 )
 
 @Composable

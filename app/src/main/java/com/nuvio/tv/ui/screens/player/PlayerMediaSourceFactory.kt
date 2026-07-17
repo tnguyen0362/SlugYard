@@ -19,22 +19,13 @@ import androidx.media3.extractor.DefaultExtractorsFactory
 import androidx.media3.extractor.ExtractorsFactory
 import androidx.media3.extractor.text.SubtitleParser
 import com.nuvio.tv.NuvioApplication
-import com.nuvio.tv.core.network.IPv4FirstDns
 import com.nuvio.tv.data.local.PlayerSettings
 import com.nuvio.tv.data.local.VodCacheSizeMode
-import okhttp3.ConnectionPool
-import okhttp3.Dispatcher
 import okhttp3.OkHttpClient
 import java.net.SocketTimeoutException
 import java.net.URLDecoder
-import java.security.SecureRandom
-import java.security.cert.X509Certificate
 import java.util.Locale
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
-import javax.net.ssl.SSLContext
-import javax.net.ssl.TrustManager
-import javax.net.ssl.X509TrustManager
 
 internal class PlayerMediaSourceFactory(private val context: Context) {
     private var customExtractorsFactory: ExtractorsFactory? = null
@@ -60,31 +51,10 @@ internal class PlayerMediaSourceFactory(private val context: Context) {
 
     // OkHttp client used only by the opt-in parallel-connections path.
     private val playbackHttpClient by lazy {
-        val trustAllManager = object : X509TrustManager {
-            override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) = Unit
-            override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) = Unit
-            override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
-        }
-        val sslContext = SSLContext.getInstance("TLS").apply {
-            init(null, arrayOf<TrustManager>(trustAllManager), SecureRandom())
-        }
-        val dispatcher = Dispatcher().apply {
-            maxRequests = 64
-            maxRequestsPerHost = 32
-        }
-        val builder = OkHttpClient.Builder()
+        PlayerPlaybackNetworking.playbackHttpClient.newBuilder()
             .cookieJar(NuvioApplication.extensionCookieJar)
-            .dns(IPv4FirstDns())
-            .dispatcher(dispatcher)
-            .sslSocketFactory(sslContext.socketFactory, trustAllManager)
-            .hostnameVerifier { _, _ -> true }
-            .connectTimeout(10, TimeUnit.SECONDS)
-            .readTimeout(20, TimeUnit.SECONDS)
-            .writeTimeout(45, TimeUnit.SECONDS)
-            .retryOnConnectionFailure(true)
-            .followRedirects(true)
-            .followSslRedirects(true)
-        NuvioExoPlayerPerformanceHelper.applyNetworkOptimizations(builder).build()
+            .let { NuvioExoPlayerPerformanceHelper.applyNetworkOptimizations(it) }
+            .build()
     }
 
     fun configureSubtitleParsing(
@@ -182,7 +152,7 @@ internal class PlayerMediaSourceFactory(private val context: Context) {
                 setSubtitleParserFactory(parserFactory)
             }
         }
-        val forceDefaultFactory = customExtractorsFactory != null || customSubtitleParserFactory != null
+        val forceDefaultFactory = customExtractorsFactory != null
 
         // Sidecar subtitles are more reliable through DefaultMediaSourceFactory.
         if (subtitleConfigurations.isNotEmpty()) {
@@ -196,9 +166,11 @@ internal class PlayerMediaSourceFactory(private val context: Context) {
             isHls && !forceDefaultFactory -> HlsMediaSource.Factory(httpDataSourceFactory)
                 .setAllowChunklessPreparation(true)
                 .setLoadErrorHandlingPolicy(loadErrorHandlingPolicy)
+                .applySubtitleParserFactory(customSubtitleParserFactory)
                 .createMediaSource(mediaItem)
             isDash && !forceDefaultFactory -> DashMediaSource.Factory(httpDataSourceFactory)
                 .setLoadErrorHandlingPolicy(loadErrorHandlingPolicy)
+                .applySubtitleParserFactory(customSubtitleParserFactory)
                 .createMediaSource(mediaItem)
             else -> defaultFactory.createMediaSource(mediaItem)
         }
@@ -206,6 +178,18 @@ internal class PlayerMediaSourceFactory(private val context: Context) {
     }
 
     fun shutdown() = Unit
+
+    private fun HlsMediaSource.Factory.applySubtitleParserFactory(
+        subtitleParserFactory: SubtitleParser.Factory?
+    ): HlsMediaSource.Factory = apply {
+        subtitleParserFactory?.let(::setSubtitleParserFactory)
+    }
+
+    private fun DashMediaSource.Factory.applySubtitleParserFactory(
+        subtitleParserFactory: SubtitleParser.Factory?
+    ): DashMediaSource.Factory = apply {
+        subtitleParserFactory?.let(::setSubtitleParserFactory)
+    }
 
     private fun buildVodCacheDataSourceFactory(upstreamFactory: DataSource.Factory, cache: SimpleCache): DataSource.Factory {
         val dataSinkFactory = CacheDataSink.Factory().setCache(cache).setFragmentSize(2L * 1024L * 1024L)

@@ -28,6 +28,7 @@ import com.nuvio.tv.core.server.TmdbSourceMetadataRequest
 import com.nuvio.tv.core.server.TmdbSourceSearchRequest
 import com.nuvio.tv.core.server.TmdbSourceSearchResultInfo
 import com.nuvio.tv.core.server.TraktSourceMetadataInfo
+import com.nuvio.tv.ui.util.loadAppLogoPngBytes
 import com.nuvio.tv.core.server.TraktSourceMetadataRequest
 import com.nuvio.tv.core.server.TraktSourceSearchRequest
 import com.nuvio.tv.core.server.TraktSourceSearchResultInfo
@@ -112,10 +113,7 @@ class AddonManagerViewModel @Inject constructor(
     }
 
     private fun loadLogoBytes() {
-        try {
-            val inputStream = context.resources.openRawResource(R.drawable.app_logo_wordmark)
-            logoBytes = inputStream.use { it.readBytes() }
-        } catch (_: Exception) { }
+        logoBytes = context.loadAppLogoPngBytes()
     }
 
     fun onInstallUrlChange(url: String) {

@@ -96,14 +96,10 @@ class LayoutPreferenceDataStore @Inject constructor(
     private fun positiveOrDefault(value: Int?, defaultValue: Int): Int =
         value?.takeIf { it > 0 } ?: defaultValue
 
-    val selectedLayout: Flow<HomeLayout> = profileFlow { prefs ->
-        val layoutName = prefs[layoutKey] ?: HomeLayout.MODERN.name
-        try {
-            HomeLayout.valueOf(layoutName)
-        } catch (e: IllegalArgumentException) {
-            HomeLayout.MODERN
-        }
-    }
+    // The consumer surface has one deliberate browse experience.  Ignoring
+    // legacy Classic/Grid selections prevents old Nuvio layouts from returning
+    // on devices that already have profile preferences saved.
+    val selectedLayout: Flow<HomeLayout> = profileFlow { HomeLayout.MODERN }
 
     val hasChosenLayout: Flow<Boolean> = profileFlow { prefs ->
         prefs[hasChosenKey] ?: false
@@ -155,7 +151,7 @@ class LayoutPreferenceDataStore @Inject constructor(
 
     val sidebarCollapsedByDefault: Flow<Boolean> = profileFlow { prefs ->
         val modernSidebarEnabled =
-            prefs[modernSidebarEnabledKey] ?: prefs[legacyModernSidebarEnabledKey] ?: false
+            prefs[modernSidebarEnabledKey] ?: prefs[legacyModernSidebarEnabledKey] ?: true
         if (modernSidebarEnabled) {
             false
         } else {
@@ -164,7 +160,7 @@ class LayoutPreferenceDataStore @Inject constructor(
     }
 
     val modernSidebarEnabled: Flow<Boolean> = profileFlow { prefs ->
-        prefs[modernSidebarEnabledKey] ?: prefs[legacyModernSidebarEnabledKey] ?: false
+        prefs[modernSidebarEnabledKey] ?: prefs[legacyModernSidebarEnabledKey] ?: true
     }
 
     val modernSidebarBlurEnabled: Flow<Boolean> = profileFlow { prefs ->
@@ -172,11 +168,11 @@ class LayoutPreferenceDataStore @Inject constructor(
     }
 
     val modernLandscapePostersEnabled: Flow<Boolean> = profileFlow { prefs ->
-        prefs[modernLandscapePostersEnabledKey] ?: false
+        prefs[modernLandscapePostersEnabledKey] ?: true
     }
 
     val modernHeroFullScreenBackdropEnabled: Flow<Boolean> = profileFlow { prefs ->
-        prefs[modernHeroFullScreenBackdropKey] ?: false
+        prefs[modernHeroFullScreenBackdropKey] ?: true
     }
 
     val heroSectionEnabled: Flow<Boolean> = profileFlow { prefs ->
@@ -204,11 +200,11 @@ class LayoutPreferenceDataStore @Inject constructor(
     }
 
     val catalogAddonNameEnabled: Flow<Boolean> = profileFlow { prefs ->
-        prefs[catalogAddonNameEnabledKey] ?: true
+        prefs[catalogAddonNameEnabledKey] ?: false
     }
 
     val catalogTypeSuffixEnabled: Flow<Boolean> = profileFlow { prefs ->
-        prefs[catalogTypeSuffixEnabledKey] ?: true
+        prefs[catalogTypeSuffixEnabledKey] ?: false
     }
 
     val classicFocusGradientEnabled: Flow<Boolean> = profileFlow { prefs ->

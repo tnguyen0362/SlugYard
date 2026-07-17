@@ -5,6 +5,7 @@ import android.util.Log
 import com.nuvio.tv.R
 import com.nuvio.tv.core.network.NetworkResult
 import com.nuvio.tv.core.network.safeApiCall
+import com.nuvio.tv.core.logging.urlForLog
 import com.nuvio.tv.core.debrid.DebridStreamPresentation
 import com.nuvio.tv.core.debrid.LocalDebridAvailabilityService
 import com.nuvio.tv.core.plugin.PluginManager
@@ -72,10 +73,10 @@ class StreamRepositoryImpl @Inject constructor(
                 addon.supportsStreamResource(type, videoId)
             }
 
-            // Convert IMDB ID to TMDB ID if needed for plugins
-            val tmdbId = tmdbService.ensureTmdbId(videoId, type)
-            Log.d(TAG, "Video ID: $videoId -> TMDB ID: $tmdbId (type: $type)")
-            val pluginRequest = buildPluginRequest(tmdbId, type, videoId)
+            // Addon stream requests do not require TMDB.  Starting them only
+            // after a remote ID conversion held every source behind an unrelated
+            // network request, including the normal no-plugin configuration.
+            val pluginsEnabled = pluginManager.pluginsEnabled.first()
             val attemptedAddonNames = streamAddons.map { it.displayName }
             val attemptedFailures = java.util.Collections.synchronizedList(
                 mutableListOf<StreamAttemptFailure>()
@@ -89,15 +90,19 @@ class StreamRepositoryImpl @Inject constructor(
                 val resultChannel = Channel<AddonStreams>(Channel.UNLIMITED)
                 
                 // Track number of pending jobs
-                val totalJobs = streamAddons.size +
-                    (if (pluginRequest != null) 1 else 0)
+                val totalJobs = streamAddons.size + (if (pluginsEnabled) 1 else 0)
                 val completedJobs = java.util.concurrent.atomic.AtomicInteger(0)
 
                 // Launch addon jobs
                 streamAddons.forEach { addon ->
                     launch {
                         try {
-                            val streamsResult = getStreamsFromAddon(addon.baseUrl, type, videoId)
+                            val streamsResult = getStreamsFromAddon(
+                                baseUrl = addon.baseUrl,
+                                type = type,
+                                videoId = videoId,
+                                installedAddon = addon
+                            )
                             when (streamsResult) {
                                 is NetworkResult.Success -> {
                                     if (streamsResult.data.isNotEmpty()) {
@@ -151,10 +156,26 @@ class StreamRepositoryImpl @Inject constructor(
                     }
                 }
 
-                // Launch plugin jobs if we have a supported plugin id - each scraper sends its own result
-                if (pluginRequest != null) {
+                // Resolve TMDB only inside the optional plugin branch. It runs
+                // alongside addon requests rather than stalling first results.
+                if (pluginsEnabled) {
                     launch {
                         try {
+                            val pluginRequest = buildPluginRequest(null, type, videoId)
+                                ?: tmdbService.ensureTmdbId(videoId, type)
+                                    ?.let { tmdbId -> buildPluginRequest(tmdbId, type, videoId) }
+                            if (pluginRequest == null) {
+                                // This is a normal outcome for sources that need
+                                // TMDB enrichment when no usable TMDB id/key is
+                                // available. It must still complete this logical
+                                // job; otherwise resultChannel stays open forever
+                                // and the final batched debrid cache pass never
+                                // runs, leaving every stream stuck at CHECKING.
+                                if (completedJobs.incrementAndGet() >= totalJobs) {
+                                    resultChannel.close()
+                                }
+                                return@launch
+                            }
                             // Stream plugins individually
                             streamLocalPlugins(
                                 pluginId = pluginRequest.id,
@@ -186,11 +207,28 @@ class StreamRepositoryImpl @Inject constructor(
                 // Emit results as they arrive
                 for (result in resultChannel) {
                     val checkingResult = localDebridAvailabilityService.markChecking(listOf(result)).firstOrNull() ?: result
-                    val checkedResult = localDebridAvailabilityService.annotateCachedAvailability(listOf(checkingResult)).firstOrNull() ?: checkingResult
-                    mergePresentedResult(accumulatedResults, checkedResult)
+                    // Never let one provider's cache API call block streams
+                    // already returned by every later addon. Show CHECKING
+                    // immediately, then perform one batched availability pass
+                    // after discovery has finished.
+                    mergePresentedResult(accumulatedResults, checkingResult)
                     emit(NetworkResult.Success(accumulatedResults.toList()))
-                    Log.d(TAG, "Emitted ${accumulatedResults.size} addon(s), latest: ${checkedResult.addonName} with ${checkedResult.streams.size} streams")
+                    Log.d(TAG, "Emitted ${accumulatedResults.size} addon(s), latest: ${checkingResult.addonName} with ${checkingResult.streams.size} streams")
                 }
+            }
+
+            // Availability supports a hash batch. Running it once after source
+            // discovery prevents an N+1 debrid round-trip from serializing the
+            // first-results path, while the final emission upgrades the badges
+            // and enables cached-torrent auto-selection.
+            if (accumulatedResults.isNotEmpty()) {
+                val checkedGroups = localDebridAvailabilityService
+                    .annotateCachedAvailability(accumulatedResults)
+                accumulatedResults.clear()
+                checkedGroups.forEach { checked ->
+                    mergePresentedResult(accumulatedResults, checked)
+                }
+                emit(NetworkResult.Success(accumulatedResults.toList()))
             }
 
             // Emit final result (even if empty)
@@ -431,6 +469,18 @@ class StreamRepositoryImpl @Inject constructor(
         baseUrl: String,
         type: String,
         videoId: String
+    ): NetworkResult<List<Stream>> = getStreamsFromAddon(
+        baseUrl = baseUrl,
+        type = type,
+        videoId = videoId,
+        installedAddon = null
+    )
+
+    private suspend fun getStreamsFromAddon(
+        baseUrl: String,
+        type: String,
+        videoId: String,
+        installedAddon: Addon?
     ): NetworkResult<List<Stream>> {
         val cleanBaseUrl = baseUrl.trimEnd('/')
         val queryStart = cleanBaseUrl.indexOf('?')
@@ -439,15 +489,16 @@ class StreamRepositoryImpl @Inject constructor(
         val encodedType = encodePathSegment(type)
         val encodedVideoId = encodePathSegment(videoId)
         val streamUrl = "$basePath/stream/$encodedType/$encodedVideoId.json$baseQuery"
-        Log.d(TAG, "Fetching streams type=$type videoId=$videoId url=$streamUrl")
+        Log.d(TAG, "Fetching streams type=$type videoId=$videoId url=${streamUrl.urlForLog()}")
 
-        // First, get addon info for name and logo
-        val addonResult = addonRepository.fetchAddon(baseUrl)
-        val addonName = when (addonResult) {
+        // Installed addons already contain their manifest name/logo. Refetching
+        // that manifest made every source lookup two sequential HTTP calls.
+        val addonResult = if (installedAddon == null) addonRepository.fetchAddon(baseUrl) else null
+        val addonName = installedAddon?.displayName ?: when (addonResult) {
             is NetworkResult.Success -> addonResult.data.displayName
             else -> context.getString(com.nuvio.tv.R.string.stream_addon_unknown)
         }
-        val addonLogo = when (addonResult) {
+        val addonLogo = installedAddon?.logo ?: when (addonResult) {
             is NetworkResult.Success -> addonResult.data.logo
             else -> null
         }
@@ -457,13 +508,13 @@ class StreamRepositoryImpl @Inject constructor(
                 val streams = result.data.streams?.map { 
                     it.toDomain(addonName, addonLogo) 
                 } ?: emptyList()
-                Log.d(TAG, "Streams success addon=$addonName count=${streams.size} url=$streamUrl")
+                Log.d(TAG, "Streams success addon=$addonName count=${streams.size} url=${streamUrl.urlForLog()}")
                 NetworkResult.Success(streams)
             }
             is NetworkResult.Error -> {
                 Log.w(
                     TAG,
-                    "Streams failed addon=$addonName code=${result.code} message=${result.message} url=$streamUrl"
+                    "Streams failed addon=$addonName code=${result.code} message=${result.message} url=${streamUrl.urlForLog()}"
                 )
                 result
             }
@@ -531,7 +582,7 @@ class StreamRepositoryImpl @Inject constructor(
         val encodedType = encodePathSegment(type)
         val encodedMetaId = encodePathSegment(metaId)
         val metaUrl = "$basePath/meta/$encodedType/$encodedMetaId.json$baseQuery"
-        Log.d(TAG, "Fetching inline streams via meta type=$type metaId=$metaId videoId=$videoId url=$metaUrl")
+        Log.d(TAG, "Fetching inline streams via meta type=$type metaId=$metaId videoId=$videoId url=${metaUrl.urlForLog()}")
         return try {
             when (val result = safeApiCall(context) { api.getMeta(metaUrl) }) {
                 is NetworkResult.Success -> {

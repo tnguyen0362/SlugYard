@@ -1,5 +1,7 @@
 package com.nuvio.tv.ui.screens.collection
 
+import android.os.Build
+import android.provider.MediaStore
 import com.nuvio.tv.ui.theme.NuvioTheme
 
 import androidx.compose.foundation.BorderStroke
@@ -198,16 +200,16 @@ fun CollectionManagementScreen(
                                 withContext(Dispatchers.IO) {
                                     val resolver = context.contentResolver
                                     // Delete existing file first
-                                    val existingUri = android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI
+                                    val existingUri = collectionDownloadsUri()
                                     resolver.delete(
                                         existingUri,
-                                        "${android.provider.MediaStore.Downloads.DISPLAY_NAME} = ?",
-                                        arrayOf("nuvio-collections.json")
+                                        "${MediaStore.MediaColumns.DISPLAY_NAME} = ?",
+                                        arrayOf("slugyard-collections.json")
                                     )
                                     // Write new file
                                     val values = android.content.ContentValues().apply {
-                                        put(android.provider.MediaStore.Downloads.DISPLAY_NAME, "nuvio-collections.json")
-                                        put(android.provider.MediaStore.Downloads.MIME_TYPE, "application/json")
+                                        put(MediaStore.MediaColumns.DISPLAY_NAME, "slugyard-collections.json")
+                                        put(MediaStore.MediaColumns.MIME_TYPE, "application/json")
                                     }
                                     val uri = resolver.insert(existingUri, values)
                                     uri?.let { resolver.openOutputStream(it)?.use { os -> os.write(json.toByteArray()) } }
@@ -313,6 +315,12 @@ fun CollectionManagementScreen(
         }
     }
     }
+}
+
+private fun collectionDownloadsUri() = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+    MediaStore.Downloads.EXTERNAL_CONTENT_URI
+} else {
+    MediaStore.Files.getContentUri("external")
 }
 
 @OptIn(ExperimentalTvMaterial3Api::class)

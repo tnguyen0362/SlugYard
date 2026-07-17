@@ -10,12 +10,18 @@ import kotlinx.coroutines.launch
 
 internal fun PlayerRuntimeController.maybeAutoSwitchInternalPlayerOnStartupError(
     detailedError: String,
-    allowEngineFailover: Boolean
+    allowEngineFailover: Boolean,
+    allowAfterFirstFrame: Boolean = false
 ): Boolean {
     if (!allowEngineFailover) return false
     if (!autoSwitchInternalPlayerOnErrorEnabled) return false
     if (startupEngineFailoverTriggered) return false
-    if (!isStartupPhaseForEngineFailover()) return false
+    // A reclaimed MediaCodec is not a normal post-start playback failure: Android
+    // has revoked the hardware decoder and recreating the same Exo instance once
+    // may still leave the stream without a usable decoder.  Allow one engine
+    // hand-off after that retry, while keeping ordinary post-start errors on the
+    // current engine so a transient network error cannot unexpectedly switch it.
+    if (!allowAfterFirstFrame && !isStartupPhaseForEngineFailover()) return false
 
     val targetEngine = when (currentInternalPlayerEngine) {
         InternalPlayerEngine.EXOPLAYER -> InternalPlayerEngine.MVP_PLAYER
@@ -30,6 +36,12 @@ internal fun PlayerRuntimeController.maybeAutoSwitchInternalPlayerOnStartupError
     rememberCurrentTrackPreferenceForEngineSwitch()
     Log.w(PlayerRuntimeController.TAG, "Startup playback error; auto-switching engine: $detailedError")
     startupEngineFailoverTriggered = true
+
+    val currentPosition = currentPlaybackPositionMs()?.coerceAtLeast(0L) ?: 0L
+    if (currentPosition > 0L) {
+        pendingResumeProgress = null
+        _uiState.update { it.copy(pendingSeekPosition = currentPosition) }
+    }
 
     val targetEngineLabel = targetEngineLabel(targetEngine)
     val switchMessage = context.getString(R.string.player_engine_switching_message, targetEngineLabel)

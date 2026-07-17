@@ -1,6 +1,8 @@
 package com.nuvio.tv.ui.screens.collection
 
 import android.content.Context
+import android.os.Build
+import android.provider.MediaStore
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.nuvio.tv.R
@@ -264,17 +266,19 @@ class CollectionManagementViewModel @Inject constructor(
             try {
                 val content = withContext(Dispatchers.IO) {
                     val resolver = context.contentResolver
-                    val uri = android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI
-                    val projection = arrayOf(android.provider.MediaStore.Downloads._ID)
-                    val selection = "${android.provider.MediaStore.Downloads.DISPLAY_NAME} = ?"
-                    val selectionArgs = arrayOf("nuvio-collections.json")
-                    resolver.query(uri, projection, selection, selectionArgs, null)?.use { cursor ->
-                        if (cursor.moveToFirst()) {
-                            val id = cursor.getLong(cursor.getColumnIndexOrThrow(android.provider.MediaStore.Downloads._ID))
-                            val fileUri = android.content.ContentUris.withAppendedId(uri, id)
-                            resolver.openInputStream(fileUri)?.bufferedReader()?.readText()
-                        } else null
-                    }
+                    val uri = collectionDownloadsUri()
+                    val projection = arrayOf(MediaStore.MediaColumns._ID)
+                    val selection = "${MediaStore.MediaColumns.DISPLAY_NAME} = ?"
+                    listOf("slugyard-collections.json", "nuvio-collections.json")
+                        .firstNotNullOfOrNull { fileName ->
+                            resolver.query(uri, projection, selection, arrayOf(fileName), null)?.use { cursor ->
+                                if (!cursor.moveToFirst()) return@use null
+                                val id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID))
+                                resolver.openInputStream(android.content.ContentUris.withAppendedId(uri, id))
+                                    ?.bufferedReader()
+                                    ?.readText()
+                            }
+                        }
                 }
                 if (content == null) {
                     _uiState.update {
@@ -304,4 +308,10 @@ class CollectionManagementViewModel @Inject constructor(
     fun getExportJson(): String {
         return collectionsDataStore.exportToJson(_uiState.value.collections)
     }
+}
+
+private fun collectionDownloadsUri() = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+    MediaStore.Downloads.EXTERNAL_CONTENT_URI
+} else {
+    MediaStore.Files.getContentUri("external")
 }

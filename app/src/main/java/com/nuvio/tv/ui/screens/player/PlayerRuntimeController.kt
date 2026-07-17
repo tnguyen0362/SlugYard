@@ -69,6 +69,7 @@ class PlayerRuntimeController(
     internal val addonRepository: AddonRepository,
     internal val pluginManager: PluginManager,
     internal val subtitleRepository: com.nuvio.tv.domain.repository.SubtitleRepository,
+    internal val openSubtitlesRepository: com.nuvio.tv.data.repository.OpenSubtitlesRepository,
     internal val parentalGuideRepository: ParentalGuideRepository,
     internal val traktScrobbleService: TraktScrobbleService,
     internal val traktEpisodeMappingService: TraktEpisodeMappingService,
@@ -182,6 +183,7 @@ class PlayerRuntimeController(
             .takeIf { it.isNotBlank() && it.contains('.') }
     internal var currentAddonName: String? = navigationArgs.addonName
     internal var currentAddonLogo: String? = navigationArgs.addonLogo
+    internal val contentGenres: String? = navigationArgs.contentGenres
     internal var currentStreamDescription: String? = navigationArgs.streamDescription
     internal var contentLanguage: String? = navigationArgs.contentLanguage
     internal var currentVideoCodec: String? = null
@@ -435,6 +437,8 @@ class PlayerRuntimeController(
     internal var mpvInitializationInProgress: Boolean = false
     internal var mpvTrackRefreshJob: Job? = null
     internal var mpvTrackRefreshInProgress: Boolean = false
+    /** MPV exposes tracks asynchronously; poll briefly during startup, never for the whole film. */
+    internal var mpvTrackDiscoveryDeadlineElapsedMs: Long = 0L
     internal var pendingMpvHardRestartOnNextAttach: Boolean = false
     internal var delayMpvResumeSeekUntilVideoTrack: Boolean = false
     internal var mpvDelayStartAfterAfrSwitch: Boolean = false
@@ -446,7 +450,7 @@ class PlayerRuntimeController(
     internal var pendingPreviewSeekPosition: Long? = null
     internal var pendingResumeProgress: WatchProgress? = null
     internal var hasRetriedCurrentStreamAfter416: Boolean = false
-    internal var isReleasingPlayer: Boolean = false
+    @Volatile internal var isReleasingPlayer: Boolean = false
     internal var cachedDecoderPriority: Int = 1
     internal var hasTriedAudioPcmFallback: Boolean = false
     internal var pendingAudioPcmFallbackRebuild: Boolean = false
@@ -455,6 +459,11 @@ class PlayerRuntimeController(
     internal var startupRetryCount: Int = 0
     internal var hasRetriedCurrentStreamAfterUnexpectedNpe: Boolean = false
     internal var hasRetriedCurrentStreamAfterMediaPeriodHolderCrash: Boolean = false
+    /** Prevent a decoder-reclaim retry loop while allowing a different stream to recover. */
+    internal var decoderResourcesReclaimedRecoveryUrl: String? = null
+    /** Invalidates deferred recovery work when the user changes stream or engine. */
+    internal var playbackRecoveryGeneration: Long = 0L
+    internal var deferredPlayerRecoveryJob: Job? = null
     internal var timeoutRecoveryAttempts: Int = 0
     internal var errorRetryCount: Int = 0
     internal var consecutiveAutoPlayCount: Int = 0

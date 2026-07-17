@@ -349,8 +349,9 @@ class TrackSelectionInvestigationTest {
                 
                 try {
                     // Check format support using ExoPlayer's capability check logic
-                    val isSupported = codecInfo.isFormatSupported(format)
-                    val isFunctionallySupported = codecInfo.isFormatFunctionallySupported(format)
+                    val testContext = mockk<Context>(relaxed = true)
+                    val isSupported = codecInfo.isFormatSupported(testContext, format)
+                    val isFunctionallySupported = codecInfo.isFormatFunctionallySupported(testContext, format)
                     
                     println("Format ${format.id} (Size: ${format.width}x${format.height}):")
                     println("  - isFormatSupported (checkPerformanceCapabilities = true): $isSupported")

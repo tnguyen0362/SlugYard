@@ -103,12 +103,8 @@ fun AccountSettingsContent(
                 item(key = "account_sign_in_qr") {
                     SettingsActionButton(
                         icon = Icons.Default.VpnKey,
-                        title = stringResource(
-                            if (BuildConfig.SELF_HOSTED) R.string.account_signin_email_title else R.string.account_signin_qr_title
-                        ),
-                        subtitle = stringResource(
-                            if (BuildConfig.SELF_HOSTED) R.string.account_signin_email_subtitle else R.string.account_signin_qr_subtitle
-                        ),
+                        title = "Sign in with email",
+                        subtitle = "Sync your SlugYard profile across devices",
                         onClick = onNavigateToAuthQrSignIn,
                         modifier = if (initialFocusRequester != null) {
                             Modifier.focusRequester(initialFocusRequester)

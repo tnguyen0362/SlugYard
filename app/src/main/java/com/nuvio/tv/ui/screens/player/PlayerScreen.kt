@@ -59,7 +59,8 @@ import androidx.compose.material.icons.filled.ClosedCaption
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.Replay10
+import androidx.compose.material.icons.filled.Forward10
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.runtime.Composable
@@ -151,9 +152,7 @@ fun PlayerScreen(
     val streamsFocusRequester = remember { FocusRequester() }
     val sourceStreamsFocusRequester = remember { FocusRequester() }
     val skipIntroFocusRequester = remember { FocusRequester() }
-    val streamInfoFocusRequester = remember { FocusRequester() }
     var skipButtonActuallyVisible by remember { mutableStateOf(false) }
-    var restoreStreamInfoFocus by remember { mutableStateOf(false) }
     val nextEpisodeFocusRequester = remember { FocusRequester() }
     var subtitleDelayAutoSyncFocused by remember { mutableStateOf(false) }
     var subtitleTimingConsumeNextConfirmKeyUp by remember { mutableStateOf(false) }
@@ -444,13 +443,6 @@ fun PlayerScreen(
     LaunchedEffect(uiState.showSubtitleTimingDialog) {
         if (!uiState.showSubtitleTimingDialog) {
             subtitleTimingConsumeNextConfirmKeyUp = false
-        }
-    }
-    LaunchedEffect(uiState.showStreamInfoOverlay, uiState.showControls, uiState.showMoreDialog) {
-        if (!uiState.showStreamInfoOverlay && uiState.showControls && uiState.showMoreDialog && restoreStreamInfoFocus) {
-            delay(250)
-            runCatching { streamInfoFocusRequester.requestFocus() }
-            restoreStreamInfoFocus = false
         }
     }
 
@@ -875,7 +867,11 @@ fun PlayerScreen(
         // Parental guide overlay (shows when video first starts playing)
         ParentalGuideOverlay(
             warnings = uiState.parentalWarnings,
-            isVisible = uiState.showParentalGuide,
+            // The guide is a short-lived informational overlay, while the
+            // top-left edge belongs to the persistent Back control whenever
+            // player chrome is visible. Let the overlay's quick-hide branch
+            // clear it instead of letting the two occupy the same region.
+            isVisible = uiState.showParentalGuide && !uiState.showControls,
             onAnimationComplete = {
                 viewModel.onEvent(PlayerEvent.OnParentalGuideHide)
             },
@@ -944,7 +940,6 @@ fun PlayerScreen(
                 viewModel = viewModel,
                 playPauseFocusRequester = playPauseFocusRequester,
                 progressBarFocusRequester = progressBarFocusRequester,
-                streamInfoFocusRequester = streamInfoFocusRequester,
                 reportCodeVisible = reportCodeVisible,
                 progressBarUpFocusRequester = when {
                     skipButtonActuallyVisible -> skipIntroFocusRequester
@@ -952,7 +947,6 @@ fun PlayerScreen(
                     else -> null
                 },
                 onPlayPause = { viewModel.onEvent(PlayerEvent.OnPlayPause) },
-                onPlayNextEpisode = { viewModel.onEvent(PlayerEvent.OnPlayNextEpisode) },
                 onSeekForward = { viewModel.onEvent(PlayerEvent.OnSeekForward) },
                 onSeekBackward = { viewModel.onEvent(PlayerEvent.OnSeekBackward) },
                 onSeekTo = { viewModel.onEvent(PlayerEvent.OnSeekTo(it)) },
@@ -965,7 +959,9 @@ fun PlayerScreen(
                     Log.d("PlayerScreen", "onToggleAspectRatio called - dispatching event")
                     viewModel.onEvent(PlayerEvent.OnToggleAspectRatio)
                 },
-                onSwitchPlayerEngine = { viewModel.onEvent(PlayerEvent.OnSwitchInternalPlayerEngine) },
+                onSwitchPlayerEngine = {
+                    viewModel.onEvent(PlayerEvent.OnSwitchInternalPlayerEngine)
+                },
                 onReportPlaybackIssue = { viewModel.onEvent(PlayerEvent.OnReportPlaybackIssue) },
                 onToggleMoreActions = {
                     if (uiState.showMoreDialog) {
@@ -973,23 +969,6 @@ fun PlayerScreen(
                     } else {
                         viewModel.onEvent(PlayerEvent.OnShowMoreDialog)
                     }
-                },
-                onOpenInExternalPlayer = {
-                    val url = viewModel.getCurrentStreamUrl()
-                    val title = uiState.title
-                    val headers = viewModel.getCurrentHeaders()
-                    val timeline = viewModel.playbackTimeline.value
-                    viewModel.stopAndRelease()
-                    // Launch via tracker - it handles progress saving independently
-                    viewModel.launchInExternalPlayer(context, timeline.currentPosition)
-                    // Exit PlayerScreen - tracker will save progress when external player returns
-                    val completed = timeline.duration > 0L &&
-                        (timeline.currentPosition.toFloat() / timeline.duration.toFloat()) >= WatchProgress.COMPLETED_THRESHOLD
-                    onBackPress(uiState.currentVideoId, uiState.currentSeason, uiState.currentEpisode, uiState.streamAutoPlayMode != StreamAutoPlayMode.MANUAL, completed)
-                },
-                onShowStreamInfo = {
-                    restoreStreamInfoFocus = true
-                    viewModel.onEvent(PlayerEvent.OnShowStreamInfo)
                 },
                 onResetHideTimer = {
                     viewModel.scheduleHideControls()
@@ -1507,8 +1486,11 @@ private fun PlayerView.applySubtitleStyleIfNeeded(subtitleStyle: SubtitleStyleSe
 
         setApplyEmbeddedStyles(false)
 
+        // Leave room for the transport chrome when it is shown.  The old 6% default
+        // placed a normal one-line caption directly on the seek bar, which made
+        // subtitles harder to read and obscured the current position on TV.
         val bottomPaddingFraction =
-            (0.06f + (subtitleStyle.verticalOffset / 250f)).coerceIn(0f, 0.4f)
+            (0.14f + (subtitleStyle.verticalOffset / 250f)).coerceIn(0f, 0.4f)
         setBottomPaddingFraction(bottomPaddingFraction)
 
         post {
@@ -1587,10 +1569,8 @@ private fun PlayerControlsOverlay(
     viewModel: PlayerViewModel,
     playPauseFocusRequester: FocusRequester,
     progressBarFocusRequester: FocusRequester,
-    streamInfoFocusRequester: FocusRequester,
     progressBarUpFocusRequester: FocusRequester? = null,
     onPlayPause: () -> Unit,
-    onPlayNextEpisode: () -> Unit,
     onSeekForward: () -> Unit,
     onSeekBackward: () -> Unit,
     onSeekTo: (Long) -> Unit,
@@ -1603,8 +1583,6 @@ private fun PlayerControlsOverlay(
     onSwitchPlayerEngine: () -> Unit,
     onReportPlaybackIssue: () -> Unit,
     onToggleMoreActions: () -> Unit,
-    onOpenInExternalPlayer: () -> Unit,
-    onShowStreamInfo: () -> Unit,
     onResetHideTimer: () -> Unit,
     onHideControls: () -> Unit,
     onBack: () -> Unit,
@@ -1620,43 +1598,49 @@ private fun PlayerControlsOverlay(
     val customEpisodesPainter = rememberRawSvgPainter(R.raw.ic_player_episodes)
 
     Box(modifier = Modifier.fillMaxSize()) {
-        // Top gradient
+        // Keep the player chrome deliberately sparse: a Netflix-style transport
+        // overlay should read as video controls, never as another app header.
         Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .height(150.dp)
                 .align(Alignment.TopCenter)
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            Color.Black.copy(alpha = 0.7f),
-                            Color.Transparent
-                        )
-                    )
-                )
-        )
-
-        // Bottom gradient
-        Box(
-            modifier = Modifier
                 .fillMaxWidth()
-                .height(200.dp)
-                .align(Alignment.BottomCenter)
                 .background(
                     Brush.verticalGradient(
-                        colors = listOf(
-                            Color.Transparent,
-                            Color.Black.copy(alpha = 0.8f)
-                        )
+                        listOf(Color.Black.copy(alpha = 0.92f), Color.Transparent)
                     )
                 )
-        )
+                .padding(horizontal = 28.dp, vertical = 14.dp)
+        ) {
+            ControlButton(
+                icon = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                contentDescription = stringResource(R.string.cd_back),
+                onClick = onBack,
+                onFocused = onResetHideTimer,
+                modifier = Modifier.align(Alignment.CenterStart)
+            )
+            Text(
+                text = stringResource(R.string.player_now_playing),
+                modifier = Modifier.align(Alignment.Center),
+                style = MaterialTheme.typography.labelMedium.copy(
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.5.sp
+                ),
+                color = Color.White.copy(alpha = 0.72f),
+                maxLines = 1
+            )
+        }
 
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.BottomCenter)
-                .padding(horizontal = NuvioTheme.spacing.xxl, vertical = NuvioTheme.spacing.xl)
+                .background(
+                    Brush.verticalGradient(
+                        listOf(Color.Transparent, Color.Black.copy(alpha = 0.94f))
+                    )
+                )
+                .padding(horizontal = 30.dp, vertical = 16.dp)
         ) {
             val skipIntroVisible = uiState.activeSkipInterval != null
 
@@ -1674,8 +1658,9 @@ private fun PlayerControlsOverlay(
 
                     Text(
                         text = displayName,
-                        style = MaterialTheme.typography.headlineMedium,
+                        style = MaterialTheme.typography.titleMedium,
                         color = Color.White,
+                        fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -1694,7 +1679,7 @@ private fun PlayerControlsOverlay(
                         }
                         Text(
                             text = episodeInfo,
-                            style = MaterialTheme.typography.titleMedium,
+                        style = MaterialTheme.typography.bodyMedium,
                             color = Color.White.copy(alpha = 0.9f),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
@@ -1763,10 +1748,6 @@ private fun PlayerControlsOverlay(
                     val hasEpisodeContext = uiState.currentSeason != null && uiState.currentEpisode != null
                     val hasSubtitleControl = uiState.subtitleTracks.isNotEmpty() || uiState.addonSubtitles.isNotEmpty()
                     val hasAudioControl = uiState.audioTracks.isNotEmpty()
-                    val showNextEpisodeButton = uiState.nextEpisode?.hasAired == true &&
-                        (uiState.postPlayMode as? PostPlayMode.AutoPlay)?.let {
-                            !it.searching && it.countdownSec == null
-                        } != false
 
                     ControlButton(
                         icon = if (uiState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
@@ -1779,16 +1760,23 @@ private fun PlayerControlsOverlay(
                         onFocused = onResetHideTimer
                     )
 
-                    if (showNextEpisodeButton) {
-                        ControlButton(
-                            icon = Icons.Default.SkipNext,
-                            contentDescription = stringResource(R.string.next_episode_label),
-                            onClick = onPlayNextEpisode,
-                            upFocusRequester = progressBarFocusRequester,
-                            onDownKey = onHideControls,
-                            onFocused = onResetHideTimer
-                        )
-                    }
+                    ControlButton(
+                        icon = Icons.Default.Replay10,
+                        contentDescription = "Rewind 10 seconds",
+                        onClick = onSeekBackward,
+                        upFocusRequester = progressBarFocusRequester,
+                        onDownKey = onHideControls,
+                        onFocused = onResetHideTimer
+                    )
+
+                    ControlButton(
+                        icon = Icons.Default.Forward10,
+                        contentDescription = "Forward 10 seconds",
+                        onClick = onSeekForward,
+                        upFocusRequester = progressBarFocusRequester,
+                        onDownKey = onHideControls,
+                        onFocused = onResetHideTimer
+                    )
 
                     if (hasSubtitleControl) {
                         ControlButton(
@@ -1819,15 +1807,6 @@ private fun PlayerControlsOverlay(
                         iconPainter = customSourcePainter,
                         contentDescription = stringResource(R.string.cd_sources),
                         onClick = onShowSourcesPanel,
-                        upFocusRequester = progressBarFocusRequester,
-                        onDownKey = onHideControls,
-                        onFocused = onResetHideTimer
-                    )
-
-                    ControlButton(
-                        icon = Icons.Default.SwapHoriz,
-                        contentDescription = stringResource(R.string.cd_switch_player_engine),
-                        onClick = onSwitchPlayerEngine,
                         upFocusRequester = progressBarFocusRequester,
                         onDownKey = onHideControls,
                         onFocused = onResetHideTimer
@@ -1881,23 +1860,13 @@ private fun PlayerControlsOverlay(
                                 onDownKey = onHideControls,
                                 onFocused = onResetHideTimer
                             )
+                            // Keep a one-action recovery path in the compact OSD.  The
+                            // controller preserves the current position and selected tracks
+                            // while it hands the stream to the alternate engine.
                             ControlButton(
-                                icon = Icons.AutoMirrored.Filled.OpenInNew,
-                                contentDescription = stringResource(R.string.cd_open_external_player),
-                                onClick = {
-                                    onOpenInExternalPlayer()
-                                },
-                                upFocusRequester = progressBarFocusRequester,
-                                onDownKey = onHideControls,
-                                onFocused = onResetHideTimer
-                            )
-                            ControlButton(
-                                icon = Icons.Default.Info,
-                                contentDescription = stringResource(R.string.cd_stream_info),
-                                onClick = {
-                                    onShowStreamInfo()
-                                },
-                                focusRequester = streamInfoFocusRequester,
+                                icon = Icons.Default.SwapHoriz,
+                                contentDescription = stringResource(R.string.cd_switch_player_engine),
+                                onClick = onSwitchPlayerEngine,
                                 upFocusRequester = progressBarFocusRequester,
                                 onDownKey = onHideControls,
                                 onFocused = onResetHideTimer
@@ -2030,15 +1999,16 @@ private fun ControlButton(
     upFocusRequester: FocusRequester? = null,
     enabled: Boolean = true,
     onDownKey: (() -> Unit)? = null,
-    onFocused: (() -> Unit)? = null
+    onFocused: (() -> Unit)? = null,
+    modifier: Modifier = Modifier
 ) {
     var isFocused by remember { mutableStateOf(false) }
 
     IconButton(
         onClick = onClick,
         enabled = enabled,
-        modifier = Modifier
-            .size(NuvioTheme.spacing.xxxl)
+        modifier = modifier
+            .size(width = 48.dp, height = 40.dp)
             .then(
                 if (focusRequester != null) Modifier.focusRequester(focusRequester)
                 else Modifier
@@ -2081,7 +2051,9 @@ private fun ControlButton(
             contentColor = Color.White,
             focusedContentColor = Color.Black
         ),
-        shape = IconButtonDefaults.shape(shape = CircleShape)
+        // Rectangular focus is easier to scan from a sofa and matches the
+        // quiet player chrome rather than the old floating-app-button look.
+        shape = IconButtonDefaults.shape(shape = RoundedCornerShape(6.dp))
     ) {
         if (iconPainter != null) {
             Icon(

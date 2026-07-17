@@ -449,9 +449,11 @@ internal fun buildCatalogItem(
     val currentBackdrop = item.backdropUrl
     val currentLogo = item.logo
 
-    // First non-blank value wins and is never replaced.
-    val frozenBackdrop = carriedBackdrop?.takeIf { it.isNotBlank() }
-        ?: currentBackdrop
+    // Prefer the current catalog value. TMDB enrichment can replace a broken or
+    // absent addon image; only reuse the prior value when the current response
+    // genuinely has no backdrop.
+    val frozenBackdrop = currentBackdrop?.takeIf { it.isNotBlank() }
+        ?: carriedBackdrop?.takeIf { it.isNotBlank() }
     val frozenLogo = carriedLogo?.takeIf { it.isNotBlank() }
         ?: currentLogo
 
@@ -578,13 +580,23 @@ internal fun catalogRowTitle(
     strTypeSeries: String = ""
 ): String {
     val catalogName = row.catalogName.replaceFirstChar { it.uppercase() }
-    if (!showCatalogTypeSuffix) return catalogName
+    val netflixStyleTitle = when (catalogName.trim().lowercase()) {
+        "popular" -> "Trending Now"
+        "new", "recent" -> "New Releases"
+        "top" -> "Top Picks for You"
+        else -> catalogName
+    }
+    if (!showCatalogTypeSuffix) return netflixStyleTitle
     val typeLabel = when (row.apiType.lowercase()) {
         "movie" -> strTypeMovie.ifBlank { row.apiType.replaceFirstChar { it.uppercase() } }
         "series" -> strTypeSeries.ifBlank { row.apiType.replaceFirstChar { it.uppercase() } }
         else -> row.apiType.replaceFirstChar { it.uppercase() }
     }
-    return "$catalogName - $typeLabel"
+    return when (catalogName.trim().lowercase()) {
+        "popular" -> "Trending $typeLabel"
+        "new", "recent" -> "New $typeLabel Releases"
+        else -> "$netflixStyleTitle - $typeLabel"
+    }
 }
 
 internal fun CatalogRow.key(): String {
