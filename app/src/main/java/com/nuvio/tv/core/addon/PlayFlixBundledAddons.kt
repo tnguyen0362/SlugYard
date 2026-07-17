@@ -9,7 +9,7 @@ import com.nuvio.tv.core.debrid.DebridProviders
  * We ship with official Stremio addons for metadata and subtitles.
  * Content sources are provisioned silently as part of connecting a debrid account.
  */
-object PureFireBundledAddons {
+object PlayFlixBundledAddons {
 
     /**
      * Infrastructure addons - always included.

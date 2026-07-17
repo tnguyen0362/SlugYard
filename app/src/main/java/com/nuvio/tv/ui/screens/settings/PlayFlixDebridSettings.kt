@@ -43,7 +43,7 @@ import com.nuvio.tv.ui.theme.NuvioTheme
 
 /** A consumer setup screen: choose one service, enter its key, and stream. */
 @Composable
-fun PureFireDebridSettingsContent(
+fun PlayFlixDebridSettingsContent(
     viewModel: DebridSettingsViewModel = hiltViewModel(),
     initialFocusRequester: FocusRequester? = null
 ) {

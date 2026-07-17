@@ -261,7 +261,7 @@ fun SettingsScreen(
     val visibleSections = remember(isPrimaryProfileActive, isEssentialMode, allSectionSpecs) {
         allSectionSpecs.filter { section ->
             when (section.category) {
-                // PureFire: Only show essential categories
+                // PlayFlix: only show essential categories.
                 SettingsCategory.EXPERIENCE -> false
                 SettingsCategory.DEBUG -> false
                 SettingsCategory.APPEARANCE -> false
@@ -749,7 +749,7 @@ private fun SettingsDetailPane(
             },
             essentialMode = isEssentialMode
         )
-        SettingsCategory.PLAYBACK -> PureFirePlaybackSettingsContent(
+        SettingsCategory.PLAYBACK -> PlayFlixPlaybackSettingsContent(
             initialFocusRequester = if (allowDetailAutofocus) {
                 contentFocusRequesters[SettingsCategory.PLAYBACK]
             } else {
@@ -817,7 +817,7 @@ private fun SettingsDetailPane(
             }
         )
         SettingsCategory.DEBUG -> DebugSettingsContent()
-        SettingsCategory.TRAKT -> PureFireTraktSettings()
+        SettingsCategory.TRAKT -> PlayFlixTraktSettings()
     }
 }
 
@@ -1002,7 +1002,7 @@ private fun IntegrationSettingsContent(
         }
 
         IntegrationSettingsSection.Debrid -> {
-            PureFireDebridSettingsContent(
+            PlayFlixDebridSettingsContent(
                 initialFocusRequester = debridFocusRequester
             )
         }

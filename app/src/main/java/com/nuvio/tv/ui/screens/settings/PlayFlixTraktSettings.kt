@@ -29,7 +29,7 @@ import com.nuvio.tv.R
 import com.nuvio.tv.ui.theme.NuvioTheme
 
 @Composable
-fun PureFireTraktSettings() {
+fun PlayFlixTraktSettings() {
     Box(
         modifier = Modifier
             .fillMaxSize()

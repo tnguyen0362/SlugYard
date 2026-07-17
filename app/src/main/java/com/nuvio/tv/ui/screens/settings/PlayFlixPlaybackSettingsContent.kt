@@ -33,7 +33,7 @@ import com.nuvio.tv.ui.theme.NuvioTheme
 import kotlinx.coroutines.launch
 
 @Composable
-fun PureFirePlaybackSettingsContent(
+fun PlayFlixPlaybackSettingsContent(
     initialFocusRequester: FocusRequester? = null,
     viewModel: PlaybackSettingsViewModel = hiltViewModel()
 ) {
@@ -54,19 +54,19 @@ fun PureFirePlaybackSettingsContent(
         ) {
             item(key = "header") {
                 SettingsDetailHeader(
-                    title = stringResource(R.string.purefire_playback_title),
-                    subtitle = stringResource(R.string.purefire_playback_subtitle)
+                    title = stringResource(R.string.playflix_playback_title),
+                    subtitle = stringResource(R.string.playflix_playback_subtitle)
                 )
             }
 
             item(key = "languages") {
                 SettingsGroupCard(
                     modifier = Modifier.fillMaxWidth(),
-                    title = stringResource(R.string.purefire_languages)
+                    title = stringResource(R.string.playflix_languages)
                 ) {
                     SettingsActionRow(
-                        title = stringResource(R.string.purefire_subtitle_language),
-                        subtitle = stringResource(R.string.purefire_subtitle_language_subtitle),
+                        title = stringResource(R.string.playflix_subtitle_language),
+                        subtitle = stringResource(R.string.playflix_subtitle_language_subtitle),
                         value = AVAILABLE_SUBTITLE_LANGUAGES.find { it.code == settings?.subtitleStyle?.preferredLanguage }?.displayName
                             ?: stringResource(R.string.settings_default),
                         leadingIcon = Icons.Default.Subtitles,
@@ -75,8 +75,8 @@ fun PureFirePlaybackSettingsContent(
                         modifier = if (initialFocusRequester != null) Modifier.focusRequester(initialFocusRequester) else Modifier
                     )
                     SettingsActionRow(
-                        title = stringResource(R.string.purefire_audio_language),
-                        subtitle = stringResource(R.string.purefire_audio_language_subtitle),
+                        title = stringResource(R.string.playflix_audio_language),
+                        subtitle = stringResource(R.string.playflix_audio_language_subtitle),
                         value = when (settings?.preferredAudioLanguage) {
                             AudioLanguageOption.DEFAULT -> stringResource(R.string.audio_language_default)
                             AudioLanguageOption.DEVICE -> stringResource(R.string.audio_language_device)
@@ -94,11 +94,11 @@ fun PureFirePlaybackSettingsContent(
             item(key = "performance") {
                 SettingsGroupCard(
                     modifier = Modifier.fillMaxWidth(),
-                    title = stringResource(R.string.purefire_performance)
+                    title = stringResource(R.string.playflix_performance)
                 ) {
                     SettingsActionRow(
-                        title = stringResource(R.string.purefire_match_frame_rate),
-                        subtitle = stringResource(R.string.purefire_match_frame_rate_subtitle),
+                        title = stringResource(R.string.playflix_match_frame_rate),
+                        subtitle = stringResource(R.string.playflix_match_frame_rate_subtitle),
                         value = when (settings?.frameRateMatchingMode) {
                             FrameRateMatchingMode.OFF -> stringResource(R.string.playback_afr_off)
                             FrameRateMatchingMode.START -> stringResource(R.string.playback_afr_on_start)
@@ -116,7 +116,7 @@ fun PureFirePlaybackSettingsContent(
         if (showSubtitleLanguageDialog && settings != null) {
             NuvioDialog(
                 onDismiss = { showSubtitleLanguageDialog = false },
-                title = stringResource(R.string.purefire_subtitle_language),
+                title = stringResource(R.string.playflix_subtitle_language),
                 content = {
                     LazyColumn {
                         items(AVAILABLE_SUBTITLE_LANGUAGES.size) { index ->
@@ -140,7 +140,7 @@ fun PureFirePlaybackSettingsContent(
         if (showAudioLanguageDialog && settings != null) {
             NuvioDialog(
                 onDismiss = { showAudioLanguageDialog = false },
-                title = stringResource(R.string.purefire_audio_language),
+                title = stringResource(R.string.playflix_audio_language),
                 content = {
                     LazyColumn {
                         item {
@@ -200,7 +200,7 @@ fun PureFirePlaybackSettingsContent(
         if (showFrameRateDialog && settings != null) {
             NuvioDialog(
                 onDismiss = { showFrameRateDialog = false },
-                title = stringResource(R.string.purefire_match_frame_rate),
+                title = stringResource(R.string.playflix_match_frame_rate),
                 content = {
                     LazyColumn {
                         item {

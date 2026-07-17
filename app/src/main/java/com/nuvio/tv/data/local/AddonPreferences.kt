@@ -227,7 +227,7 @@ class AddonPreferences @Inject constructor(
     }
 
     private fun getDefaultAddons(): Set<String> =
-        com.nuvio.tv.core.addon.PureFireBundledAddons.INFRASTRUCTURE_ADDONS.toSet()
+        com.nuvio.tv.core.addon.PlayFlixBundledAddons.INFRASTRUCTURE_ADDONS.toSet()
 
     /**
      * Add content source addons with debrid credentials.
@@ -236,7 +236,7 @@ class AddonPreferences @Inject constructor(
     suspend fun addContentSourceAddons(debridSettings: DebridSettings) {
         val active = profileManager.activeProfile
         if (active != null && !active.isPrimary && active.usesPrimaryAddons) return
-        val contentUrls = com.nuvio.tv.core.addon.PureFireBundledAddons
+        val contentUrls = com.nuvio.tv.core.addon.PlayFlixBundledAddons
             .buildConfiguredContentSourceUrls(debridSettings)
 
         store().edit { preferences ->
@@ -248,7 +248,7 @@ class AddonPreferences @Inject constructor(
             val managed = preferences[managedContentSourceUrlsKey]
                 ?.let(::parseUrlList)
                 .orEmpty()
-                .ifEmpty { current.filter(com.nuvio.tv.core.addon.PureFireBundledAddons::isContentSourceAddon) }
+                .ifEmpty { current.filter(com.nuvio.tv.core.addon.PlayFlixBundledAddons::isContentSourceAddon) }
                 .map(::canonicalizeUrl)
                 .toSet()
             current.removeAll { canonicalizeUrl(it) in managed }
