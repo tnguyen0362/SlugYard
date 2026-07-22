@@ -213,7 +213,7 @@ class AddonPreferences @Inject constructor(
     }
 
     private fun getDefaultAddons(): Set<String> =
-        com.sluggyard.tv.core.addon.PlayFlixBundledAddons.INFRASTRUCTURE_ADDONS.toSet()
+        com.sluggyard.tv.core.addon.SlugYardBundledAddons.INFRASTRUCTURE_ADDONS.toSet()
 
     /**
      * Add content source addons with debrid credentials.
@@ -221,7 +221,7 @@ class AddonPreferences @Inject constructor(
      */
     suspend fun addContentSourceAddons(debridSettings: DebridSettings) {
         if (isPrimaryAddonLocked()) return
-        val contentUrls = com.sluggyard.tv.core.addon.PlayFlixBundledAddons
+        val contentUrls = com.sluggyard.tv.core.addon.SlugYardBundledAddons
             .buildConfiguredContentSourceUrls(debridSettings)
 
         store().edit { prefs ->
@@ -233,7 +233,7 @@ class AddonPreferences @Inject constructor(
             val managed = prefs[managedContentSourceUrlsKey]
                 ?.let(::parseUrlList)
                 .orEmpty()
-                .ifEmpty { current.filter(com.sluggyard.tv.core.addon.PlayFlixBundledAddons::isContentSourceAddon) }
+                .ifEmpty { current.filter(com.sluggyard.tv.core.addon.SlugYardBundledAddons::isContentSourceAddon) }
                 .map(::canonicalizeUrl)
                 .toSet()
             current.removeAll { canonicalizeUrl(it) in managed }

@@ -12,7 +12,7 @@ import com.sluggyard.tv.core.addonprotocol.AddonRegistryAction
 import com.sluggyard.tv.core.addonprotocol.AddonRegistryState
 import com.sluggyard.tv.core.addonprotocol.AddonResource
 import com.sluggyard.tv.core.addonprotocol.ManagedAddon
-import com.sluggyard.tv.core.addonprotocol.PlayFlixCommunitySourcePolicy
+import com.sluggyard.tv.core.addonprotocol.SlugYardCommunitySourcePolicy
 import com.sluggyard.tv.core.addonprotocol.reduceAddonRegistry
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -64,12 +64,12 @@ class RewriteAddonRegistryStore(
                 ?.let(::sanitizeCuratedRegistry)
                 ?: AddonRegistryState()
             val curated = addons.filter { addon ->
-                addon.manifestUrl in PlayFlixCommunitySourcePolicy.bootstrapManifestUrls
+                addon.manifestUrl in SlugYardCommunitySourcePolicy.bootstrapManifestUrls
             }
             val byUrl = curated.associateBy(ManagedAddon::manifestUrl)
             val updated = current.addons.mapNotNull { existing ->
                 byUrl[existing.manifestUrl]?.copy(enabled = existing.enabled) ?: existing.takeIf {
-                    it.manifestUrl in PlayFlixCommunitySourcePolicy.bootstrapManifestUrls
+                    it.manifestUrl in SlugYardCommunitySourcePolicy.bootstrapManifestUrls
                 }
             }
             val additions = curated.filter { candidate -> current.addons.none { it.manifestUrl == candidate.manifestUrl } }
@@ -87,7 +87,7 @@ class RewriteAddonRegistryStore(
 internal fun sanitizeCuratedRegistry(state: AddonRegistryState): AddonRegistryState =
     AddonRegistryState(
         state.addons
-            .filter { it.manifestUrl in PlayFlixCommunitySourcePolicy.bootstrapManifestUrls }
+            .filter { it.manifestUrl in SlugYardCommunitySourcePolicy.bootstrapManifestUrls }
             .map { addon ->
                 addon.copy(
                     configuredManifestUrl = addon.configuredManifestUrl?.takeIf {

@@ -60,7 +60,7 @@ private fun PlayerPreparing(state: PlayerUiState, modifier: Modifier) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text(state.contentName ?: state.title ?: "PlayFlix", style = MaterialTheme.typography.headlineLarge)
+            Text(state.contentName ?: state.title ?: "SlugYard", style = MaterialTheme.typography.headlineLarge)
             Text(
                 state.loadingMessage?.cleanPlayerStatus() ?: "Preparing stream",
                 style = MaterialTheme.typography.bodyLarge,

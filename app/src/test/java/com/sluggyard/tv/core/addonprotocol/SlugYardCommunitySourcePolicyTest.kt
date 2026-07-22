@@ -4,10 +4,10 @@ import kotlin.test.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-class PlayFlixCommunitySourcePolicyTest {
+class SlugYardCommunitySourcePolicyTest {
     @Test
     fun `keeps both community sources in the fixed backend allowlist`() {
-        val urls = PlayFlixCommunitySourcePolicy.bootstrapManifestUrls
+        val urls = SlugYardCommunitySourcePolicy.bootstrapManifestUrls
 
         assertTrue(urls.any { it.contains("torrentio", ignoreCase = true) })
         assertTrue(urls.any { it.contains("mediafusion", ignoreCase = true) })
@@ -15,7 +15,7 @@ class PlayFlixCommunitySourcePolicyTest {
 
     @Test
     fun `never embeds a customer debrid credential in a backend manifest URL`() {
-        assertTrue(PlayFlixCommunitySourcePolicy.bootstrapManifestUrls.isNotEmpty())
-        assertFalse(PlayFlixCommunitySourcePolicy.bootstrapManifestUrls.any { it.contains("apikey=", ignoreCase = true) })
+        assertTrue(SlugYardCommunitySourcePolicy.bootstrapManifestUrls.isNotEmpty())
+        assertFalse(SlugYardCommunitySourcePolicy.bootstrapManifestUrls.any { it.contains("apikey=", ignoreCase = true) })
     }
 }

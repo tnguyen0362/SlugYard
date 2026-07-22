@@ -19,7 +19,7 @@ internal fun ContentDiscoverySettings(
     val addonStates by facade.addonPreferences.addonEnabledStates.collectAsState(initial = emptyMap())
     RewriteSettingsGroup("Content enrichment") {
         RewriteToggleRow("TMDB enrichment", "Improve artwork, metadata, dates, and details.", tmdb.enabled, onTmdbEnabled)
-        RewriteValueRow("Community sources", if (communityAddonCount > 0) "$communityAddonCount managed" else "Managed by PlayFlix")
+        RewriteValueRow("Community sources", if (communityAddonCount > 0) "$communityAddonCount managed" else "Managed by SlugYard")
         RewriteValueRow("Catalog ordering", "Follow installed addon order")
     }
     RewriteSettingsGroup("Installed addons") {

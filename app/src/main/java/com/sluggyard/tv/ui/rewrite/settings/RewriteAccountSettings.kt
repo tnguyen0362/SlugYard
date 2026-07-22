@@ -19,7 +19,7 @@ internal fun AccountSettings(facade: RewriteSettingsFacade, onSignOut: () -> Uni
     LaunchedEffect(Unit) {
         signedIn = facade.sessions.read() is SupabaseSessionState.Active
     }
-    RewriteSettingsGroup("PlayFlix account") {
+    RewriteSettingsGroup("SlugYard account") {
         RewriteValueRow("Status", when (signedIn) { true -> "Signed in"; false -> "Guest"; null -> "Checking" })
         RewriteValueRow("Sync", if (signedIn == true) "Enabled for this profile" else "Available after sign-in")
         if (signedIn == true) RewriteActionRow("Sign out", "Remove the active account from this device.", onSignOut)

@@ -2838,20 +2838,20 @@
     <string name="stream_test_video_bitrate">Average Video Bitrate: %1$s</string>
     <string name="stream_test_error_connection">Connection failed. The last played stream link may have expired or is unreachable. Please play the video again and retry.</string>
 
-    <!-- PlayFlix settings -->
-    <string name="playflix_playback_title">Playback</string>
-    <string name="playflix_playback_subtitle">Stream selection, languages, and performance</string>
-    <string name="playflix_link_filtering">Link Filtering</string>
-    <string name="playflix_stream_selection">Stream Selection</string>
-    <string name="playflix_stream_selection_subtitle">How streams are chosen for playback</string>
-    <string name="playflix_languages">Languages</string>
-    <string name="playflix_subtitle_language">Subtitle Language</string>
-    <string name="playflix_subtitle_language_subtitle">Preferred language for subtitles</string>
-    <string name="playflix_audio_language">Audio Language</string>
-    <string name="playflix_audio_language_subtitle">Preferred language for audio tracks</string>
-    <string name="playflix_performance">Performance</string>
-    <string name="playflix_match_frame_rate">Match Frame Rate</string>
-    <string name="playflix_match_frame_rate_subtitle">Adjust display refresh rate to match video</string>
+    <!-- SlugYard settings -->
+    <string name="slugyard_playback_title">Playback</string>
+    <string name="slugyard_playback_subtitle">Stream selection, languages, and performance</string>
+    <string name="slugyard_link_filtering">Link Filtering</string>
+    <string name="slugyard_stream_selection">Stream Selection</string>
+    <string name="slugyard_stream_selection_subtitle">How streams are chosen for playback</string>
+    <string name="slugyard_languages">Languages</string>
+    <string name="slugyard_subtitle_language">Subtitle Language</string>
+    <string name="slugyard_subtitle_language_subtitle">Preferred language for subtitles</string>
+    <string name="slugyard_audio_language">Audio Language</string>
+    <string name="slugyard_audio_language_subtitle">Preferred language for audio tracks</string>
+    <string name="slugyard_performance">Performance</string>
+    <string name="slugyard_match_frame_rate">Match Frame Rate</string>
+    <string name="slugyard_match_frame_rate_subtitle">Adjust display refresh rate to match video</string>
     <string name="audio_language_default">Media Default</string>
     <string name="audio_language_default_subtitle">Use the audio track specified by the media</string>
     <string name="audio_language_device">Device Language</string>

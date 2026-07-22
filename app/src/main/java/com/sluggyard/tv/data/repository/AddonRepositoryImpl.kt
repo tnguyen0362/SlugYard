@@ -4,7 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
-import com.sluggyard.tv.core.addon.PlayFlixBundledAddons
+import com.sluggyard.tv.core.addon.SlugYardBundledAddons
 import com.sluggyard.tv.core.network.NetworkResult
 import com.sluggyard.tv.core.network.safeApiCall
 import com.sluggyard.tv.core.logging.urlForLog
@@ -212,7 +212,7 @@ class AddonRepositoryImpl @Inject constructor(
 
     override suspend fun removeAddon(url: String) {
         val cleanUrl = canonicalizeUrl(url)
-        if (PlayFlixBundledAddons.isDefaultAddon(cleanUrl)) {
+        if (SlugYardBundledAddons.isDefaultAddon(cleanUrl)) {
             Log.w(TAG, "removeAddon: blocked — $cleanUrl is a bundled addon")
             return
         }
@@ -225,7 +225,7 @@ class AddonRepositoryImpl @Inject constructor(
 
     override suspend fun setAddonOrder(urls: List<String>) {
         val canonicalUrls = urls.map { canonicalizeUrl(it) }
-        val bundledUrls = PlayFlixBundledAddons.INFRASTRUCTURE_ADDONS.map { canonicalizeUrl(it) }
+        val bundledUrls = SlugYardBundledAddons.INFRASTRUCTURE_ADDONS.map { canonicalizeUrl(it) }
         val withBundledPreserved = bundledUrls.fold(canonicalUrls) { acc, bundledUrl ->
             if (acc.none { normalizeUrl(it) == normalizeUrl(bundledUrl) }) acc + bundledUrl else acc
         }
@@ -234,7 +234,7 @@ class AddonRepositoryImpl @Inject constructor(
 
     override suspend fun setAddonEnabled(url: String, enabled: Boolean) {
         val cleanUrl = canonicalizeUrl(url)
-        if (!enabled && PlayFlixBundledAddons.isDefaultAddon(cleanUrl)) {
+        if (!enabled && SlugYardBundledAddons.isDefaultAddon(cleanUrl)) {
             Log.w(TAG, "setAddonEnabled: blocked — cannot disable bundled addon $cleanUrl")
             return
         }
@@ -280,7 +280,7 @@ class AddonRepositoryImpl @Inject constructor(
             remoteOrdered + extras
         }
 
-        val bundledUrls = PlayFlixBundledAddons.INFRASTRUCTURE_ADDONS.map { canonicalizeUrl(it) }
+        val bundledUrls = SlugYardBundledAddons.INFRASTRUCTURE_ADDONS.map { canonicalizeUrl(it) }
         val finalListWithBundled = bundledUrls.fold(finalList) { acc, bundledUrl ->
             if (acc.none { normalizeUrl(it) == normalizeUrl(bundledUrl) }) acc + bundledUrl else acc
         }
@@ -288,7 +288,7 @@ class AddonRepositoryImpl @Inject constructor(
         if (shouldRemoveMissingLocal) {
             val removedAny = initialLocalUrls
                 .filter { normalizeUrl(it) !in remoteSet }
-                .filter { !PlayFlixBundledAddons.isDefaultAddon(it) }
+                .filter { !SlugYardBundledAddons.isDefaultAddon(it) }
                 .map { canonicalizeUrl(it) }
                 .fold(false) { removed, url -> removeCachedManifest(url) || removed }
             if (removedAny) {

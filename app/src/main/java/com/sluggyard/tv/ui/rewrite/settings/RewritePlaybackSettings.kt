@@ -65,8 +65,8 @@ internal fun AdvancedSettings(player: PlayerSettings) {
 
 @Composable
 internal fun AboutSettings() {
-    RewriteSettingsGroup("About PlayFlix") {
-        RewriteValueRow("Application", "PlayFlix TV")
+    RewriteSettingsGroup("About SlugYard") {
+        RewriteValueRow("Application", "SlugYard TV")
         RewriteValueRow("Settings model", "Locked-down SlugYard TV")
         RewriteValueRow("Playback", "Automatic dual-player fallback")
         RewriteValueRow("Privacy", "Credentials remain on this device profile")

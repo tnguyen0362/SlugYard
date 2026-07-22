@@ -87,6 +87,9 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
+// Intentionally kept as "playflix_rewrite": this is the internal, never-user-visible
+// DataStore file name. Renaming it would orphan every existing user's persisted
+// rewrite-path preferences on upgrade (DataStore has no automatic rename migration).
 private val Context.rewritePreferences by preferencesDataStore(name = "playflix_rewrite")
 
 /** Runtime composition root for the rewritten application path. */
@@ -399,7 +402,11 @@ private fun RewriteAppContent(
                         graph.provisionCommunitySources(settingsFacade.debridSettings.first().enabled)
                     },
                     communityAddonCount = registry.addons.count { addon ->
+                        // Manifest "name" is fetched at runtime from a third-party server
+                        // (torrentio/mediafusion) — match both names since we don't control
+                        // when/whether the remote manifest's own name field gets renamed.
                         addon.manifest.name.contains("PlayFlix", ignoreCase = true) ||
+                            addon.manifest.name.contains("SlugYard", ignoreCase = true) ||
                             addon.manifestUrl.contains("torrentio", ignoreCase = true) ||
                             addon.manifestUrl.contains("mediafusion", ignoreCase = true)
                     },
@@ -523,7 +530,7 @@ private fun RewriteRootNavigation(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text(
-            text = "PLAYFLIX",
+            text = "SLUGYARD",
             style = MaterialTheme.typography.titleLarge,
             color = SlugYardPalette.OnCanvas,
             fontWeight = FontWeight.Bold,

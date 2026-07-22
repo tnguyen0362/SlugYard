@@ -29,7 +29,7 @@ import javax.inject.Singleton
 
 /**
  * UI boundary for the locked-down settings surface. It delegates persistence to the existing
- * profile-scoped stores and deliberately omits playback policy knobs that PlayFlix owns.
+ * profile-scoped stores and deliberately omits playback policy knobs that SlugYard owns.
  */
 interface RewriteSettingsFacade {
     val categories: List<RewriteSettingsCategory>

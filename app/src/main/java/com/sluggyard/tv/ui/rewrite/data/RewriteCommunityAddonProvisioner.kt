@@ -3,7 +3,7 @@ package com.sluggyard.tv.ui.rewrite.data
 import com.sluggyard.tv.core.addonprotocol.AddonManifestPolicy
 import com.sluggyard.tv.core.addonprotocol.AddonTransportResult
 import com.sluggyard.tv.core.addonprotocol.ManagedAddon
-import com.sluggyard.tv.core.addonprotocol.PlayFlixCommunitySourcePolicy
+import com.sluggyard.tv.core.addonprotocol.SlugYardCommunitySourcePolicy
 import com.sluggyard.tv.core.addonprotocol.StremioAddonGateway
 import com.sluggyard.tv.core.aggregation.AddonFanoutResult
 import com.sluggyard.tv.core.aggregation.AddonFanoutTask
@@ -16,7 +16,7 @@ data class CommunityProvisioningReport(
 )
 
 /**
- * First-run backend provisioning for the single PlayFlix Community integration.
+ * First-run backend provisioning for the single SlugYard Community integration.
  *
  * There is intentionally no URL parameter: callers cannot turn this into a generic addon
  * installer. Each manifest is allowlisted before it is fetched and persisted.
@@ -26,7 +26,7 @@ class RewriteCommunityAddonProvisioner(
     private val registry: RewriteAddonRegistry,
 ) {
     suspend fun provision(configured: RewriteConfiguredAddonUrls? = null): CommunityProvisioningReport {
-        val requests = PlayFlixCommunitySourcePolicy.bootstrapManifestUrls.map { registryUrl ->
+        val requests = SlugYardCommunitySourcePolicy.bootstrapManifestUrls.map { registryUrl ->
             val requestUrl = when {
                 registryUrl.contains("torrentio", ignoreCase = true) -> configured?.torrentioManifestUrl
                 registryUrl.contains("mediafusion", ignoreCase = true) -> configured?.mediaFusionManifestUrl

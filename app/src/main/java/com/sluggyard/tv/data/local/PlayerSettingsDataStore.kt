@@ -783,7 +783,7 @@ class PlayerSettingsDataStore @Inject constructor(
             playerPreference = prefs[playerPreferenceKey]?.let {
                 runCatching { PlayerPreference.valueOf(it) }.getOrDefault(PlayerPreference.INTERNAL)
             } ?: PlayerPreference.INTERNAL,
-            // PlayFlix owns the engine policy: AUTO selects MPV where
+            // SlugYard owns the engine policy: AUTO selects MPV where
             // ASS/SSA rendering matters and falls back between engines on
             // startup errors. Do not resurrect stale per-profile choices
             // that silently pinned customers to ExoPlayer with failover off.
