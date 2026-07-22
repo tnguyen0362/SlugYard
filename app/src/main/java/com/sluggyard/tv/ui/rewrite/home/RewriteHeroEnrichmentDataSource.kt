@@ -34,7 +34,7 @@ class RewriteHeroEnrichmentDataSource(
             ?.value
             ?: return null
 
-        val metadataLabel = buildList {
+        val descriptorLabel = buildList {
             metadata.releaseInfo?.takeIf(String::isNotBlank)?.let(::add)
             metadata.genres.take(2).filter(String::isNotBlank).joinToString(" · ")
                 .takeIf(String::isNotBlank)
@@ -44,15 +44,15 @@ class RewriteHeroEnrichmentDataSource(
         return RewriteHeroEnrichment(
             backdropUrl = metadata.backgroundUrl?.takeIf(String::isNotBlank),
             summary = metadata.description?.takeIf(String::isNotBlank),
-            metadata = metadataLabel,
-        ).takeIf { it.backdropUrl != null || it.summary != null || it.metadata != null }
+            descriptorTag = descriptorLabel,
+        ).takeIf { it.backdropUrl != null || it.summary != null || it.descriptorTag != null }
     }
 }
 
 data class RewriteHeroEnrichment(
     val backdropUrl: String? = null,
     val summary: String? = null,
-    val metadata: String? = null,
+    val descriptorTag: String? = null,
 )
 
 fun RewriteHomeState.withHeroEnrichment(enrichment: RewriteHeroEnrichment?): RewriteHomeState {
@@ -62,7 +62,7 @@ fun RewriteHomeState.withHeroEnrichment(enrichment: RewriteHeroEnrichment?): Rew
         hero = baseHero.copy(
             backdropUrl = upgrade.backdropUrl ?: baseHero.backdropUrl,
             summary = upgrade.summary ?: baseHero.summary,
-            metadata = upgrade.metadata ?: baseHero.metadata,
+            descriptorTag = upgrade.descriptorTag ?: baseHero.descriptorTag,
         ),
     )
 }

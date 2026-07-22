@@ -21,7 +21,7 @@ class RewriteHeroEnrichmentDataSourceTest {
             registrySnapshot = { AddonRegistryState(listOf(addon())) },
             gateway = gateway("""{"meta":{"id":"movie","type":"movie","name":"Movie","background":"https://backdrop","description":"A proper summary","releaseInfo":"2026","genres":["Drama","Mystery"]}}"""),
         )
-        val hero = RewriteHero("movie", "Movie", "https://poster", "Base", "Movie", "source", "movie")
+        val hero = RewriteHero(id = "movie", title = "Movie", backdropUrl = "https://poster", summary = "Base", contextTag = "Movie", addonId = "source", contentType = "movie")
 
         val state = RewriteHomeState(hero = hero).withHeroEnrichment(source.enrich(hero))
 
@@ -29,7 +29,7 @@ class RewriteHeroEnrichmentDataSourceTest {
         assertEquals("source", state.hero?.addonId)
         assertEquals("https://backdrop", state.hero?.backdropUrl)
         assertEquals("A proper summary", state.hero?.summary)
-        assertEquals("2026  ·  Drama · Mystery", state.hero?.metadata)
+        assertEquals("2026  ·  Drama · Mystery", state.hero?.descriptorTag)
     }
 
     @Test
@@ -44,7 +44,7 @@ class RewriteHeroEnrichmentDataSourceTest {
                 override suspend fun fetchSubtitles(manifestUrl: String, type: String, id: String) = error("unused")
             },
         )
-        val hero = RewriteHero("movie", "Movie", "https://poster", "Base", "Movie", "source", "movie")
+        val hero = RewriteHero(id = "movie", title = "Movie", backdropUrl = "https://poster", summary = "Base", contextTag = "Movie", addonId = "source", contentType = "movie")
 
         assertNull(source.enrich(hero))
         assertEquals(hero, RewriteHomeState(hero = hero).withHeroEnrichment(null).hero)

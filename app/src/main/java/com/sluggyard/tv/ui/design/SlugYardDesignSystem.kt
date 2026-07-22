@@ -37,6 +37,10 @@ object SlugYardTvMetrics {
     val FocusRingWidth = 3.dp
     val FocusScale = 1.06f
     val RowGap = 14.dp
+
+    /** Dominant-card focus scale for catalog rows -- deliberately larger than [FocusScale]
+     * so the focused poster reads as the clear center of attention in a row, not a subtle bump. */
+    val RowFocusScale = 1.25f
 }
 
 private val SlugYardTypography = Typography(

@@ -1,6 +1,7 @@
 package com.sluggyard.tv.ui.rewrite.home
 
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -53,6 +54,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import coil3.compose.AsyncImage
 import com.sluggyard.tv.ui.design.SlugYardPalette
 import com.sluggyard.tv.ui.design.SlugYardTvMetrics
@@ -82,7 +84,8 @@ data class RewriteHero(
     val title: String,
     val backdropUrl: String?,
     val summary: String,
-    val metadata: String,
+    val contextTag: String,
+    val descriptorTag: String? = null,
     val addonId: String,
     val contentType: String,
 )
@@ -183,11 +186,10 @@ private fun RewriteHeroPanel(
         ) {
             Text(hero.title, style = MaterialTheme.typography.displayLarge)
             Spacer(Modifier.height(10.dp))
-            Text(
-                hero.metadata,
-                style = MaterialTheme.typography.labelLarge,
-                color = SlugYardPalette.OnCanvasMuted,
-            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                HeroMetadataPill(hero.contextTag)
+                hero.descriptorTag?.let { HeroMetadataPill(it) }
+            }
             Spacer(Modifier.height(12.dp))
             Text(hero.summary, style = MaterialTheme.typography.bodyLarge, maxLines = 3)
             Spacer(Modifier.height(22.dp))
@@ -196,6 +198,22 @@ private fun RewriteHeroPanel(
                 HeroActionButton("More info", Icons.Default.Info, onDetails, primary = false)
             }
         }
+    }
+}
+
+@Composable
+private fun HeroMetadataPill(label: String) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(4.dp))
+            .background(SlugYardPalette.SurfaceElevated)
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelMedium,
+            color = SlugYardPalette.OnCanvas,
+        )
     }
 }
 
@@ -271,7 +289,8 @@ private fun RewritePosterCard(
     val bringIntoViewRequester = remember { BringIntoViewRequester() }
     val scope = rememberCoroutineScope()
     val scale by animateFloatAsState(
-        targetValue = if (focused) SlugYardTvMetrics.FocusScale else 1f,
+        targetValue = if (focused) SlugYardTvMetrics.RowFocusScale else 1f,
+        animationSpec = tween(220),
         label = "poster focus scale",
     )
 
@@ -288,6 +307,7 @@ private fun RewritePosterCard(
     Box(
         modifier = focusMovementModifier
             .size(width = 176.dp, height = 264.dp)
+            .zIndex(if (focused) 1f else 0f)
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale

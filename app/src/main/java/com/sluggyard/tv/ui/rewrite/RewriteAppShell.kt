@@ -582,7 +582,7 @@ private fun RewriteHomeCatalogState.toScreenState(
                 title = poster.title,
                 backdropUrl = poster.imageUrl,
                 summary = "Browse details and choose a stream.",
-                metadata = type.replaceFirstChar(Char::titlecase),
+                contextTag = type.replaceFirstChar(Char::titlecase),
                 addonId = addonId,
                 contentType = type,
             )
