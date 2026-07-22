@@ -66,6 +66,9 @@ jobs:
             echo "SLUGYARD_RELEASE_STORE_PASSWORD=android"
           } >> "$GITHUB_ENV"
 
+      - name: Check repository readiness
+        run: python scripts/check_repository_readiness.py
+
       - name: Build fullDebug APK
         run: ./gradlew :app:assembleFullDebug --stacktrace
 
