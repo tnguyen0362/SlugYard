@@ -53,6 +53,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import coil3.compose.AsyncImage
@@ -155,7 +156,7 @@ private fun RewriteHeroPanel(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(500.dp)
+            .height(560.dp)
             .background(SlugYardPalette.Surface),
     ) {
         AsyncImage(
@@ -184,14 +185,24 @@ private fun RewriteHeroPanel(
                 )
                 .fillMaxWidth(0.52f),
         ) {
-            Text(hero.title, style = MaterialTheme.typography.displayLarge)
+            Text(
+                hero.title,
+                style = MaterialTheme.typography.displayLarge,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
             Spacer(Modifier.height(10.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 HeroMetadataPill(hero.contextTag)
                 hero.descriptorTag?.let { HeroMetadataPill(it) }
             }
             Spacer(Modifier.height(12.dp))
-            Text(hero.summary, style = MaterialTheme.typography.bodyLarge, maxLines = 3)
+            Text(
+                hero.summary,
+                style = MaterialTheme.typography.bodyLarge,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
             Spacer(Modifier.height(22.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 HeroActionButton("Play", Icons.Default.PlayArrow, onPlay, primary = true, modifier = Modifier.focusRequester(playFocusRequester))
@@ -326,12 +337,25 @@ private fun RewritePosterCard(
             ),
         contentAlignment = Alignment.Center,
     ) {
-        AsyncImage(
-            model = poster.imageUrl,
-            contentDescription = null,
-            modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.Crop,
+        // Drawn underneath the image so a failed/missing load (Coil renders nothing on
+        // error) still leaves a readable card instead of a bare placeholder box.
+        Text(
+            poster.title,
+            modifier = Modifier.padding(12.dp),
+            style = MaterialTheme.typography.labelLarge,
+            color = SlugYardPalette.OnCanvasMuted,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            maxLines = 4,
+            overflow = TextOverflow.Ellipsis,
         )
+        if (!poster.imageUrl.isNullOrBlank()) {
+            AsyncImage(
+                model = poster.imageUrl,
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+            )
+        }
         poster.progressFraction?.let { progress ->
             androidx.compose.foundation.layout.Box(
                 modifier = Modifier
