@@ -16,9 +16,9 @@
 
 ## About
 
-SlugYard is a substantially overhauled Android TV fork of [NuvioTV](https://github.com/NuvioMedia/NuvioTV), designed as a polished, plug-and-play media experience: connect a supported debrid account and press play.
+SlugYard is an independently maintained Android TV media experience: connect a supported debrid account and press play. It is designed for remote-first browsing, local playback, optional profiles, and opt-in account sync.
 
-This project is independently branded and maintained as SlugYard. It retains the NuvioTV attribution and is released under the same GPLv3 license; see [NOTICE](NOTICE) and [LICENSE](LICENSE).
+The project is released under GPLv3. Required upstream attribution and third-party notices are maintained in [NOTICE](NOTICE) and [LICENSE](LICENSE).
 
 ## Release notes
 
@@ -176,32 +176,13 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for:
 - Dolby Vision conversion pipeline
 - Build flavors and configuration
 
-## Key Changes from NuvioTV
-
-| Area | NuvioTV | SlugYard |
-|------|---------|----------|
-| Default player | ExoPlayer | Auto (content-aware) |
-| AUTO heuristic | HDR→ExoPlayer, anime→MPV | DV→ExoPlayer; anime/ASS→MPV; other streams→ExoPlayer |
-| MPV config | `profile=fast`, basic settings | Optimized: adaptive buffers, tone-mapping, AAudio, ASS compat, latency hacks |
-| UI strings | "Libmpv (Beta)", "Experimental" | "MPV Player", production labels |
-| Auto-failover | Disabled | Enabled (ExoPlayer fallback on MPV error) |
-| Settings categories | 12 | 6 (simplified for consumers) |
-| Autoplay modes | MANUAL, FIRST_STREAM, REGEX_MATCH | + SCORED (content-type-aware scoring) |
-| Source setup | Addons configured individually | Automatic Torrentio + MediaFusion setup after linking a debrid account |
-| OpenSubtitles | Not integrated | Automatic fallback when embedded subs unavailable |
-| Auth screens | QR code + email/password | Email/password only (Netflix-style) |
-| Startup flow | Experience mode + layout selection | Skips all onboarding, goes straight to home |
-| Debrid settings | Multi-provider UI | Torbox, Premiumize, and Real-Debrid connection flow |
-| Media3 version | 1.8.0 | 1.10.1 (forked with custom modifications) |
-| Branding | NuvioTV | SlugYard |
-
 ## Media3 Fork Details
 
 SlugYard maintains a fork of Media3 1.10.1 with custom performance optimizations:
 
 | Module | Purpose |
 |--------|---------|
-| `media3-common` | NuvioEngineConfig global toggle, ByteBufferDataReader |
+| `media3-common` | SlugYardEngineConfig global toggle, ByteBufferDataReader |
 | `media3-exoplayer` | Native allocation (DefaultAllocatorNative with JNI), scrubbing mode |
 | `media3-datasource` | ByteBufferDataReader zero-copy interface |
 | `media3-datasource-okhttp` | OkHttp datasource |
@@ -235,8 +216,8 @@ This project is licensed under the GNU General Public License v3.0 — see [LICE
 
 ## Credits
 
-- [NuvioTV](https://github.com/tapframe/NuvioTV) — upstream project
-- [NuvioTV](https://github.com/NuvioMedia/NuvioTV) — original project
+Required upstream attribution is documented in [NOTICE](NOTICE). This section lists the active third-party integrations used by the product:
+
 - [libmpv-android](https://github.com/jarnedemeulemeester/libmpv-android) — MPV Android integration
 - [Stremio](https://www.stremio.com/) — addon ecosystem
 

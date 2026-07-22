@@ -19,6 +19,7 @@ ALLOWED_FIXTURE_PARTS = {"TraktPublicListSourceResolverTest.kt"}
 ALLOWED_CHECKER_FILES = {
     "scripts/check_repository_readiness.py",
     "scripts/test_check_repository_readiness.py",
+    "scripts/test_release_beta.py",
 }
 ALLOWED_UPSTREAM_LICENSE_FILES = {
     "ffmpeg-decoder-downmix/src/main/java/androidx/media3/decoder/ffmpeg/FfmpegAudioDecoder.java",

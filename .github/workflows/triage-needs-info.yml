@@ -186,7 +186,7 @@ jobs:
                 });
               }
 
-              const marker = "<!-- nuviotv-bot:crash-logs-required-close -->";
+              const marker = "<!-- slugyard-bot:crash-logs-required-close -->";
               const comments = await github.paginate(github.rest.issues.listComments, {
                 owner,
                 repo,
@@ -227,7 +227,7 @@ jobs:
                 });
               }
 
-              const marker = "<!-- nuviotv-bot:needs-info -->";
+              const marker = "<!-- slugyard-bot:needs-info -->";
               const commentBody =
                 `${marker}\n` +
                 `Thanks for the report. Could you add more detail so we can reproduce it?\n\n` +

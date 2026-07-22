@@ -48,9 +48,9 @@ jobs:
               return;
             }
 
-            const marker = "<!-- nuvio-full-debug-build -->";
+            const marker = "<!-- slugyard-full-debug-build -->";
             const runUrl = run.html_url;
-            const artifactName = `nuvio-full-debug-pr-${pr.number}`;
+            const artifactName = `slugyard-full-debug-pr-${pr.number}`;
             let body;
 
             if (run.conclusion === "success") {

@@ -60,10 +60,10 @@ jobs:
             -validity 10000
 
           {
-            echo "NUVIO_RELEASE_STORE_FILE=$RUNNER_TEMP/ci-debug.jks"
-            echo "NUVIO_RELEASE_KEY_ALIAS=androiddebugkey"
-            echo "NUVIO_RELEASE_KEY_PASSWORD=android"
-            echo "NUVIO_RELEASE_STORE_PASSWORD=android"
+            echo "SLUGYARD_RELEASE_STORE_FILE=$RUNNER_TEMP/ci-debug.jks"
+            echo "SLUGYARD_RELEASE_KEY_ALIAS=androiddebugkey"
+            echo "SLUGYARD_RELEASE_KEY_PASSWORD=android"
+            echo "SLUGYARD_RELEASE_STORE_PASSWORD=android"
           } >> "$GITHUB_ENV"
 
       - name: Build fullDebug APK
@@ -72,7 +72,7 @@ jobs:
       - name: Upload fullDebug APK
         uses: actions/upload-artifact@v4
         with:
-          name: nuvio-full-debug-pr-${{ github.event.pull_request.number || github.run_number }}
+          name: slugyard-full-debug-pr-${{ github.event.pull_request.number || github.run_number }}
           path: app/build/outputs/apk/full/debug/app-full-universal-debug.apk
           if-no-files-found: error
           retention-days: 7
