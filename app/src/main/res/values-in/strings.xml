@@ -100,7 +100,6 @@
     <!-- HomeScreen -->
     <string name="home_no_addons">Tidak ada addon terpasang. Tambahkan satu untuk memulai.</string>
     <string name="home_no_catalog_addons">Tidak ada addon katalog terpasang. Pasang addon katalog untuk melihat konten.</string>
-    <string name="auth_notice_nuvio_logged_out">Anda telah keluar dari SlugYard. Silakan masuk kembali.</string>
     <string name="auth_notice_trakt_logged_out">Anda telah keluar dari Trakt. Silakan sambungkan kembali.</string>
     <string name="error_generic">Terjadi kesalahan</string>
 
@@ -354,8 +353,6 @@
     <string name="licenses_attributions_section_app">LISENSI APLIKASI</string>
     <string name="licenses_attributions_section_data">DATA &amp; LAYANAN</string>
     <string name="licenses_attributions_section_playback">LISENSI PEMUTARAN ANDROID</string>
-    <string name="licenses_attributions_nuvio_title">SlugYard TV</string>
-    <string name="licenses_attributions_nuvio_body">Kode sumber dan ketentuan lisensi tersedia di repositori proyek. Dilisensikan di bawah GNU General Public License v3.0.</string>
     <string name="licenses_attributions_tmdb_title">The Movie Database (TMDB)</string>
     <string name="licenses_attributions_tmdb_body">SlugYard menggunakan API TMDB untuk metadata film dan TV, poster dan latar belakang, trailer, pemeran, detail produksi, koleksi, dan rekomendasi. Produk ini menggunakan API TMDB namun tidak didukung atau disertifikasi oleh TMDB.</string>
     <string name="licenses_attributions_trakt_title">Trakt</string>
@@ -473,8 +470,6 @@
     <string name="advanced_section_cache">Cache</string>
     <string name="advanced_fast_horizontal_navigation">Navigasi Horizontal Cepat</string>
     <string name="advanced_fast_horizontal_navigation_subtitle">Tingkatkan kecepatan pengulangan D-pad di baris sambil menjaga pembatasan pengulangan tetap aktif.</string>
-    <string name="advanced_nuvio_focus_scroll">Gulir Fokus SlugYard</string>
-    <string name="advanced_nuvio_focus_scroll_subtitle">Gunakan animasi dan posisi gulir fokus global kustom SlugYard.</string>
     <string name="advanced_memory_only_vertical_scroll">Gulir Vertikal Hanya-Memori</string>
     <string name="advanced_memory_only_vertical_scroll_subtitle">Lewati permintaan gambar dari disk dan jaringan saat menggulir vertikal baris beranda.</string>
     <string name="advanced_compose_highlighter">Penyorot Compose</string>
@@ -1088,19 +1083,15 @@
     <string name="trakt_watch_progress_dialog_title">Progres Tonton</string>
     <string name="trakt_watch_progress_dialog_subtitle">Pilih apakah lanjutkan dan continue watching harus menggunakan Trakt atau SlugYard Sync sementara scrobbling Trakt tetap aktif.</string>
     <string name="trakt_watch_progress_source_trakt">Trakt</string>
-    <string name="trakt_watch_progress_source_nuvio">SlugYard Sync</string>
     <string name="trakt_library_source_title">Sumber Pustaka</string>
     <string name="trakt_library_source_subtitle">Pilih pustaka mana yang digunakan untuk menyimpan dan melihat koleksi Anda</string>
     <string name="trakt_library_source_dialog_title">Sumber Pustaka</string>
     <string name="trakt_library_source_dialog_subtitle">Pilih di mana menyimpan dan mengelola item pustaka Anda</string>
     <string name="trakt_library_source_trakt">Trakt</string>
-    <string name="trakt_library_source_nuvio">Pustaka SlugYard</string>
     <string name="trakt_library_source_trakt_selected">Pustaka Trakt dipilih</string>
-    <string name="trakt_library_source_nuvio_selected">Pustaka SlugYard dipilih</string>
     <string name="trakt_setting_on">Aktif</string>
     <string name="trakt_setting_off">Nonaktif</string>
     <string name="trakt_watch_progress_trakt_selected">Sumber progres tonton diatur ke Trakt</string>
-    <string name="trakt_watch_progress_nuvio_selected">Sumber progres tonton diatur ke SlugYard Sync</string>
     <string name="trakt_continue_watching_window">Jendela Lanjutkan Menonton</string>
     <string name="trakt_continue_watching_subtitle">Riwayat Trakt yang dipertimbangkan untuk lanjutkan menonton</string>
     <string name="trakt_unaired_next_up">Episode Selanjutnya yang Belum Tayang</string>
@@ -1591,7 +1582,6 @@
     <string name="library_delete_subtitle">Ini menghapus daftar dan semua item daftar dari Trakt.</string>
     <string name="library_delete_confirm">Hapus</string>
     <string name="library_source_local">LOKAL</string>
-    <string name="library_source_nuvio">SLUGYARD</string>
     <string name="library_source_trakt">TRAKT</string>
     <string name="library_source_saved">Tersimpan</string>
     <string name="library_source_cloud">Cloud</string>
@@ -1965,7 +1955,6 @@
     <string name="cd_preview">Pratinjau</string>
     <string name="cd_test">Tes</string>
     <string name="cd_unlink">Putuskan Tautan</string>
-    <string name="cd_nuvio_logo">SlugYard</string>
     <string name="cd_trakt_logo">Logo Trakt</string>
     <string name="cd_trakt_qr">QR aktivasi Trakt</string>
     <string name="cd_imdb">IMDb</string>
@@ -1976,8 +1965,6 @@
     <string name="cd_expand">Luaskan %1$s</string>
     <string name="cd_collapse">Ciutkan %1$s</string>
     <string name="cd_qr_login">Kode login QR</string>
-    <string name="cd_nuvio">SlugYard</string>
-
     <!-- Debug -->
     <string name="debug_signin_success">Berhasil masuk</string>
     <string name="debug_generate_description">Item debug yang dibuat %1$s #%2$d</string>

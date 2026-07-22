@@ -25,11 +25,11 @@
 # Keep Retrofit service interfaces (must preserve generic return types)
 -keep,allowobfuscation,allowshrinking interface retrofit2.Call
 -keep,allowobfuscation,allowshrinking class retrofit2.Response
-# NOTE: allowobfuscation here is fine for Retrofit, but superseded by the
-# broader kotlin.** keep rule below for DexClassLoader extension compatibility.
+# NOTE: allowobfuscation here is safe because Retrofit reconstructs these
+# interfaces from their preserved generic signatures.
 -keep,allowobfuscation,allowshrinking class kotlin.coroutines.Continuation
 # Keep all project API interfaces
--keep class com.nuvio.tv.data.remote.api.** { *; }
+-keep class com.sluggyard.tv.data.remote.api.** { *; }
 
 # ── OkHttp ─────────────────────────────────────────────────────────────────────
 -dontwarn okhttp3.internal.platform.**
@@ -39,8 +39,8 @@
 
 # ── Data classes (DTOs) ────────────────────────────────────────────────────────
 # Keep all DTO classes used with Moshi/Retrofit
--keep class com.nuvio.tv.data.remote.dto.** { *; }
--keep class com.nuvio.tv.domain.model.** { *; }
+-keep class com.sluggyard.tv.data.remote.dto.** { *; }
+-keep class com.sluggyard.tv.domain.model.** { *; }
 
 # ── Kotlin ─────────────────────────────────────────────────────────────────────
 -keepattributes *Annotation*
@@ -50,21 +50,8 @@
 # Keep Kotlin Metadata for reflection
 -keepattributes RuntimeVisibleAnnotations
 
-# ── NanoHTTPD (used by local server) ───────────────────────────────────────────
--keep class fi.iki.elonen.** { *; }
-# Keep server classes and their inner data classes (serialized with Gson)
--keep class com.nuvio.tv.core.server.** { *; }
-
 # ── Torrent streaming (TorrServer) ─────────────────────────────────────────────
--keep class com.nuvio.tv.core.torrent.** { *; }
-
-#── QuickJS ────────────────────────────────────────────────────────────────────
-# Keep quickjs-kt library classes for proper type conversion
--keep class com.dokar.quickjs.** { *; }
--keepclassmembers class com.dokar.quickjs.** { *; }
-# Keep PluginRuntime and related classes for JS bindings
--keep class com.nuvio.tv.core.plugin.** { *; }
--keepclassmembers class com.nuvio.tv.core.plugin.** { *; }
+-keep class com.sluggyard.tv.core.torrent.** { *; }
 
 # ── ExoPlayer / Media3 ────────────────────────────────────────────────────────
 -dontwarn androidx.media3.**
@@ -78,7 +65,7 @@
 -keep interface com.google.android.exoplayer2.** { *; }
 -keep class com.google.android.exoplayer2.ext.** { *; }
 
-# Keep native interfaces and handles for Nuvio Engine JNI
+# Keep native interfaces and handles for the retained Media3 engine JNI
 -keep class androidx.media3.exoplayer.upstream.DefaultAllocatorNative {
     native <methods>;
 }
@@ -90,23 +77,10 @@
     public long nativeHandle;
 }
 
-# ── Supabase / Ktor / Kotlinx Serialization ───────────────────────────────────
--keep class io.github.jan.supabase.** { *; }
--keep class io.ktor.** { *; }
--dontwarn io.ktor.**
--keep class com.nuvio.tv.data.remote.supabase.** { *; }
 # Keep @Serializable classes and their generated serializers
 -keepclassmembers class * {
     kotlinx.serialization.KSerializer serializer(...);
 }
-
-# ── External extension compatibility stubs (loaded via DexClassLoader) ────────
--keep class com.lagradost.cloudstream3.** { *; }
--keepclassmembers class com.lagradost.cloudstream3.** { *; }
--keep class com.lagradost.nicehttp.** { *; }
--keepclassmembers class com.lagradost.nicehttp.** { *; }
--keep class com.lagradost.api.** { *; }
--keepclassmembers class com.lagradost.api.** { *; }
 
 # ── General ────────────────────────────────────────────────────────────────────
 # Keep line numbers for crash reports
@@ -118,27 +92,7 @@
 # so keep the whole package to avoid JNI lookup crashes after R8.
 -keep class is.xyz.mpv.** { *; }
 
-# ── Missing class stubs (referenced by cloudstream3 / jsoup / newpipe) ────────
--dontwarn org.mozilla.javascript.**
--dontwarn com.google.re2j.**
 -dontwarn javax.script.**
 -dontwarn okhttp3.internal.sse.**
--dontwarn org.jsoup.helper.Re2jRegex
-
-# ── DexClassLoader runtime deps (CloudStream extensions) ─────────────────────
-# Extensions are DEX files loaded at runtime via DexClassLoader. They resolve
-# dependencies by fully-qualified name from the host classloader. R8 must not
-# rename or remove any class that extensions may reference.
--keep class kotlin.** { *; }
--keep class kotlinx.coroutines.** { *; }
-
--keep class okhttp3.** { *; }
--keepclassmembers class okhttp3.** { *; }
--keep class okio.** { *; }
--keepclassmembers class okio.** { *; }
--keep class org.jsoup.** { *; }
--keepclassmembers class org.jsoup.** { *; }
--keep class com.fasterxml.jackson.** { *; }
--keepclassmembers class com.fasterxml.jackson.** { *; }
 -dontwarn java.beans.ConstructorProperties
 -dontwarn java.beans.Transient

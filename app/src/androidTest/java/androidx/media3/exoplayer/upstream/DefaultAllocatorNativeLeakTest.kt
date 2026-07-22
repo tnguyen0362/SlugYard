@@ -1,6 +1,6 @@
 package androidx.media3.exoplayer.upstream
 
-import androidx.media3.common.NuvioEngineConfig
+import androidx.media3.common.SlugYardEngineConfig
 import androidx.media3.exoplayer.source.SampleDataQueueNative
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.After
@@ -16,12 +16,12 @@ class DefaultAllocatorNativeLeakTest {
 
     @Before
     fun setUp() {
-        NuvioEngineConfig.set(NuvioEngineConfig.nuvioMode())
+        SlugYardEngineConfig.set(SlugYardEngineConfig.slugyardMode())
     }
 
     @After
     fun tearDown() {
-        NuvioEngineConfig.set(NuvioEngineConfig.stockMode())
+        SlugYardEngineConfig.set(SlugYardEngineConfig.stockMode())
     }
 
     @Test

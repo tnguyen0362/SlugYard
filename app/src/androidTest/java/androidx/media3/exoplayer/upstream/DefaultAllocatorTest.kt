@@ -1,6 +1,6 @@
 package androidx.media3.exoplayer.upstream
 
-import androidx.media3.common.NuvioEngineConfig
+import androidx.media3.common.SlugYardEngineConfig
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -16,12 +16,12 @@ class DefaultAllocatorTest {
     @After
     fun tearDown() {
         // Reset config to stockMode to avoid test cross-pollution
-        NuvioEngineConfig.set(NuvioEngineConfig.stockMode())
+        SlugYardEngineConfig.set(SlugYardEngineConfig.stockMode())
     }
 
     @Test
     fun testAllocationInStockMode() {
-        NuvioEngineConfig.set(NuvioEngineConfig.stockMode())
+        SlugYardEngineConfig.set(SlugYardEngineConfig.stockMode())
         
         val allocationSize = 65536
         val allocator = DefaultAllocator(true, allocationSize)
@@ -37,17 +37,17 @@ class DefaultAllocatorTest {
     }
 
     @Test
-    fun testAllocationInNuvioMode() {
-        NuvioEngineConfig.set(NuvioEngineConfig.nuvioMode())
+    fun testAllocationInSlugyardMode() {
+        SlugYardEngineConfig.set(SlugYardEngineConfig.slugyardMode())
         
         val allocationSize = 65536
-        val allocator = DefaultAllocator(true, allocationSize)
+        val allocator = DefaultAllocator(true, allocationSize, 0, true)
         
         val allocation = allocator.allocate()
         assertNotNull("Allocation should not be null", allocation)
-        assertNull("Allocation data (heap array) should be null in nuvio mode", allocation.data)
-        assertNotNull("Allocation buffer (direct ByteBuffer) should not be null in nuvio mode", allocation.buffer)
-        assertTrue("Allocation buffer should be direct in nuvio mode", allocation.buffer!!.isDirect)
+        assertNull("Allocation data (heap array) should be null in slugyard mode", allocation.data)
+        assertNotNull("Allocation buffer (direct ByteBuffer) should not be null in slugyard mode", allocation.buffer)
+        assertTrue("Allocation buffer should be direct in slugyard mode", allocation.buffer!!.isDirect)
         assertEquals("Allocation buffer capacity should match request", allocationSize, allocation.buffer!!.capacity())
         
         allocator.release(allocation)

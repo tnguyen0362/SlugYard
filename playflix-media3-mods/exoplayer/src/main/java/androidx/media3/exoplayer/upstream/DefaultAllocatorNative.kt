@@ -4,7 +4,7 @@ import java.nio.ByteBuffer
 
 /**
  * JNI bridge for native off-heap memory allocation.
- * Fork addition for NuvioEngineConfig performance mode.
+ * Fork addition for SlugYardEngineConfig performance mode.
  *
  * Uses aligned allocation (64-byte) for SIMD-friendly access patterns.
  * Reuses the libdovi_bridge native library for JNI calls.

@@ -1,6 +1,6 @@
 package androidx.media3.exoplayer.upstream
 
-import androidx.media3.common.NuvioEngineConfig
+import androidx.media3.common.SlugYardEngineConfig
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Before
@@ -10,13 +10,13 @@ class DefaultAllocatorTest {
 
     @Before
     fun setUp() {
-        // Enable Nuvio mode to force native direct ByteBuffer allocation
-        NuvioEngineConfig.set(NuvioEngineConfig.nuvioMode())
+        // Enable SlugYard mode to force native direct ByteBuffer allocation
+        SlugYardEngineConfig.set(SlugYardEngineConfig.slugyardMode())
     }
 
     @After
     fun tearDown() {
-        NuvioEngineConfig.set(NuvioEngineConfig.stockMode())
+        SlugYardEngineConfig.set(SlugYardEngineConfig.stockMode())
     }
 
     @Test

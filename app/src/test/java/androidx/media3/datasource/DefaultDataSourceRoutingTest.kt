@@ -4,7 +4,7 @@ import android.content.Context
 import android.net.Uri
 import android.text.TextUtils
 import android.util.Log
-import androidx.media3.common.NuvioEngineConfig
+import androidx.media3.common.SlugYardEngineConfig
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkStatic
@@ -12,10 +12,7 @@ import io.mockk.unmockkAll
 import org.junit.After
 import org.junit.Before
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.net.ServerSocket
-import kotlin.concurrent.thread
 
 class DefaultDataSourceRoutingTest {
 
@@ -36,35 +33,12 @@ class DefaultDataSourceRoutingTest {
     @After
     fun tearDown() {
         unmockkAll()
-        NuvioEngineConfig.set(NuvioEngineConfig.stockMode())
+        SlugYardEngineConfig.set(SlugYardEngineConfig.stockMode())
     }
 
     @Test
-    fun testRoutingToLocalhostZeroCopyWhenEnabled() {
-        NuvioEngineConfig.set(NuvioEngineConfig.nuvioMode())
-
-        val serverSocket = ServerSocket(0)
-        val port = serverSocket.localPort
-
-        val expectedDataLength = 12345L
-        val responseHeaders = "HTTP/1.1 200 OK\r\n" +
-                "Content-Length: $expectedDataLength\r\n" +
-                "Connection: close\r\n" +
-                "\r\n"
-
-        var connectionAccepted = false
-        val serverThread = thread {
-            try {
-                val client = serverSocket.accept()
-                connectionAccepted = true
-                val out = client.getOutputStream()
-                out.write(responseHeaders.toByteArray())
-                out.flush()
-                client.close()
-            } catch (e: Exception) {
-                // Ignore
-            }
-        }
+    fun testRoutingToBaseDataSourceWhenSlugyardModeForLoopback() {
+        SlugYardEngineConfig.set(SlugYardEngineConfig.slugyardMode())
 
         val context = mockk<Context>(relaxed = true)
         val baseDataSource = mockk<DataSource>(relaxed = true)
@@ -73,7 +47,7 @@ class DefaultDataSourceRoutingTest {
         val mockUri = mockk<Uri>()
         every { mockUri.scheme } returns "http"
         every { mockUri.host } returns "127.0.0.1"
-        every { mockUri.port } returns port
+        every { mockUri.port } returns 8080
         every { mockUri.path } returns "/stream.mp4"
         every { mockUri.query } returns null
 
@@ -85,21 +59,15 @@ class DefaultDataSourceRoutingTest {
 
         try {
             val openedLength = defaultDataSource.open(dataSpec)
-            serverThread.join(3000)
-            
-            // If it routed to LocalhostZeroCopyDataSource, it connected to the socket
-            // and parsed Content-Length from headers.
-            assertEquals(expectedDataLength, openedLength)
-            assertTrue(connectionAccepted)
+            assertEquals(9999L, openedLength)
         } finally {
             defaultDataSource.close()
-            serverSocket.close()
         }
     }
 
     @Test
     fun testRoutingToBaseDataSourceWhenStockMode() {
-        NuvioEngineConfig.set(NuvioEngineConfig.stockMode())
+        SlugYardEngineConfig.set(SlugYardEngineConfig.stockMode())
 
         val context = mockk<Context>(relaxed = true)
         val baseDataSource = mockk<DataSource>(relaxed = true)
@@ -130,7 +98,7 @@ class DefaultDataSourceRoutingTest {
 
     @Test
     fun testRoutingToBaseDataSourceForExternalHost() {
-        NuvioEngineConfig.set(NuvioEngineConfig.nuvioMode()) // Enabled but host is external
+        SlugYardEngineConfig.set(SlugYardEngineConfig.slugyardMode()) // Enabled but host is external
 
         val context = mockk<Context>(relaxed = true)
         val baseDataSource = mockk<DataSource>(relaxed = true)

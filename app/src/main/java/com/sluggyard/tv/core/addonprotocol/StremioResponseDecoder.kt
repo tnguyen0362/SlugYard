@@ -1,0 +1,95 @@
+package com.sluggyard.tv.core.addonprotocol
+
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
+
+data class AddonCatalogItem(
+    val id: String,
+    val type: String,
+    val title: String,
+    val posterUrl: String?,
+    val backgroundUrl: String?,
+    val description: String?,
+    val releaseInfo: String?,
+)
+
+data class AddonStreamItem(
+    val id: String,
+    val title: String,
+    val sourceName: String?,
+    val directUrl: String?,
+    val infoHash: String?,
+    val fileIndex: Int?,
+)
+
+data class AddonSubtitleTrack(
+    val id: String,
+    val language: String?,
+    val url: String,
+)
+
+/** Decodes only documented response fields and ignores addon-specific extra data safely. */
+object StremioResponseDecoder {
+    fun catalogItems(payload: JsonObject): List<AddonCatalogItem> = payload.array("metas")
+        .orEmpty()
+        .mapNotNull(::catalogItem)
+
+    fun streamItems(payload: JsonObject): List<AddonStreamItem> = payload.array("streams")
+        .orEmpty()
+        .mapIndexedNotNull { index, element -> streamItem(index, element) }
+
+    fun subtitles(payload: JsonObject): List<AddonSubtitleTrack> = payload.array("subtitles")
+        .orEmpty()
+        .mapIndexedNotNull { index, element -> subtitle(index, element) }
+
+    private fun catalogItem(element: JsonElement): AddonCatalogItem? {
+        val objectValue = element as? JsonObject ?: return null
+        val id = objectValue.string("id")?.trim().orEmpty()
+        val type = objectValue.string("type")?.trim().orEmpty()
+        val title = objectValue.string("name")?.trim().orEmpty()
+        if (id.isBlank() || type.isBlank() || title.isBlank()) return null
+        return AddonCatalogItem(
+            id = id,
+            type = type,
+            title = title,
+            posterUrl = objectValue.string("poster"),
+            backgroundUrl = objectValue.string("background"),
+            description = objectValue.string("description"),
+            releaseInfo = objectValue.string("releaseInfo"),
+        )
+    }
+
+    private fun streamItem(index: Int, element: JsonElement): AddonStreamItem? {
+        val objectValue = element as? JsonObject ?: return null
+        val directUrl = objectValue.string("url")?.takeIf(String::isNotBlank)
+        val infoHash = objectValue.string("infoHash")?.takeIf(String::isNotBlank)
+        if (directUrl == null && infoHash == null) return null
+        val name = objectValue.string("name")?.takeIf(String::isNotBlank)
+        val title = objectValue.string("title")?.takeIf(String::isNotBlank) ?: name ?: "Stream ${index + 1}"
+        return AddonStreamItem(
+            id = objectValue.string("id")?.takeIf(String::isNotBlank) ?: "$index:$title",
+            title = title,
+            sourceName = name,
+            directUrl = directUrl,
+            infoHash = infoHash,
+            fileIndex = (objectValue["fileIdx"] as? JsonPrimitive)?.intOrNull,
+        )
+    }
+
+    private fun subtitle(index: Int, element: JsonElement): AddonSubtitleTrack? {
+        val objectValue = element as? JsonObject ?: return null
+        val url = objectValue.string("url")?.takeIf(String::isNotBlank) ?: return null
+        return AddonSubtitleTrack(
+            id = objectValue.string("id")?.takeIf(String::isNotBlank) ?: "$index:$url",
+            language = objectValue.string("lang") ?: objectValue.string("language"),
+            url = url,
+        )
+    }
+
+    private fun JsonObject.array(name: String): JsonArray? = this[name] as? JsonArray
+    private fun JsonObject.string(name: String): String? = (this[name] as? JsonPrimitive)?.contentOrNull
+}

@@ -4,7 +4,7 @@ import java.nio.ByteBuffer;
 
 /**
  * Interface for zero-copy data reading via direct ByteBuffers.
- * Fork addition for NuvioEngineConfig performance mode.
+ * Fork addition for SlugYardEngineConfig performance mode.
  */
 public interface ByteBufferDataReader {
     /**

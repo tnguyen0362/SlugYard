@@ -98,7 +98,6 @@
 
     <string name="home_no_addons">Ingen addons installeret. Tilføj en for at komme i gang.</string>
     <string name="home_no_catalog_addons">Ingen katalog-addons installeret. Installer en katalog-addon for at se indhold.</string>
-    <string name="auth_notice_nuvio_logged_out">Du er blevet logget ud af SlugYard. Log venligst ind igen.</string>
     <string name="auth_notice_trakt_logged_out">Du er blevet logget ud af Trakt. Tilslut venligst igen.</string>
     <string name="error_generic">Der opstod en fejl</string>
 
@@ -341,8 +340,6 @@
     <string name="licenses_attributions_section_app">APP-LICENS</string>
     <string name="licenses_attributions_section_data">DATA &amp; TJENESTER</string>
     <string name="licenses_attributions_section_playback">ANDROID-AFSPILNINGSLICENSER</string>
-    <string name="licenses_attributions_nuvio_title">SlugYard TV</string>
-    <string name="licenses_attributions_nuvio_body">Kildekode og licensvilkår er tilgængelige i projektets repository. Licenseret under GNU General Public License v3.0.</string>
     <string name="licenses_attributions_tmdb_title">The Movie Database (TMDB)</string>
     <string name="licenses_attributions_tmdb_body">SlugYard bruger TMDB API til film- og TV-metadata, artwork, trailere, cast, produktionsdetaljer, samlinger og anbefalinger. Dette produkt bruger TMDB API, men er ikke godkendt eller certificeret af TMDB.</string>
     <string name="licenses_attributions_trakt_title">Trakt</string>
@@ -470,8 +467,6 @@
     <string name="advanced_section_dv_diagnostics" translatable="false">DV Diagnostics</string>
     <string name="advanced_fast_horizontal_navigation">Hurtig vandret navigation</string>
     <string name="advanced_fast_horizontal_navigation_subtitle">Øg D-pad-gentagnelseshastighed i rækker mens gentagelsesbegrænsning forbliver aktiv.</string>
-    <string name="advanced_nuvio_focus_scroll">SlugYard fokusscrolling</string>
-    <string name="advanced_nuvio_focus_scroll_subtitle">Brug SlugYard\'s brugerdefinerede globale fokusscroll-animation og -positionering.</string>
     <string name="advanced_memory_only_vertical_scroll">Hukommelsesbaseret lodret scrolling</string>
     <string name="advanced_memory_only_vertical_scroll_subtitle">Spring disk- og netværksbilledanmodninger over under lodret scrolling af startsiderækkerne.</string>
     <string name="advanced_compose_highlighter">Compose-fremhæver</string>
@@ -1153,19 +1148,15 @@
     <string name="trakt_watch_progress_dialog_title">Se-fremdrift</string>
     <string name="trakt_watch_progress_dialog_subtitle">Vælg om genoptagelse og fortsæt med at se skal bruge Trakt eller SlugYard Sync, mens Trakt-scrobbling forbliver aktiv.</string>
     <string name="trakt_watch_progress_source_trakt">Trakt</string>
-    <string name="trakt_watch_progress_source_nuvio">SlugYard Sync</string>
     <string name="trakt_library_source_title">Bibliotekskilde</string>
     <string name="trakt_library_source_subtitle">Vælg hvilket bibliotek der bruges til at gemme og se din samling</string>
     <string name="trakt_library_source_dialog_title">Bibliotekskilde</string>
     <string name="trakt_library_source_dialog_subtitle">Vælg, hvor du vil gemme og administrere dine bibliotekets indhold</string>
     <string name="trakt_library_source_trakt">Trakt</string>
-    <string name="trakt_library_source_nuvio">SlugYard-bibliotek</string>
     <string name="trakt_library_source_trakt_selected">Trakt-bibliotek valgt</string>
-    <string name="trakt_library_source_nuvio_selected">SlugYard-bibliotek valgt</string>
     <string name="trakt_setting_on">Til</string>
     <string name="trakt_setting_off">Fra</string>
     <string name="trakt_watch_progress_trakt_selected">Fremskridtskilde indstillet til Trakt</string>
-    <string name="trakt_watch_progress_nuvio_selected">Fremskridtskilde indstillet til SlugYard Sync</string>
     <string name="trakt_continue_watching_window">Fortsæt med at se-vindue</string>
     <string name="trakt_continue_watching_subtitle">Trakt-historik inkluderet i fortsæt med at se</string>
     <string name="trakt_unaired_next_up">Kommende næste afsnit</string>
@@ -1653,7 +1644,6 @@
     <string name="library_delete_subtitle">Dette fjerner listen og alle listeelementer fra Trakt.</string>
     <string name="library_delete_confirm">Slet</string>
     <string name="library_source_local">LOKAL</string>
-    <string name="library_source_nuvio">SLUGYARD</string>
     <string name="library_source_trakt">TRAKT</string>
     <string name="library_source_saved">Gemt</string>
     <string name="library_source_cloud">Cloud</string>
@@ -2011,7 +2001,6 @@
     <string name="cd_preview">Forhåndsvisning</string>
     <string name="cd_test">Test</string>
     <string name="cd_unlink">Fjern tilknytning</string>
-    <string name="cd_nuvio_logo">SlugYard</string>
     <string name="cd_trakt_logo">Trakt-logo</string>
     <string name="cd_trakt_qr">Trakt-aktiverings-QR</string>
     <string name="cd_imdb">IMDb</string>
@@ -2022,8 +2011,6 @@
     <string name="cd_expand">Udvid %1$s</string>
     <string name="cd_collapse">Skjul %1$s</string>
     <string name="cd_qr_login">QR-loginkode</string>
-    <string name="cd_nuvio">SlugYard</string>
-
     <string name="debug_signin_success">Logget ind</string>
     <string name="debug_generate_description">Debug-genereret %1$s element nr. %2$d</string>
     <string name="debug_generate_result_failed">Mislykkedes: %1$s</string>

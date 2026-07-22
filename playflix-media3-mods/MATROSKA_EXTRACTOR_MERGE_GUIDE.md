@@ -1,7 +1,7 @@
 # MatroskaExtractor Merge Guide: DV Vendored Additions
 
 Rebase target: Media3 1.10.1 stock `MatroskaExtractor.java`
-Source: `app/src/main/java/com/nuvio/tv/core/player/dvmkv/MatroskaExtractor.java` (3,523 lines)
+Source: `app/src/main/java/com/sluggyard/tv/core/player/dvmkv/MatroskaExtractor.java` (3,523 lines)
 
 ---
 
@@ -11,7 +11,7 @@ The following imports are NOT in stock MatroskaExtractor and must be added:
 
 ```java
 import androidx.media3.container.DolbyVisionConfig;           // line 43
-import com.nuvio.tv.core.player.dvmkv.DolbyVisionCompatibility; // used at lines 2901, 2929, 2936
+import com.sluggyard.tv.core.player.dvmkv.DolbyVisionCompatibility; // used at lines 2901, 2929, 2936
 import java.nio.ByteBuffer;                                    // may already be stock
 import java.nio.ByteOrder;                                    // may already be stock
 ```

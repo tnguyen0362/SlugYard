@@ -10,3 +10,11 @@ and application settings. These changes are maintained by the SlugYard project.
 
 SlugYard is distributed under the GNU General Public License, version 3.0.
 See LICENSE for the complete license text.
+
+Third-party GPL component:
+
+SlugYard distributes `nextlib-mediainfo` version 1.9.1-0.11.0 from the
+`io.github.anilbeesetti:nextlib-mediainfo` Maven coordinate. The upstream
+project is licensed under GPL-3.0.
+
+Source: https://github.com/anilbeesetti/nextlib

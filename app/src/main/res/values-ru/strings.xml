@@ -64,7 +64,6 @@
     <!-- HomeScreen -->
     <string name="home_no_addons">Нет установленных аддонов. Добавьте один для начала.</string>
     <string name="home_no_catalog_addons">Нет установленных аддонов каталога. Установите аддон каталога, чтобы увидеть контент.</string>
-    <string name="auth_notice_nuvio_logged_out">Вы вышли из системы SlugYard. Пожалуйста, войдите снова.</string>
     <string name="auth_notice_trakt_logged_out">Вы вышли из системы Trakt. Пожалуйста, переподключитесь.</string>
     <string name="error_generic">Произошла ошибка</string>
 
@@ -699,11 +698,9 @@
     <string name="trakt_watch_progress_dialog_title">Прогресс просмотра</string>
     <string name="trakt_watch_progress_dialog_subtitle">Выберите, должен ли раздел \"Продолжить просмотр\" использовать Trakt или SlugYard Sync (скробблинг в Trakt останется активным).</string>
     <string name="trakt_watch_progress_source_trakt">Trakt</string>
-    <string name="trakt_watch_progress_source_nuvio">SlugYard Sync</string>
     <string name="trakt_setting_on">Вкл</string>
     <string name="trakt_setting_off">Выкл</string>
     <string name="trakt_watch_progress_trakt_selected">Источник прогресса просмотра установлен на Trakt</string>
-    <string name="trakt_watch_progress_nuvio_selected">Источник прогресса просмотра установлен на SlugYard Sync</string>
     <string name="trakt_continue_watching_window">Окно \"Продолжить просмотр\"</string>
     <string name="trakt_continue_watching_subtitle">История Trakt, учитываемая для раздела \"Продолжить просмотр\"</string>
     <string name="trakt_unaired_next_up">Невышедшие эпизоды \"На очереди\"</string>
@@ -1111,7 +1108,6 @@
     <string name="library_delete_subtitle">Это удалит список и все его элементы из Trakt.</string>
     <string name="library_delete_confirm">Удалить</string>
     <string name="library_source_local">ЛОКАЛЬНО</string>
-    <string name="library_source_nuvio">SLUGYARD</string>
     <string name="library_source_trakt">TRAKT</string>
     <string name="library_syncing_library">Синхронизация библиотеки\u2026</string>
     <string name="library_type_all">Все</string>
@@ -1414,7 +1410,6 @@
     <string name="cd_preview">Предпросмотр</string>
     <string name="cd_test">Тест</string>
     <string name="cd_unlink">Отвязать</string>
-    <string name="cd_nuvio_logo">SlugYard</string>
     <string name="cd_trakt_logo">Логотип Trakt</string>
     <string name="cd_trakt_qr">QR-код активации Trakt</string>
     <string name="cd_imdb">IMDb</string>
@@ -1425,8 +1420,6 @@
     <string name="cd_expand">Развернуть %1$s</string>
     <string name="cd_collapse">Свернуть %1$s</string>
     <string name="cd_qr_login">QR-код входа</string>
-    <string name="cd_nuvio">SlugYard</string>
-
     <!-- Debug -->
     <string name="debug_signin_success">Вход успешно выполнен</string>
     <string name="debug_generate_description">Сгенерированный отладкой элемент %1$s #%2$d</string>
@@ -1603,8 +1596,6 @@
     <string name="licenses_attributions_section_app">ЛИЦЕНЗИЯ ПРИЛОЖЕНИЯ</string>
     <string name="licenses_attributions_section_data">ДАННЫЕ И СЕРВИСЫ</string>
     <string name="licenses_attributions_section_playback">ЛИЦЕНЗИИ ВОСПРОИЗВЕДЕНИЯ ANDROID</string>
-    <string name="licenses_attributions_nuvio_title">SlugYard TV</string>
-    <string name="licenses_attributions_nuvio_body">Исходный код и условия лицензии доступны в репозитории проекта. Лицензировано под GNU General Public License v3.0.</string>
     <string name="licenses_attributions_tmdb_title">The Movie Database (TMDB)</string>
     <string name="licenses_attributions_tmdb_body">SlugYard использует API TMDB для метаданных фильмов и ТВ, иллюстраций, трейлеров, актёров, производственных деталей, коллекций и рекомендаций. Этот продукт использует API TMDB, но не одобрен и не сертифицирован TMDB.</string>
     <string name="licenses_attributions_trakt_title">Trakt</string>
@@ -1690,8 +1681,6 @@
     <string name="advanced_section_cache">Кэш</string>
     <string name="advanced_fast_horizontal_navigation">Быстрая горизонтальная навигация</string>
     <string name="advanced_fast_horizontal_navigation_subtitle">Увеличить скорость повторения D-pad в строках при сохранении дросселирования повторений.</string>
-    <string name="advanced_nuvio_focus_scroll">Прокрутка фокуса SlugYard</string>
-    <string name="advanced_nuvio_focus_scroll_subtitle">Использовать собственную глобальную анимацию прокрутки и позиционирования фокуса SlugYard.</string>
     <string name="advanced_memory_only_vertical_scroll">Вертикальная прокрутка только из памяти</string>
     <string name="advanced_memory_only_vertical_scroll_subtitle">Пропускать запросы изображений с диска и сети при вертикальной прокрутке строк главного экрана.</string>
     <string name="advanced_compose_highlighter">Подсветка Compose</string>
@@ -1926,9 +1915,7 @@
     <string name="trakt_library_source_dialog_title">Источник библиотеки</string>
     <string name="trakt_library_source_dialog_subtitle">Выберите, где сохранять и управлять элементами библиотеки</string>
     <string name="trakt_library_source_trakt">Trakt</string>
-    <string name="trakt_library_source_nuvio">Библиотека SlugYard</string>
     <string name="trakt_library_source_trakt_selected">Выбрана библиотека Trakt</string>
-    <string name="trakt_library_source_nuvio_selected">Выбрана библиотека SlugYard</string>
     <string name="trakt_more_like_this_source_title">Источник «Похожее»</string>
     <string name="trakt_more_like_this_source_subtitle">Выберите, откуда берутся рекомендации на страницах деталей</string>
     <string name="trakt_more_like_this_source_dialog_title">Источник «Похожее»</string>

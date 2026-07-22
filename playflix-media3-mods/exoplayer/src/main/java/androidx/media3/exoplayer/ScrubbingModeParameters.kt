@@ -2,7 +2,7 @@ package androidx.media3.exoplayer
 
 /**
  * Configuration for scrubbing (seek) optimization mode.
- * Fork addition for NuvioEngineConfig performance mode.
+ * Fork addition for SlugYardEngineConfig performance mode.
  *
  * Controls behavior during seek operations: whether to disable audio/metadata
  * rendering for faster response, and whether to boost codec operating rate.

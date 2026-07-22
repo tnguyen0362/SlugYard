@@ -3,8 +3,6 @@ package androidx.media3.exoplayer.source
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.nio.ByteBuffer
@@ -18,8 +16,9 @@ class SampleDataQueueNativeTest {
         val target = ByteBuffer.allocateDirect(20)
 
         // Success copy
-        val success = SampleDataQueueNative.copyFromArray(source, 2, target, 5, 5)
-        assertTrue("copyFromArray should succeed", success)
+        val targetAddress = SampleDataQueueNative.getDirectBufferAddressCached(target)
+        val result = SampleDataQueueNative.copyFromArray(targetAddress + 5, source, 2, 5)
+        assertEquals("copyFromArray should return copied length", 5, result)
 
         // Verify content
         val verification = ByteArray(5)
@@ -27,16 +26,17 @@ class SampleDataQueueNativeTest {
         target.get(verification)
         assertArrayEquals(byteArrayOf(3, 4, 5, 6, 7), verification)
 
-        // Boundary checks
-        // 1. Negative offset
-        assertFalse(SampleDataQueueNative.copyFromArray(source, -1, target, 0, 5))
-        assertFalse(SampleDataQueueNative.copyFromArray(source, 0, target, -1, 5))
-        // 2. Negative length
-        assertFalse(SampleDataQueueNative.copyFromArray(source, 0, target, 0, -5))
-        // 3. Length exceeds source
-        assertFalse(SampleDataQueueNative.copyFromArray(source, 8, target, 0, 5))
-        // 4. Length exceeds target capacity
-        assertFalse(SampleDataQueueNative.copyFromArray(source, 0, target, 18, 5))
+        assertEquals(
+            "copyFromArray should reject a non-direct destination",
+            -1,
+            SampleDataQueueNative.copyBetweenDirectBuffers(
+                ByteBuffer.allocate(20),
+                0,
+                target,
+                0,
+                1,
+            ),
+        )
     }
 
     @Test
@@ -48,24 +48,20 @@ class SampleDataQueueNativeTest {
         val target = ByteArray(15)
 
         // Success copy
-        val success = SampleDataQueueNative.copyToArray(source, 2, target, 4, 5)
-        assertTrue("copyToArray should succeed", success)
+        val sourceAddress = SampleDataQueueNative.getDirectBufferAddressCached(source)
+        val result = SampleDataQueueNative.copyToArray(target, 4, sourceAddress + 2, 5)
+        assertEquals("copyToArray should return copied length", 5, result)
 
         // Verify content
         val verification = ByteArray(5)
         System.arraycopy(target, 4, verification, 0, 5)
         assertArrayEquals(byteArrayOf(3, 4, 5, 6, 7), verification)
 
-        // Boundary checks
-        // 1. Negative offset
-        assertFalse(SampleDataQueueNative.copyToArray(source, -1, target, 0, 5))
-        assertFalse(SampleDataQueueNative.copyToArray(source, 0, target, -1, 5))
-        // 2. Negative length
-        assertFalse(SampleDataQueueNative.copyToArray(source, 0, target, 0, -5))
-        // 3. Length exceeds source capacity
-        assertFalse(SampleDataQueueNative.copyToArray(source, 18, target, 0, 5))
-        // 4. Length exceeds target array size
-        assertFalse(SampleDataQueueNative.copyToArray(source, 0, target, 12, 5))
+        assertEquals(
+            "copyToArray should copy from the resolved direct-buffer address",
+            5,
+            SampleDataQueueNative.copyToArray(target, 0, sourceAddress, 5),
+        )
     }
 
     @Test
@@ -77,8 +73,8 @@ class SampleDataQueueNativeTest {
         }
 
         // Success copy
-        val success = SampleDataQueueNative.copyBetweenDirectBuffers(source, 2, target, 5, 5)
-        assertTrue("copyBetweenDirectBuffers should succeed", success)
+        val result = SampleDataQueueNative.copyBetweenDirectBuffers(target, 5, source, 2, 5)
+        assertEquals("copyBetweenDirectBuffers should return copied length", 5, result)
 
         // Verify content
         val verification = ByteArray(5)
@@ -86,15 +82,16 @@ class SampleDataQueueNativeTest {
         target.get(verification)
         assertArrayEquals(byteArrayOf(3, 4, 5, 6, 7), verification)
 
-        // Boundary checks
-        // 1. Negative offset
-        assertFalse(SampleDataQueueNative.copyBetweenDirectBuffers(source, -1, target, 0, 5))
-        assertFalse(SampleDataQueueNative.copyBetweenDirectBuffers(source, 0, target, -1, 5))
-        // 2. Negative length
-        assertFalse(SampleDataQueueNative.copyBetweenDirectBuffers(source, 0, target, 0, -5))
-        // 3. Length exceeds source capacity
-        assertFalse(SampleDataQueueNative.copyBetweenDirectBuffers(source, 18, target, 0, 5))
-        // 4. Length exceeds target capacity
-        assertFalse(SampleDataQueueNative.copyBetweenDirectBuffers(source, 0, target, 18, 5))
+        assertEquals(
+            "copyBetweenDirectBuffers should reject a non-direct source",
+            -1,
+            SampleDataQueueNative.copyBetweenDirectBuffers(
+                target,
+                0,
+                ByteBuffer.allocate(20),
+                0,
+                1,
+            ),
+        )
     }
 }

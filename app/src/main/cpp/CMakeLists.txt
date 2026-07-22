@@ -10,6 +10,10 @@ add_library(
     dovi_bridge
     SHARED
     dovi_bridge.cpp
+    # Reuse the owner-provided Media3 fork JNI entry points that are packaged
+    # in the retained AAR and loaded by its native allocator classes.
+    ${CMAKE_CURRENT_LIST_DIR}/../../../../playflix-media3-mods/exoplayer/src/main/jni/default_allocator_native.c
+    ${CMAKE_CURRENT_LIST_DIR}/../../../../playflix-media3-mods/exoplayer/src/main/jni/sample_data_queue_native.c
 )
 
 find_library(log-lib log)

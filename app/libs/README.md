@@ -8,7 +8,7 @@ SlugYard maintains a fork of `androidx.media3` at `C:\Users\tnguy\Documents\Medi
 
 | Module | AAR | Purpose |
 |--------|-----|---------|
-| `media3-common` | `lib-common-release.aar` | NuvioEngineConfig, ByteBufferDataReader |
+| `media3-common` | `lib-common-release.aar` | SlugYardEngineConfig, ByteBufferDataReader |
 | `media3-exoplayer` | `lib-exoplayer-release.aar` | Native allocation (DefaultAllocatorNative JNI), scrubbing mode |
 | `media3-datasource` | `lib-datasource-release.aar` | ByteBufferDataReader zero-copy |
 | `media3-datasource-okhttp` | `lib-datasource-okhttp-release.aar` | OkHttp datasource |
@@ -63,7 +63,7 @@ SlugYard maintains a fork of `androidx.media3` at `C:\Users\tnguy\Documents\Medi
 
 The fork includes these custom modifications on top of stock Media3 1.10.1:
 
-- **NuvioEngineConfig** (Java) — Global performance toggle in `common` module
+- **SlugYardEngineConfig** (Java) — Global performance toggle in `common` module
 - **ByteBufferDataReader** — Zero-copy interface in `common` module
 - **DefaultAllocatorNative** — JNI-backed native allocator in `exoplayer` module
 - **Allocation.buffer** — Added `ByteBuffer buffer` field for parallel range data source

@@ -1,7 +1,7 @@
 package androidx.media3.exoplayer.upstream
 
 import android.net.Uri
-import androidx.media3.common.NuvioEngineConfig
+import androidx.media3.common.SlugYardEngineConfig
 import androidx.media3.datasource.AesCipherDataSource
 import androidx.media3.datasource.AesFlushingCipher
 import androidx.media3.datasource.ByteArrayDataSource
@@ -33,19 +33,19 @@ class PerformanceBenchmark {
 
     @Before
     fun setUp() {
-        NuvioEngineConfig.set(NuvioEngineConfig.stockMode())
+        SlugYardEngineConfig.set(SlugYardEngineConfig.stockMode())
     }
 
     @After
     fun tearDown() {
-        NuvioEngineConfig.set(NuvioEngineConfig.stockMode())
+        SlugYardEngineConfig.set(SlugYardEngineConfig.stockMode())
     }
 
     @Test
     fun runAllBenchmarks() {
         val results = StringBuilder()
         results.append("\n==================================================\n")
-        results.append("         NUVIO TV PERFORMANCE BENCHMARKS          \n")
+        results.append("         SLUGYARD PERFORMANCE BENCHMARKS          \n")
         results.append("==================================================\n\n")
 
         runAllocatorBenchmark(results)
@@ -134,16 +134,15 @@ class PerformanceBenchmark {
             directTarget.clear()
             directTarget.put(directSource)
             SampleDataQueueNative.copyBetweenDirectBuffers(directSource, 0, directTarget, 0, chunkSize)
-            SampleDataQueueNative.copyBetweenAddresses(directSource, 0, directTarget, 0, chunkSize)
-            SampleDataQueueNative.nativeCopyAddresses(sourceAddr, 0, targetAddr, 0, chunkSize)
+            SampleDataQueueNative.copyBetweenAddresses(targetAddr, sourceAddr, chunkSize)
             
             directTarget.clear()
             directTarget.put(sourceBytes, 0, chunkSize)
-            SampleDataQueueNative.copyFromArray(sourceBytes, 0, directTarget, 0, chunkSize)
+            SampleDataQueueNative.copyFromArray(targetAddr, sourceBytes, 0, chunkSize)
             
             directSource.clear()
             directSource.get(targetBytes, 0, chunkSize)
-            SampleDataQueueNative.copyToArray(directSource, 0, targetBytes, 0, chunkSize)
+            SampleDataQueueNative.copyToArray(targetBytes, 0, sourceAddr, chunkSize)
         }
 
         // 1. JVM Standard Copy (Heap to Heap)
@@ -176,7 +175,7 @@ class PerformanceBenchmark {
 
         val jniCriticalStart = System.nanoTime()
         for (i in 0 until totalChunks) {
-            SampleDataQueueNative.copyBetweenAddresses(directSource, 0, directTarget, 0, chunkSize)
+            SampleDataQueueNative.copyBetweenAddresses(targetAddr, sourceAddr, chunkSize)
         }
         val jniCriticalEnd = System.nanoTime()
         val jniCriticalDurationSec = (jniCriticalEnd - jniCriticalStart) / 1_000_000_000.0
@@ -184,7 +183,7 @@ class PerformanceBenchmark {
 
         val jniCriticalCachedStart = System.nanoTime()
         for (i in 0 until totalChunks) {
-            SampleDataQueueNative.nativeCopyAddresses(sourceAddr, 0, targetAddr, 0, chunkSize)
+            SampleDataQueueNative.copyBetweenAddresses(targetAddr, sourceAddr, chunkSize)
         }
         val jniCriticalCachedEnd = System.nanoTime()
         val jniCriticalCachedDurationSec = (jniCriticalCachedEnd - jniCriticalCachedStart) / 1_000_000_000.0
@@ -202,7 +201,7 @@ class PerformanceBenchmark {
 
         val jniArrayToDirectStart = System.nanoTime()
         for (i in 0 until totalChunks) {
-            SampleDataQueueNative.copyFromArray(sourceBytes, 0, directTarget, 0, chunkSize)
+            SampleDataQueueNative.copyFromArray(targetAddr, sourceBytes, 0, chunkSize)
         }
         val jniArrayToDirectEnd = System.nanoTime()
         val jniArrayToDirectDurationSec = (jniArrayToDirectEnd - jniArrayToDirectStart) / 1_000_000_000.0
@@ -220,7 +219,7 @@ class PerformanceBenchmark {
 
         val jniDirectToArrayStart = System.nanoTime()
         for (i in 0 until totalChunks) {
-            SampleDataQueueNative.copyToArray(directSource, 0, targetBytes, 0, chunkSize)
+            SampleDataQueueNative.copyToArray(targetBytes, 0, sourceAddr, chunkSize)
         }
         val jniDirectToArrayEnd = System.nanoTime()
         val jniDirectToArrayDurationSec = (jniDirectToArrayEnd - jniDirectToArrayStart) / 1_000_000_000.0
@@ -283,17 +282,16 @@ class PerformanceBenchmark {
         val heapDurationSec = (heapEnd - heapStart) / 1_000_000_000.0
         val heapThroughput = sizeMb / heapDurationSec
 
-        // 2. Zero-Copy direct ByteBuffer AES path
+        // 2. Alternate AES DataSource path using the resolved byte-array API
         val directDataSource = FakeByteBufferDataSource(ciphertext)
         val directAesDataSource = AesCipherDataSource(secretKey, directDataSource)
 
-        val directTarget = ByteBuffer.allocateDirect(chunkSize)
+        val directTarget = ByteArray(chunkSize)
         val directStart = System.nanoTime()
         for (i in 0 until totalChunks) {
             directAesDataSource.open(dataSpec)
             directDataSource.resetPosition()
-            directTarget.clear()
-            directAesDataSource.read(directTarget, chunkSize)
+            directAesDataSource.read(directTarget, 0, chunkSize)
             directAesDataSource.close()
         }
         val directEnd = System.nanoTime()
@@ -301,7 +299,7 @@ class PerformanceBenchmark {
         val directThroughput = sizeMb / directDurationSec
 
         sb.append(String.format("  - Heap AesCipherDataSource : %6.2f ms (%6.1f MB/s)\n", heapDurationSec * 1000.0, heapThroughput))
-        sb.append(String.format("  - Direct Zero-Copy AES Path : %6.2f ms (%6.1f MB/s)\n", directDurationSec * 1000.0, directThroughput))
+        sb.append(String.format("  - Alternate AES DataSource  : %6.2f ms (%6.1f MB/s)\n", directDurationSec * 1000.0, directThroughput))
         val ratio = heapDurationSec / directDurationSec
         sb.append(String.format("  - Direct Speedup Factor     : %.2fx\n\n", ratio))
     }
@@ -433,7 +431,7 @@ class PerformanceBenchmark {
                 System.arraycopy(srcArr, 0, dstArr, 0, size)
                 srcDirect.clear(); dstDirect.clear()
                 SampleDataQueueNative.copyBetweenDirectBuffers(srcDirect, 0, dstDirect, 0, size)
-                SampleDataQueueNative.nativeCopyAddresses(srcAddr, 0, dstAddr, 0, size)
+                SampleDataQueueNative.copyBetweenAddresses(dstAddr, srcAddr, size)
             }
 
             // JVM ArrayCopy
@@ -453,7 +451,7 @@ class PerformanceBenchmark {
             // JNI Critical Cached
             val startCrit = System.nanoTime()
             for (i in 0 until iterations) {
-                SampleDataQueueNative.nativeCopyAddresses(srcAddr, 0, dstAddr, 0, size)
+                SampleDataQueueNative.copyBetweenAddresses(dstAddr, srcAddr, size)
             }
             val critDurationMs = (System.nanoTime() - startCrit) / 1_000_000.0
 

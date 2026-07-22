@@ -98,7 +98,6 @@
     <!-- HomeScreen -->
     <string name="home_no_addons">Aucun addon installé. Ajoutez-en un pour commencer.</string>
     <string name="home_no_catalog_addons">Aucun addon de catalogue installé. Installez un addon de catalogue pour voir du contenu.</string>
-    <string name="auth_notice_nuvio_logged_out">Vous avez été déconnecté de SlugYard. Reconnectez-vous.</string>
     <string name="auth_notice_trakt_logged_out">Vous avez été déconnecté de Trakt. Reconnectez-vous.</string>
     <string name="error_generic">Une erreur est survenue</string>
 
@@ -405,15 +404,11 @@
     <string name="advanced_section_dv_diagnostics">Diagnostics DV</string>
     <string name="advanced_fast_horizontal_navigation">Navigation horizontale rapide</string>
     <string name="advanced_fast_horizontal_navigation_subtitle">Augmenter la vitesse de répétition du D-pad dans les rangées tout en conservant la limitation de répétition.</string>
-    <string name="advanced_nuvio_performance_mode">Mémoire native ExoPlayer</string>
-    <string name="advanced_nuvio_performance_mode_subtitle">Active l’allocateur natif haute performance, la mémoire hors tas et les optimisations réseau pour une lecture plus fluide</string>
     <string name="buffer_device_ram_info">RAM de l’appareil : %s</string>
     <string name="buffer_safe_limit_info">Limite de sécurité recommandée : %d Mo</string>
     <string name="buffer_safe_status">Sûr : dans la limite recommandée pour votre appareil.</string>
     <string name="buffer_unsafe_warning">Avertissement : dépasse la limite de sécurité recommandée (%1$d Mo) pour votre appareil %2$s. Peut provoquer des plantages de l’app.</string>
     <string name="buffer_auto_limit_active">Limite de sécurité auto-ajustée : %d Mo</string>
-    <string name="advanced_nuvio_focus_scroll">Défilement de la sélection SlugYard</string>
-    <string name="advanced_nuvio_focus_scroll_subtitle">Utiliser l’animation et le positionnement globaux personnalisés du défilement de sélection de SlugYard.</string>
     <string name="advanced_memory_only_vertical_scroll">Défilement vertical en mémoire uniquement</string>
     <string name="advanced_memory_only_vertical_scroll_subtitle">Ignorer les requêtes d’images disque et réseau pendant le défilement vertical des rangées de l’accueil.</string>
     <string name="advanced_compose_highlighter">Surligneur Compose</string>
@@ -888,19 +883,15 @@
     <string name="trakt_watch_progress_dialog_title">Progression</string>
     <string name="trakt_watch_progress_dialog_subtitle">Choisir si la reprise et Continuer à regarder utilisent Trakt ou SlugYard Sync, tout en maintenant le scrobbling Trakt actif.</string>
     <string name="trakt_watch_progress_source_trakt">Trakt</string>
-    <string name="trakt_watch_progress_source_nuvio">SlugYard Sync</string>
     <string name="trakt_library_source_title">Source de la bibliothèque</string>
     <string name="trakt_library_source_subtitle">Choisir quelle bibliothèque utiliser pour enregistrer et afficher votre collection</string>
     <string name="trakt_library_source_dialog_title">Source de la bibliothèque</string>
     <string name="trakt_library_source_dialog_subtitle">Choisir où enregistrer et gérer les éléments de votre bibliothèque</string>
     <string name="trakt_library_source_trakt">Trakt</string>
-    <string name="trakt_library_source_nuvio">Bibliothèque SlugYard</string>
     <string name="trakt_library_source_trakt_selected">Bibliothèque Trakt sélectionnée</string>
-    <string name="trakt_library_source_nuvio_selected">Bibliothèque SlugYard sélectionnée</string>
     <string name="trakt_setting_on">Activé</string>
     <string name="trakt_setting_off">Désactivé</string>
     <string name="trakt_watch_progress_trakt_selected">Source de progression définie sur Trakt</string>
-    <string name="trakt_watch_progress_nuvio_selected">Source de progression définie sur SlugYard Sync</string>
     <string name="trakt_continue_watching_window">Période de Continuer à regarder</string>
     <string name="trakt_continue_watching_subtitle">Historique Trakt pris en compte pour Continuer à regarder</string>
     <string name="trakt_unaired_next_up">Épisodes suivants non diffusés</string>
@@ -1378,7 +1369,6 @@
     <string name="library_delete_subtitle">Cela supprime la liste et tous ses éléments de Trakt.</string>
     <string name="library_delete_confirm">Supprimer</string>
     <string name="library_source_local">Local</string>
-    <string name="library_source_nuvio">SlugYard</string>
     <string name="library_source_trakt">Trakt</string>
     <string name="library_watchlist">Liste de suivi</string>
     <string name="library_syncing_library">Synchronisation de la bibliothèque\u2026</string>
@@ -1772,7 +1762,6 @@
     <string name="cd_preview">Aperçu</string>
     <string name="cd_test">Tester</string>
     <string name="cd_unlink">Délier</string>
-    <string name="cd_nuvio_logo">SlugYard</string>
     <string name="cd_trakt_logo">Logo Trakt</string>
     <string name="cd_trakt_qr">Code QR d’activation Trakt</string>
     <string name="cd_imdb">IMDb</string>
@@ -1783,8 +1772,6 @@
     <string name="cd_expand">Développer %1$s</string>
     <string name="cd_collapse">Réduire %1$s</string>
     <string name="cd_qr_login">Code QR de connexion</string>
-    <string name="cd_nuvio">SlugYard</string>
-
     <!-- Debug -->
     <string name="debug_signin_success">Connexion réussie</string>
     <string name="debug_generate_description">Élément de test %1$s n°%2$d</string>
@@ -2385,8 +2372,6 @@
     <string name="licenses_attributions_section_app">LICENCE DE L’APPLICATION</string>
     <string name="licenses_attributions_section_data">DONNÉES &amp; SERVICES</string>
     <string name="licenses_attributions_section_playback">LICENCES DE LECTURE ANDROID</string>
-    <string name="licenses_attributions_nuvio_title">SlugYard TV</string>
-    <string name="licenses_attributions_nuvio_body">Le code source et les conditions de licence sont disponibles dans le dépôt du projet. Distribué sous licence GNU General Public License v3.0.</string>
     <string name="licenses_attributions_tmdb_title">The Movie Database (TMDB)</string>
     <string name="licenses_attributions_tmdb_body">SlugYard utilise l’API TMDB pour les métadonnées de films et de séries, les visuels, les bandes-annonces, la distribution, les détails de production, les collections et les recommandations. Ce produit utilise l’API TMDB mais n’est ni approuvé ni certifié par TMDB.</string>
     <string name="licenses_attributions_trakt_title">Trakt</string>
@@ -2799,9 +2784,6 @@
     <string name="playback_section_buffer_network">Mémoire tampon et réseau</string>
     <string name="playback_section_buffer_network_desc">Quelle quantité de contenu garder en mémoire et comment récupérer les flux.</string>
     <string name="playback_net_device_memory_info">Mémoire de l’appareil : %1$s | Limite de sécurité recommandée : %2$d Mo</string>
-    <string name="playback_net_nuvio_performance_mode">Mémoire native ExoPlayer</string>
-    <string name="playback_net_nuvio_performance_mode_sub">Active l’allocateur natif hors tas et les optimisations de défilement.</string>
-    <string name="playback_net_nuvio_performance_mode_not_supported">Cette fonctionnalité n’est pas prise en charge par votre appareil.</string>
     <string name="playback_buffer_custom">Tampons de lecture personnalisés</string>
     <string name="playback_buffer_custom_sub">Remplace la mise en mémoire tampon par défaut de Media3 par les valeurs ci-dessous. Quand c’est désactivé, le lecteur utilise les durées de tampon et la taille cible d’origine de Media3.</string>
     <string name="playback_buffer_header">Mémoire tampon</string>

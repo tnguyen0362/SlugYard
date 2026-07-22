@@ -98,7 +98,6 @@
 
     <string name="home_no_addons">Nincsenek telepített bővítmények. A kezdéshez adj hozzá egyet.</string>
     <string name="home_no_catalog_addons">Nincsenek katalógusbővítmények. Telepíts egyet a tartalom megtekintéséhez.</string>
-    <string name="auth_notice_nuvio_logged_out">Kijelentkeztél a SlugYardból. Kérlek, jelentkezz be újra.</string>
     <string name="auth_notice_trakt_logged_out">Kijelentkeztél a Trakt-ból. Kérlek, csatlakozz újra.</string>
     <string name="error_generic">Hiba történt</string>
 
@@ -341,8 +340,6 @@
     <string name="licenses_attributions_section_app">ALKALMAZÁS LICENC</string>
     <string name="licenses_attributions_section_data">ADATOK ÉS SZOLGÁLTATÁSOK</string>
     <string name="licenses_attributions_section_playback">ANDROID LEJÁTSZÁSI LICENCEK</string>
-    <string name="licenses_attributions_nuvio_title">SlugYard</string>
-    <string name="licenses_attributions_nuvio_body">A forráskód és a licencfeltételek elérhetők a projekt tárolójában. Licenc: GNU General Public License v3.0.</string>
     <string name="licenses_attributions_tmdb_title">The Movie Database (TMDB)</string>
     <string name="licenses_attributions_tmdb_body">A SlugYard a TMDB API-t használja a filmek és tévéműsorok metaadataihoz, borítóképekhez, előzetesekhez, stáblistákhoz, gyártási adatokhoz, gyűjteményekhez és ajánlásokhoz. Ez a termék a TMDB API-t használja, de a TMDB nem támogatja és nem hagyta jóvá.</string>
     <string name="licenses_attributions_trakt_title">Trakt</string>
@@ -461,8 +458,6 @@
     <string name="advanced_section_dv_diagnostics" translatable="false">DV Diagnostics</string>
     <string name="advanced_fast_horizontal_navigation">Gyors vízszintes navigáció</string>
     <string name="advanced_fast_horizontal_navigation_subtitle">Növeli az iránygomb (D-pad) ismétlési sebességét a sorokban, miközben a görgetés korlátozása aktív marad.</string>
-    <string name="advanced_nuvio_focus_scroll">SlugYard fókusz görgetés</string>
-    <string name="advanced_nuvio_focus_scroll_subtitle">A SlugYard saját, globális fókusz görgetési animációjának és pozicionálásának használata.</string>
     <string name="advanced_memory_only_vertical_scroll">Csak memóriás függőleges görgetés</string>
     <string name="advanced_memory_only_vertical_scroll_subtitle">A lemez- és hálózati képkérések kihagyása a kezdőlap sorainak függőleges görgetése közben.</string>
     <string name="advanced_compose_highlighter">Compose Kiemelő</string>
@@ -1129,19 +1124,15 @@
     <string name="trakt_watch_progress_dialog_title">Megtekintési folyamat</string>
     <string name="trakt_watch_progress_dialog_subtitle">Válaszd ki, hogy a lejátszás folytatása a Traktot vagy a SlugYard Sync-et használja-e, miközben a Trakt scrobbling aktív marad.</string>
     <string name="trakt_watch_progress_source_trakt">Trakt</string>
-    <string name="trakt_watch_progress_source_nuvio">SlugYard Sync</string>
     <string name="trakt_library_source_title">Könyvtár forrása</string>
     <string name="trakt_library_source_subtitle">Válaszd ki, melyik könyvtárat használja a gyűjteményed mentéséhez és megtekintéséhez</string>
     <string name="trakt_library_source_dialog_title">Könyvtár forrása</string>
     <string name="trakt_library_source_dialog_subtitle">Válaszd ki, hol szeretnéd menteni és kezelni a könyvtárelemeidet</string>
     <string name="trakt_library_source_trakt">Trakt</string>
-    <string name="trakt_library_source_nuvio">SlugYard Könyvtár</string>
     <string name="trakt_library_source_trakt_selected">Trakt könyvtár kiválasztva</string>
-    <string name="trakt_library_source_nuvio_selected">SlugYard könyvtár kiválasztva</string>
     <string name="trakt_setting_on">Be</string>
     <string name="trakt_setting_off">Ki</string>
     <string name="trakt_watch_progress_trakt_selected">Megtekintési folyamat forrása: Trakt</string>
-    <string name="trakt_watch_progress_nuvio_selected">Megtekintési folyamat forrása: SlugYard Sync</string>
     <string name="trakt_continue_watching_window">Folytatási időablak</string>
     <string name="trakt_continue_watching_subtitle">A Trakt előzmények figyelembe vétele a folytatáshoz</string>
     <string name="trakt_unaired_next_up">Még nem vetített epizódok</string>
@@ -1630,7 +1621,6 @@
     <string name="library_delete_subtitle">Ez eltávolítja a listát és annak minden elemét a Trakt-ról.</string>
     <string name="library_delete_confirm">Törlés</string>
     <string name="library_source_local">HELYI</string>
-    <string name="library_source_nuvio">SLUGYARD</string>
     <string name="library_source_trakt">TRAKT</string>
     <string name="library_source_saved">Mentett</string>
     <string name="library_source_cloud">Felhő</string>
@@ -1988,7 +1978,6 @@
     <string name="cd_preview">Előnézet</string>
     <string name="cd_test">Tesztelés</string>
     <string name="cd_unlink">Leválasztás</string>
-    <string name="cd_nuvio_logo">SlugYard</string>
     <string name="cd_trakt_logo">Trakt logó</string>
     <string name="cd_trakt_qr">Trakt aktivációs QR-kód</string>
     <string name="cd_imdb">IMDb</string>
@@ -1999,8 +1988,6 @@
     <string name="cd_expand">Kibontás: %1$s</string>
     <string name="cd_collapse">Összecsukás: %1$s</string>
     <string name="cd_qr_login">QR-kódos bejelentkezés</string>
-    <string name="cd_nuvio">SlugYard</string>
-
     <string name="debug_signin_success">Sikeres bejelentkezés</string>
     <string name="debug_generate_description">Debug-generált %1$s elem #%2$d</string>
     <string name="debug_generate_result_failed">Sikertelen: %1$s</string>

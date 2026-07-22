@@ -96,7 +96,6 @@
     <string name="web_import_invalid_json">JSON inválido</string>
     <string name="home_no_addons">Nenhum addon instalado. Adiciona um para começar.</string>
     <string name="home_no_catalog_addons">Nenhum addon de catálogo instalado. Instala um addon de catálogo para veres conteúdos.</string>
-    <string name="auth_notice_nuvio_logged_out">A tua sessão no SlugYard foi terminada. Inicia sessão novamente.</string>
     <string name="auth_notice_trakt_logged_out">A tua sessão no Trakt foi terminada. Volta a ligar a conta.</string>
     <string name="error_generic">Ocorreu um erro</string>
     <string name="action_retry">Tentar novamente</string>
@@ -328,8 +327,6 @@
     <string name="licenses_attributions_section_app">LICENÇA DA APP</string>
     <string name="licenses_attributions_section_data">DADOS E SERVIÇOS</string>
     <string name="licenses_attributions_section_playback">LICENÇAS DE REPRODUÇÃO ANDROID</string>
-    <string name="licenses_attributions_nuvio_title">SlugYard TV</string>
-    <string name="licenses_attributions_nuvio_body">O código-fonte e os termos da licença estão disponíveis no repositório do projeto. Licenciado sob a GNU General Public License v3.0.</string>
     <string name="licenses_attributions_tmdb_title">The Movie Database (TMDB)</string>
     <string name="licenses_attributions_tmdb_body">O SlugYard utiliza a API do TMDB para metadados de filmes e séries, imagens, trailers, elenco, detalhes de produção, coleções e recomendações. Este produto utiliza a API do TMDB, mas não é endossado nem certificado pelo TMDB.</string>
     <string name="licenses_attributions_trakt_title">Trakt</string>
@@ -456,8 +453,6 @@
     <string name="advanced_section_dv_diagnostics" translatable="false">Diagnóstico Dolby Vision</string>
     <string name="advanced_fast_horizontal_navigation">Navegação horizontal rápida</string>
     <string name="advanced_fast_horizontal_navigation_subtitle">Aumenta a velocidade de repetição do D-pad nas linhas, mantendo ativa a limitação de repetição.</string>
-    <string name="advanced_nuvio_focus_scroll">Deslocamento de foco do SlugYard</string>
-    <string name="advanced_nuvio_focus_scroll_subtitle">Utiliza a animação e o posicionamento personalizados de deslocamento global de foco do SlugYard.</string>
     <string name="advanced_memory_only_vertical_scroll">Deslocamento vertical apenas em memória</string>
     <string name="advanced_memory_only_vertical_scroll_subtitle">Ignora pedidos de imagem em disco e rede ao deslocar verticalmente as linhas da página inicial.</string>
     <string name="advanced_compose_highlighter">Destacador de Compose</string>
@@ -1119,19 +1114,15 @@
     <string name="trakt_watch_progress_dialog_title">Progresso de visualização</string>
     <string name="trakt_watch_progress_dialog_subtitle">Escolhe se Retomar e Continuar a Ver devem utilizar o Trakt ou o SlugYard Sync enquanto o scrobbling do Trakt permanece ativo.</string>
     <string name="trakt_watch_progress_source_trakt">Trakt</string>
-    <string name="trakt_watch_progress_source_nuvio">SlugYard Sync</string>
     <string name="trakt_library_source_title">Fonte da biblioteca</string>
     <string name="trakt_library_source_subtitle">Escolhe que biblioteca utilizar para guardar e ver a tua coleção.</string>
     <string name="trakt_library_source_dialog_title">Fonte da biblioteca</string>
     <string name="trakt_library_source_dialog_subtitle">Escolhe onde guardar e gerir os itens da tua biblioteca.</string>
     <string name="trakt_library_source_trakt">Trakt</string>
-    <string name="trakt_library_source_nuvio">Biblioteca SlugYard</string>
     <string name="trakt_library_source_trakt_selected">Biblioteca do Trakt selecionada</string>
-    <string name="trakt_library_source_nuvio_selected">Biblioteca do SlugYard selecionada</string>
     <string name="trakt_setting_on">Ligado</string>
     <string name="trakt_setting_off">Desligado</string>
     <string name="trakt_watch_progress_trakt_selected">Fonte de progresso de visualização definida para Trakt</string>
-    <string name="trakt_watch_progress_nuvio_selected">Fonte de progresso de visualização definida para SlugYard Sync</string>
     <string name="trakt_continue_watching_window">Janela de Continuar a Ver</string>
     <string name="trakt_continue_watching_subtitle">Histórico do Trakt considerado no Continuar a Ver.</string>
     <string name="trakt_unaired_next_up">Próximos episódios não emitidos</string>
@@ -1599,7 +1590,6 @@
     <string name="library_delete_subtitle">Isto remove a lista e todos os seus itens do Trakt.</string>
     <string name="library_delete_confirm">Eliminar</string>
     <string name="library_source_local">LOCAL</string>
-    <string name="library_source_nuvio">SLUGYARD</string>
     <string name="library_source_trakt">TRAKT</string>
     <string name="library_source_saved">Guardado</string>
     <string name="library_source_cloud">Nuvem</string>
@@ -1919,7 +1909,6 @@
     <string name="cd_preview">Visualização</string>
     <string name="cd_test">Testar</string>
     <string name="cd_unlink">Desassociar</string>
-    <string name="cd_nuvio_logo">SlugYard</string>
     <string name="cd_trakt_logo">Logótipo do Trakt</string>
     <string name="cd_trakt_qr">QR de ativação do Trakt</string>
     <string name="cd_imdb">IMDb</string>
@@ -1930,7 +1919,6 @@
     <string name="cd_expand">Expandir %1$s</string>
     <string name="cd_collapse">Recolher %1$s</string>
     <string name="cd_qr_login">Código QR de início de sessão</string>
-    <string name="cd_nuvio">SlugYard</string>
     <string name="debug_signin_success">Sessão iniciada com sucesso</string>
     <string name="debug_generate_description">Item %1$s nº %2$d gerado por debug</string>
     <string name="debug_generate_result_failed">Falhou: %1$s</string>

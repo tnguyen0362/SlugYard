@@ -7,7 +7,6 @@
     <!-- HomeScreen -->
     <string name="home_no_addons">Ingen tillegg installert. Legg til et for å komme i gang.</string>
     <string name="home_no_catalog_addons">Ingen katalogtillegg installert. Installer et katalogtillegg for å se innhold.</string>
-    <string name="auth_notice_nuvio_logged_out">Du har blitt logget ut av SlugYard. Logg inn igjen.</string>
     <string name="auth_notice_trakt_logged_out">Du har blitt logget ut av Trakt. Koble til igjen.</string>
     <string name="error_generic">En feil har oppstått</string>
 
@@ -614,11 +613,9 @@
     <string name="trakt_watch_progress_dialog_title">Seeframgang</string>
     <string name="trakt_watch_progress_dialog_subtitle">Velg om gjenopptagelse og fortsett å se skal bruke Trakt eller SlugYard Sync mens Trakt-skrobletmeldinger forblir aktive.</string>
     <string name="trakt_watch_progress_source_trakt">Trakt</string>
-    <string name="trakt_watch_progress_source_nuvio">SlugYard Sync</string>
     <string name="trakt_setting_on">På</string>
     <string name="trakt_setting_off">Av</string>
     <string name="trakt_watch_progress_trakt_selected">Seeframgangskilden satt til Trakt</string>
-    <string name="trakt_watch_progress_nuvio_selected">Seeframgangskilden satt til SlugYard Sync</string>
     <string name="trakt_continue_watching_window">Fortsett å se vindu</string>
     <string name="trakt_continue_watching_subtitle">Trakt-historikk vurdert for fortsett å se</string>
     <string name="trakt_unaired_next_up">Usendte neste episoder</string>

@@ -98,7 +98,6 @@
 
     <string name="home_no_addons">未安裝擴充套件。請新增一個以開始使用。</string>
     <string name="home_no_catalog_addons">未安裝目錄擴充套件。請安裝目錄擴充套件以瀏覽內容。</string>
-    <string name="auth_notice_nuvio_logged_out">您已登出 SlugYard。請重新登入。</string>
     <string name="auth_notice_trakt_logged_out">您已登出 Trakt。請重新連線。</string>
     <string name="error_generic">發生錯誤</string>
 
@@ -351,8 +350,6 @@
     <string name="licenses_attributions_section_app">應用程式授權</string>
     <string name="licenses_attributions_section_data">資料與服務</string>
     <string name="licenses_attributions_section_playback">Android 播放授權</string>
-    <string name="licenses_attributions_nuvio_title">SlugYard TV</string>
-    <string name="licenses_attributions_nuvio_body">原始碼和授權條款可在專案倉庫中取得。基於 GNU General Public License v3.0 授權。</string>
     <string name="licenses_attributions_tmdb_title">The Movie Database (TMDB)</string>
     <string name="licenses_attributions_tmdb_body">SlugYard 使用 TMDB API 獲取電影和電視節目的中繼資料、美術圖、預告片、演員、製作細節、收藏和推薦內容。本產品使用 TMDB API，但未經 TMDB 認可或認證。</string>
     <string name="licenses_attributions_trakt_title">Trakt</string>
@@ -497,15 +494,11 @@
     <string name="advanced_section_dv_diagnostics" translatable="false">DV Diagnostics</string>
     <string name="advanced_fast_horizontal_navigation">快速水平導航</string>
     <string name="advanced_fast_horizontal_navigation_subtitle">提高 D-pad 在行內的重複速度，同時保留重複節流功能。</string>
-    <string name="advanced_nuvio_performance_mode">ExoPlayer 原生記憶體</string>
-    <string name="advanced_nuvio_performance_mode_subtitle">啟用高效能原生分配器、堆外記憶體和網路優化，實現更流暢的播放</string>
     <string name="buffer_device_ram_info">裝置記憶體：%s</string>
     <string name="buffer_safe_limit_info">建議安全限制：%d MB</string>
     <string name="buffer_safe_status">安全：在您裝置的建議限制內。</string>
     <string name="buffer_unsafe_warning">警告：超出您的 %2$s 裝置的建議安全限制 (%1$d MB)。可能導致應用程式崩潰。</string>
     <string name="buffer_auto_limit_active">自動縮放安全限制：%d MB</string>
-    <string name="advanced_nuvio_focus_scroll">SlugYard 焦點滾動</string>
-    <string name="advanced_nuvio_focus_scroll_subtitle">使用 SlugYard 的自訂全域焦點滾動動畫和定位。</string>
     <string name="advanced_memory_only_vertical_scroll">僅記憶體垂直滾動</string>
     <string name="advanced_memory_only_vertical_scroll_subtitle">在垂直滾動首頁行時跳過磁碟和網路的圖片請求。</string>
     <string name="advanced_compose_highlighter">Compose 高亮器</string>
@@ -1194,19 +1187,15 @@
     <string name="trakt_watch_progress_dialog_title">觀看進度</string>
     <string name="trakt_watch_progress_dialog_subtitle">選擇繼續播放和繼續觀看應使用 Trakt 還是 SlugYard Sync，同時 Trakt 記錄保持啟用。</string>
     <string name="trakt_watch_progress_source_trakt">Trakt</string>
-    <string name="trakt_watch_progress_source_nuvio">SlugYard Sync</string>
     <string name="trakt_library_source_title">媒體庫來源</string>
     <string name="trakt_library_source_subtitle">選擇用於儲存和檢視收藏的媒體庫</string>
     <string name="trakt_library_source_dialog_title">媒體庫來源</string>
     <string name="trakt_library_source_dialog_subtitle">選擇儲存和管理媒體庫項目的位置</string>
     <string name="trakt_library_source_trakt">Trakt</string>
-    <string name="trakt_library_source_nuvio">SlugYard 媒體庫</string>
     <string name="trakt_library_source_trakt_selected">已選擇 Trakt 媒體庫</string>
-    <string name="trakt_library_source_nuvio_selected">已選擇 SlugYard 媒體庫</string>
     <string name="trakt_setting_on">開啟</string>
     <string name="trakt_setting_off">關閉</string>
     <string name="trakt_watch_progress_trakt_selected">觀看進度來源設為 Trakt</string>
-    <string name="trakt_watch_progress_nuvio_selected">觀看進度來源設為 SlugYard Sync</string>
     <string name="trakt_continue_watching_window">繼續觀看範圍</string>
     <string name="trakt_continue_watching_subtitle">納入繼續觀看的 Trakt 歷史記錄</string>
     <string name="trakt_unaired_next_up">未播出的下一集</string>
@@ -1712,7 +1701,6 @@
     <string name="library_delete_subtitle">這將從 Trakt 移除該清單及其所有項目。</string>
     <string name="library_delete_confirm">刪除</string>
     <string name="library_source_local">本地</string>
-    <string name="library_source_nuvio">SLUGYARD</string>
     <string name="library_source_trakt">TRAKT</string>
     <string name="library_source_saved">已儲存</string>
     <string name="library_source_cloud">雲端</string>
@@ -2083,7 +2071,6 @@
     <string name="cd_preview">預覽</string>
     <string name="cd_test">測試</string>
     <string name="cd_unlink">取消連結</string>
-    <string name="cd_nuvio_logo">SlugYard</string>
     <string name="cd_trakt_logo">Trakt 標誌</string>
     <string name="cd_trakt_qr">Trakt 啟用 QR</string>
     <string name="cd_imdb">IMDb</string>
@@ -2094,8 +2081,6 @@
     <string name="cd_expand">展開 %1$s</string>
     <string name="cd_collapse">摺疊 %1$s</string>
     <string name="cd_qr_login">QR 碼登入</string>
-    <string name="cd_nuvio">SlugYard</string>
-
     <string name="debug_signin_success">登入成功</string>
     <string name="debug_generate_description">除錯產生的 %1$s 項目 #%2$d</string>
     <string name="debug_generate_result_failed">失敗：%1$s</string>
@@ -2700,9 +2685,6 @@
     <string name="playback_section_buffer_network">緩衝與網路</string>
     <string name="playback_section_buffer_network_desc">記憶體中保留的內容量以及獲取串流的方式。</string>
     <string name="playback_net_device_memory_info">裝置記憶體：%1$s | 建議安全限制：%2$d MB</string>
-    <string name="playback_net_nuvio_performance_mode">ExoPlayer 原生記憶體</string>
-    <string name="playback_net_nuvio_performance_mode_sub">啟用原生堆外分配器和快速拖動優化。</string>
-    <string name="playback_net_nuvio_performance_mode_not_supported">您的裝置不支援此功能。</string>
     <string name="playback_buffer_custom">自訂播放緩衝</string>
     <string name="playback_buffer_custom_sub">用下方的值覆蓋 Media3 的預設緩衝。關閉時，播放器使用 Media3 的標準緩衝持續時間和目標大小。</string>
     <string name="playback_buffer_header">緩衝</string>

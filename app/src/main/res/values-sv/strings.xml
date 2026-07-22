@@ -6,7 +6,6 @@
     <!-- HomeScreen -->
     <string name="home_no_addons">Inga tillägg installerade. Lägg till ett tillägg för att komma igång.</string>
     <string name="home_no_catalog_addons">Inga tillägg med kataloger installerade. Installera ett katalogtillägg för att se innehåll.</string>
-    <string name="auth_notice_nuvio_logged_out">Du har loggats ut från SlugYard. Logga in igen.</string>
     <string name="auth_notice_trakt_logged_out">Du har loggats ut från Trakt. Anslut igen.</string>
     <string name="error_generic">Ett fel uppstod</string>
 
@@ -565,9 +564,7 @@
     <string name="trakt_watch_progress_dialog_title">Tittarframsteg</string>
     <string name="trakt_watch_progress_dialog_subtitle">Välj om återupptagning och fortsätt titta ska använda Trakt eller SlugYard Sync medan Trakt-scrobbling förblir aktiv.</string>
     <string name="trakt_watch_progress_source_trakt">Trakt</string>
-    <string name="trakt_watch_progress_source_nuvio">SlugYard Sync</string>
     <string name="trakt_watch_progress_trakt_selected">Tittarframstegskälla satt till Trakt</string>
-    <string name="trakt_watch_progress_nuvio_selected">Tittarframstegskälla satt till SlugYard Sync</string>
     <string name="trakt_continue_watching_window">Fortsätt titta-fönster</string>
     <string name="trakt_continue_watching_subtitle">Trakt-historik som beaktas för fortsätt titta</string>
     <string name="trakt_unaired_next_up">Osända nästa avsnitt</string>
@@ -888,7 +885,6 @@
     <string name="library_delete_subtitle">Detta tar bort listan och alla listobjekt från Trakt.</string>
     <string name="library_delete_confirm">Radera</string>
     <string name="library_source_local">LOKAL</string>
-    <string name="library_source_nuvio">SLUGYARD</string>
     <string name="library_source_trakt">TRAKT</string>
     <string name="library_syncing_library">Synkroniserar bibliotek\u2026</string>
     <string name="library_type_all">Alla</string>
@@ -1359,10 +1355,7 @@
     <string name="trakt_library_source_dialog_title">Bibliotekskälla</string>
     <string name="trakt_library_source_dialog_subtitle">Välj var du vill spara och hantera dina biblioteksobjekt</string>
     <string name="trakt_library_source_trakt">Trakt</string>
-    <string name="trakt_library_source_nuvio">SlugYard-bibliotek</string>
     <string name="trakt_library_source_trakt_selected">Trakt-bibliotek valt</string>
-    <string name="trakt_library_source_nuvio_selected">SlugYard-bibliotek valt</string>
-
     <!-- ProfileSettingsContent -->
     <string name="profile_edit_header">Redigera profil</string>
 
@@ -1533,7 +1526,6 @@
     <string name="cd_preview">Förhandsvisning</string>
     <string name="cd_test">Testa</string>
     <string name="cd_unlink">Avlänka</string>
-    <string name="cd_nuvio_logo">SlugYard</string>
     <string name="cd_trakt_logo">Trakt-logotyp</string>
     <string name="cd_trakt_qr">Trakt-aktiverings-QR</string>
     <string name="cd_imdb">IMDb</string>
@@ -1544,8 +1536,6 @@
     <string name="cd_expand">Expandera %1$s</string>
     <string name="cd_collapse">Fäll ihop %1$s</string>
     <string name="cd_qr_login">QR-inloggningskod</string>
-    <string name="cd_nuvio">SlugYard</string>
-
     <!-- Debug -->
     <string name="debug_signin_success">Inloggad</string>
     <string name="debug_generate_description">Debug-genererat %1$s objekt #%2$d</string>

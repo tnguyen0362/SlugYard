@@ -64,7 +64,6 @@
     <!-- HomeScreen -->
     <string name="home_no_addons">Nema instaliranih addona. Dodajte jedan za početak.</string>
     <string name="home_no_catalog_addons">Nema instaliranih addona za katalog. Instalirajte katalog addon da vidite sadržaj.</string>
-    <string name="auth_notice_nuvio_logged_out">Odjavljeni ste iz SlugYard. Molimo prijavite se ponovo.</string>
     <string name="auth_notice_trakt_logged_out">Odjavljeni ste sa Trakta. Molimo ponovo se povežite.</string>
     <string name="error_generic">Došlo je do greške</string>
 
@@ -704,11 +703,9 @@
     <string name="trakt_watch_progress_dialog_title">Napredak Gledanja</string>
     <string name="trakt_watch_progress_dialog_subtitle">Odaberi da li nastavi i nastavi gledati treba da koriste Trakt ili SlugYard Sync, dok Trakt scrobble ostaje aktivan.</string>
     <string name="trakt_watch_progress_source_trakt">Trakt</string>
-    <string name="trakt_watch_progress_source_nuvio">SlugYard Sync</string>
     <string name="trakt_setting_on">Uključeno</string>
     <string name="trakt_setting_off">Isključeno</string>
     <string name="trakt_watch_progress_trakt_selected">Izvor napretka gledanja postavljen na Trakt</string>
-    <string name="trakt_watch_progress_nuvio_selected">Izvor napretka gledanja postavljen na SlugYard Sync</string>
     <string name="trakt_continue_watching_window">Prozor za Nastavi Gledati</string>
     <string name="trakt_continue_watching_subtitle">Trakt historija koja se uzima u obzir za nastavi gledati</string>
     <string name="trakt_unaired_next_up">Neemitovane Sljedeće Epizode</string>
@@ -1127,7 +1124,6 @@
     <string name="library_delete_subtitle">Ovo uklanja listu i sve stavke sa Trakta.</string>
     <string name="library_delete_confirm">Izbriši</string>
     <string name="library_source_local">LOKALNO</string>
-    <string name="library_source_nuvio">SLUGYARD</string>
     <string name="library_source_trakt">TRAKT</string>
     <string name="library_syncing_library">Sinhronizacija biblioteke…</string>
     <string name="library_type_all">Sve</string>
@@ -1431,7 +1427,6 @@
     <string name="cd_preview">Pregled</string>
     <string name="cd_test">Testiraj</string>
     <string name="cd_unlink">Odspoji</string>
-    <string name="cd_nuvio_logo">SlugYard</string>
     <string name="cd_trakt_logo">Trakt Logo</string>
     <string name="cd_trakt_qr">Trakt QR za aktivaciju</string>
     <string name="cd_imdb">IMDb</string>
@@ -1442,8 +1437,6 @@
     <string name="cd_expand">Proširi %1$s</string>
     <string name="cd_collapse">Skupi %1$s</string>
     <string name="cd_qr_login">QR kod za prijavu</string>
-    <string name="cd_nuvio">SlugYard</string>
-
     <!-- Debug -->
     <string name="debug_signin_success">Uspješno prijavljeno</string>
     <string name="debug_generate_description">Debug generisana stavka %1$s broj %2$d</string>

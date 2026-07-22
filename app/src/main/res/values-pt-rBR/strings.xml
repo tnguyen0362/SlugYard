@@ -98,7 +98,6 @@
 
     <string name="home_no_addons">Nenhum addon instalado. Adicione um para começar.</string>
     <string name="home_no_catalog_addons">Nenhum addon de catálogo instalado. Instale um para ver conteúdos.</string>
-    <string name="auth_notice_nuvio_logged_out">Você foi desconectado do SlugYard. Faça login novamente.</string>
     <string name="auth_notice_trakt_logged_out">Você foi desconectado do Trakt. Reconecte-se.</string>
     <string name="error_generic">Ocorreu um erro</string>
 
@@ -343,8 +342,6 @@
     <string name="licenses_attributions_section_app">LICENÇA DO APP</string>
     <string name="licenses_attributions_section_data">DADOS e SERVIÇOS</string>
     <string name="licenses_attributions_section_playback">LICENÇAS DE REPRODUÇÃO ANDROID</string>
-    <string name="licenses_attributions_nuvio_title">SlugYard TV</string>
-    <string name="licenses_attributions_nuvio_body">Código-fonte e os termos de licença estão disponíveis no repositório do projeto. Licenciado sob a GNU General Public License v3.0.</string>
     <string name="licenses_attributions_tmdb_title">The Movie Database (TMDB)</string>
     <string name="licenses_attributions_tmdb_body">O SlugYard utiliza a API do TMDB para metadados de filmes e séries, artes, trailers, elenco, detalhes de produção, coleções e recomendações. Este produto usa a API do TMDB, mas não é endossado ou certificado pelo TMDB.</string>
     <string name="licenses_attributions_trakt_title">Trakt</string>
@@ -474,15 +471,11 @@
     <string name="advanced_section_dv_diagnostics">Diagnóstico de Dolby Vision</string>
     <string name="advanced_fast_horizontal_navigation">Navegação horizontal rápida</string>
     <string name="advanced_fast_horizontal_navigation_subtitle">Acelera a navegação nas fileiras</string>
-    <string name="advanced_nuvio_performance_mode">Memória Nativa do ExoPlayer</string>
-    <string name="advanced_nuvio_performance_mode_subtitle">Habilita alocador nativo de alta performance, memória off-heap e otimizações de rede para uma reprodução mais fluida</string>
     <string name="buffer_device_ram_info">RAM do dispositivo: %s</string>
     <string name="buffer_safe_limit_info">Limite seguro recomendado: %d MB</string>
     <string name="buffer_safe_status">Seguro: Dentro do limite recomendado para o seu dispositivo.</string>
     <string name="buffer_unsafe_warning">Aviso: Excede o limite seguro recomendado (%1$d MB) para seu dispositivo %2$s. Pode causar travamentos no aplicativo.</string>
     <string name="buffer_auto_limit_active">Limite seguro autoajustado: %d MB</string>
-    <string name="advanced_nuvio_focus_scroll">Rolagem de foco SlugYard</string>
-    <string name="advanced_nuvio_focus_scroll_subtitle">Usa animação de foco personalizada do SlugYard</string>
     <string name="advanced_memory_only_vertical_scroll">Rolagem vertical via memória</string>
     <string name="advanced_memory_only_vertical_scroll_subtitle">Não carrega imagens ao rolar as fileiras</string>
     <string name="advanced_compose_highlighter">Destacador de interface</string>
@@ -1171,19 +1164,15 @@
     <string name="trakt_watch_progress_dialog_title">Progresso de Reprodução</string>
     <string name="trakt_watch_progress_dialog_subtitle">Escolha se o progresso deve usar o Trakt ou o SlugYard Sync (o registro no Trakt continuará ativo).</string>
     <string name="trakt_watch_progress_source_trakt">Trakt</string>
-    <string name="trakt_watch_progress_source_nuvio">SlugYard Sync</string>
     <string name="trakt_library_source_title">Fonte para Biblioteca</string>
     <string name="trakt_library_source_subtitle">Escolha qual fonte usar para salvar e ver sua coleção</string>
     <string name="trakt_library_source_dialog_title">Fonte para Biblioteca</string>
     <string name="trakt_library_source_dialog_subtitle">Escolha onde salvar e gerenciar os itens da sua biblioteca</string>
     <string name="trakt_library_source_trakt">Trakt</string>
-    <string name="trakt_library_source_nuvio">SlugYard</string>
     <string name="trakt_library_source_trakt_selected">Biblioteca Trakt selecionada</string>
-    <string name="trakt_library_source_nuvio_selected">Biblioteca SlugYard selecionada</string>
     <string name="trakt_setting_on">Ativado</string>
     <string name="trakt_setting_off">Desativado</string>
     <string name="trakt_watch_progress_trakt_selected">Fonte de progresso definida para Trakt</string>
-    <string name="trakt_watch_progress_nuvio_selected">Fonte de progresso definida para SlugYard Sync</string>
     <string name="trakt_continue_watching_window">Continuar Assistindo</string>
     <string name="trakt_continue_watching_subtitle">Período considerado para exibir.</string>
     <string name="trakt_unaired_next_up">Próximos episódios não exibidos</string>
@@ -1683,7 +1672,6 @@
     <string name="library_delete_subtitle">Isso removerá a lista e todos os seus itens do Trakt.</string>
     <string name="library_delete_confirm">Excluir</string>
     <string name="library_source_local">LOCAL</string>
-    <string name="library_source_nuvio">SLUGYARD</string>
     <string name="library_source_trakt">TRAKT</string>
     <string name="library_source_saved">Salvos</string>
     <string name="library_source_cloud">Nuvem</string>
@@ -2044,7 +2032,6 @@
     <string name="cd_preview">Pré-visualizar</string>
     <string name="cd_test">Testar</string>
     <string name="cd_unlink">Desvincular</string>
-    <string name="cd_nuvio_logo">SlugYard</string>
     <string name="cd_trakt_logo">Logo Trakt</string>
     <string name="cd_trakt_qr">QR de ativação Trakt</string>
     <string name="cd_imdb">IMDb</string>
@@ -2055,8 +2042,6 @@
     <string name="cd_expand">Expandir %1$s</string>
     <string name="cd_collapse">Recolher %1$s</string>
     <string name="cd_qr_login">Código QR de login</string>
-    <string name="cd_nuvio">SlugYard</string>
-
     <string name="debug_signin_success">Login realizado com sucesso</string>
     <string name="debug_generate_description">Item %1$s gerado em debug #%2$d</string>
     <string name="debug_generate_result_failed">Falha: %1$s</string>
@@ -2661,9 +2646,6 @@
     <string name="playback_section_buffer_network">Buffer e Rede</string>
     <string name="playback_section_buffer_network_desc">Quanto conteúdo manter na memória e como buscar os streams.</string>
     <string name="playback_net_device_memory_info">Memória do dispositivo: %1$s | Limite de segurança recomendado: %2$d MB</string>
-    <string name="playback_net_nuvio_performance_mode">Memória nativa do ExoPlayer</string>
-    <string name="playback_net_nuvio_performance_mode_sub">Habilita alocador nativo off-heap e otimizações de busca.</string>
-    <string name="playback_net_nuvio_performance_mode_not_supported">Este recurso não é compatível com seu dispositivo.</string>
     <string name="playback_buffer_custom">Buffer de reprodução personalizado</string>
     <string name="playback_buffer_custom_sub">Substitui o buffer padrão do Media3 pelos valores abaixo. Se desativado, o player usa os valores e tamanhos padrão do Media3.</string>
     <string name="playback_buffer_header">Buffer</string>

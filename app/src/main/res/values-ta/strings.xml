@@ -100,7 +100,6 @@
     <!-- HomeScreen -->
     <string name="home_no_addons">ஆடான்கள் எதுவும் நிறுவப்படவில்லை. தொடங்க ஒன்றை சேர்க்கவும்.</string>
     <string name="home_no_catalog_addons">பட்டியல் ஆடான்கள் எதுவும் நிறுவப்படவில்லை. உள்ளடக்கத்தை பார்க்க ஒரு பட்டியல் ஆடானை நிறுவவும்.</string>
-    <string name="auth_notice_nuvio_logged_out">நீங்கள் நுவியோவில் இருந்து வெளியேற்றப்பட்டுள்ளீர்கள். மீண்டும் உள்நுழையவும்.</string>
     <string name="auth_notice_trakt_logged_out">நீங்கள் ட்ராக்டில் இருந்து வெளியேற்றப்பட்டுள்ளீர்கள். மீண்டும் இணைக்கவும்.</string>
     <string name="error_generic">ஒரு பிழை ஏற்பட்டது</string>
 
@@ -348,8 +347,6 @@
     <string name="licenses_attributions_section_app">செயலி உரிமம்</string>
     <string name="licenses_attributions_section_data">தரவு &amp; சேவைகள்</string>
     <string name="licenses_attributions_section_playback">ஆண்ட்ராய்டு இயக்க உரிமங்கள்</string>
-    <string name="licenses_attributions_nuvio_title">நுவியோ டிவி</string>
-    <string name="licenses_attributions_nuvio_body">மூலக் குறியீடு மற்றும் உரிம நிபந்தனைகள் திட்ட களஞ்சியத்தில் கிடைக்கின்றன. GNU பொது உரிமம் v3.0 கீழ் வழங்கப்படுகிறது.</string>
     <string name="licenses_attributions_tmdb_title">தி மூவி டேட்டாபேஸ் (TMDB)</string>
     <string name="licenses_attributions_tmdb_body">நுவியோ திரைப்படம் மற்றும் டிவி தகவல்கள், கலைப்படங்கள், முன்னோட்டங்கள், நடிகர்கள், தயாரிப்பு விவரங்கள், தொகுப்புகள் மற்றும் பரிந்துரைகளுக்காக TMDB API-ஐ பயன்படுத்துகிறது. இந்த தயாரிப்பு TMDB API-ஐ பயன்படுத்தினாலும் TMDB ஆதரவு அல்லது சான்றளிப்பு பெறவில்லை.</string>
     <string name="licenses_attributions_trakt_title">ட்ராக்ட்</string>
@@ -467,8 +464,6 @@
     <string name="advanced_section_cache">கேச்</string>
     <string name="advanced_fast_horizontal_navigation">வேகமான கிடைமட்ட வழிசெலுத்தல்</string>
     <string name="advanced_fast_horizontal_navigation_subtitle">மீள்வேக கட்டுப்பாட்டை வைத்தபடி டி-பேட் வேகத்தை அதிகரிக்கவும்.</string>
-    <string name="advanced_nuvio_focus_scroll">நுவியோ கவன உருட்டல்</string>
-    <string name="advanced_nuvio_focus_scroll_subtitle">நுவியோவின் தனிப்பயன் கவன உருட்டல் அசைவூட்டலை பயன்படுத்து.</string>
     <string name="advanced_memory_only_vertical_scroll">நினைவக மட்டும் செங்குத்து உருட்டல்</string>
     <string name="advanced_memory_only_vertical_scroll_subtitle">முகப்பு வரிசைகளை உருட்டும் போது வட்டு மற்றும் இணைய பட கோரிக்கைகளை தவிர்.</string>
     <string name="advanced_compose_highlighter">காம்போஸ் ஒளிர்விப்பு</string>
@@ -951,19 +946,15 @@
     <string name="trakt_watch_progress_dialog_title">பார்வை முன்னேற்றம்</string>
     <string name="trakt_watch_progress_dialog_subtitle">ட்ராக்ட் ஸ்க்ரோபிளிங் செயலிலேயே இருக்கும் போது, மீண்டும் தொடங்கு மற்றும் தொடர்ந்து பார்ப்பதற்கு ட்ராக்ட் அல்லது நுவியோ ஒத்திசைவை பயன்படுத்த வேண்டுமா என்பதை தேர்வு செய்யவும்.</string>
     <string name="trakt_watch_progress_source_trakt">ட்ராக்ட்</string>
-    <string name="trakt_watch_progress_source_nuvio">நுவியோ ஒத்திசைவு</string>
     <string name="trakt_library_source_title">நூலக மூலம்</string>
     <string name="trakt_library_source_subtitle">உங்கள் தொகுப்பை சேமிக்கவும் பார்க்கவும் எந்த நூலகத்தை பயன்படுத்துவது என்பதை தேர்வு செய்யவும்</string>
     <string name="trakt_library_source_dialog_title">நூலக மூலம்</string>
     <string name="trakt_library_source_dialog_subtitle">உங்கள் நூலக உருப்படிகளை எங்கு சேமித்து நிர்வகிப்பது என்பதை தேர்வு செய்யவும்</string>
     <string name="trakt_library_source_trakt">ட்ராக்ட்</string>
-    <string name="trakt_library_source_nuvio">நுவியோ நூலகம்</string>
     <string name="trakt_library_source_trakt_selected">ட்ராக்ட் நூலகம் தேர்ந்தெடுக்கப்பட்டது</string>
-    <string name="trakt_library_source_nuvio_selected">நுவியோ நூலகம் தேர்ந்தெடுக்கப்பட்டது</string>
     <string name="trakt_setting_on">இயக்கம்</string>
     <string name="trakt_setting_off">நிறுத்தம்</string>
     <string name="trakt_watch_progress_trakt_selected">பார்வை முன்னேற்ற மூலம் ட்ராக்ட் ஆக அமைக்கப்பட்டது</string>
-    <string name="trakt_watch_progress_nuvio_selected">பார்வை முன்னேற்ற மூலம் நுவியோ ஒத்திசைவு ஆக அமைக்கப்பட்டது</string>
     <string name="trakt_continue_watching_window">தொடர்ந்து பார்ப்பது சாளரம்</string>
     <string name="trakt_continue_watching_subtitle">தொடர்ந்து பார்ப்பதற்காக கருதப்படும் ட்ராக்ட் வரலாறு</string>
     <string name="trakt_unaired_next_up">ஒளிபரப்பாகாத அடுத்த அத்தியாயங்கள்</string>
@@ -1442,7 +1433,6 @@
     <string name="library_delete_subtitle">இது பட்டியலையும் அதிலுள்ள அனைத்து உருப்படிகளையும் ட்ராக்டிலிருந்து அகற்றும்.</string>
     <string name="library_delete_confirm">அழி</string>
     <string name="library_source_local">உள்ளகம்</string>
-    <string name="library_source_nuvio">நூவியோ</string>
     <string name="library_source_trakt">ட்ராக்ட்</string>
     <string name="library_watchlist">பார்க்க வேண்டிய பட்டியல்</string>
     <string name="library_syncing_library">நூலகம் ஒத்திசைக்கப்படுகிறது\u2026</string>
@@ -1786,7 +1776,6 @@
     <string name="cd_preview">முன்னோட்டம்</string>
     <string name="cd_test">சோதனை</string>
     <string name="cd_unlink">இணைப்பை நீக்கு</string>
-    <string name="cd_nuvio_logo">நுவியோடிவி</string>
     <string name="cd_trakt_logo">ட்ராக்ட் லோகோ</string>
     <string name="cd_trakt_qr">ட்ராக்ட் செயல்படுத்தும் க்யூஆர்</string>
     <string name="cd_imdb">ஐஎம்டிபி</string>
@@ -1797,8 +1786,6 @@
     <string name="cd_expand">விரிவு செய் %1$s</string>
     <string name="cd_collapse">சுருக்கு %1$s</string>
     <string name="cd_qr_login">க்யூஆர் உள்நுழைவு குறியீடு</string>
-    <string name="cd_nuvio">நுவியோ</string>
-
     <!-- Debug -->
     <string name="debug_signin_success">வெற்றிகரமாக உள்நுழைந்தது</string>
     <string name="debug_generate_description">டீபக் உருவாக்கிய %1$s உருப்பு #%2$d</string>

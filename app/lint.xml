@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<lint>
+    <!-- SlugYard ships with English as the primary language and partial
+         translations across 33 locales. Lint's MissingTranslation check is
+         binary (all-or-nothing), so it flags every string not translated in
+         every locale. Android automatically falls back to English for
+         untranslated strings, so this is safe to suppress. -->
+    <issue id="MissingTranslation" severity="ignore" />
+
+    <!-- UnusedResources warnings come primarily from bundled Media3 fork
+         AARs that ship resources not referenced by this app. Suppressing
+         avoids noise from third-party artifacts. -->
+    <issue id="UnusedResources" severity="ignore" />
+
+    <!-- Vendored Matroska extractor (dvmkv) is a clean-room port of Media3's
+         extractor code. It intentionally uses Media3's @UnstableApi-annotated
+         types. Suppress at the package level rather than annotating each
+         usage site in the vendored Java sources. -->
+    <issue id="UnsafeOptInUsageError">
+        <ignore path="src/main/java/com/sluggyard/tv/core/player/dvmkv/" />
+    </issue>
+</lint>

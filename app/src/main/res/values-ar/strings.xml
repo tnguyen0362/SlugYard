@@ -100,7 +100,6 @@
     <!-- HomeScreen -->
     <string name="home_no_addons">لا توجد إضافات مثبتة. أضف إضافة واحدة للبدء.</string>
     <string name="home_no_catalog_addons">لا توجد إضافات قوائم عرض مثبتة. ثبت واحدة لعرض المحتوى.</string>
-    <string name="auth_notice_nuvio_logged_out">تم تسجيل خروجك من SlugYard. يرجى تسجيل الدخول مرة أخرى.</string>
     <string name="auth_notice_trakt_logged_out">تم تسجيل خروجك من Trakt. يرجى إعادة الاتصال.</string>
     <string name="error_generic">حدث خطأ</string>
 
@@ -354,8 +353,6 @@
     <string name="licenses_attributions_section_app">APP LICENSE</string>
     <string name="licenses_attributions_section_data">DATA &amp; SERVICES</string>
     <string name="licenses_attributions_section_playback">ANDROID PLAYBACK LICENSES</string>
-    <string name="licenses_attributions_nuvio_title">SlugYard TV</string>
-    <string name="licenses_attributions_nuvio_body">Source code and license terms are available in the project repository. Licensed under the GNU General Public License v3.0.</string>
     <string name="licenses_attributions_tmdb_title">The Movie Database (TMDB)</string>
     <string name="licenses_attributions_tmdb_body">SlugYard uses the TMDB API for movie and TV metadata, artwork, trailers, cast, production details, collections, and recommendations. This product uses the TMDB API but is not endorsed or certified by TMDB.</string>
     <string name="licenses_attributions_trakt_title">Trakt</string>
@@ -474,8 +471,6 @@
     <string name="advanced_section_dv_diagnostics" translatable="false">DV Diagnostics</string>
     <string name="advanced_fast_horizontal_navigation">التصفح الأفقي السريع</string>
     <string name="advanced_fast_horizontal_navigation_subtitle">رفع سرعة تكرار أزرار الاتجاهات (D-pad) في الصفوف مع بقاء ميزة تقييد التكرار قيد التشغيل..</string>
-    <string name="advanced_nuvio_focus_scroll">تصفح التركيز الخاص بـ SlugYard</string>
-    <string name="advanced_nuvio_focus_scroll_subtitle">استخدام نظام SlugYard المخصص للرسوم المتحركة وتموضع التركيز في كافة واجهات التطبيق.</string>
     <string name="advanced_memory_only_vertical_scroll">التمرير العمودي من الذاكرة فقط</string>
     <string name="advanced_memory_only_vertical_scroll_subtitle">تخطي طلبات الصور من القرص والشبكة أثناء التمرير العمودي في صفوف الشاشة الرئيسية.</string>
     <string name="advanced_compose_highlighter">مؤشر إعادة البناء (Compose)</string>
@@ -1147,19 +1142,15 @@
     <string name="trakt_watch_progress_dialog_title">مستوى المشاهدة</string>
     <string name="trakt_watch_progress_dialog_subtitle">إختر ما إذا كان الاستئناف ومتابعة المشاهدة سيستخدم Trakt أم مزامنة SlugYard، بينما تظل سجلات Trakt مفعلة.</string>
     <string name="trakt_watch_progress_source_trakt">Trakt</string>
-    <string name="trakt_watch_progress_source_nuvio">مزامنة SlugYard</string>
     <string name="trakt_library_source_title">مصدر المكتبة</string>
     <string name="trakt_library_source_subtitle">إختر المكتبة المراد استخدامها لحفظ مجموعتك وعرضها</string>
     <string name="trakt_library_source_dialog_title">مصدر المكتبة</string>
     <string name="trakt_library_source_dialog_subtitle">إختر مكان حفظ عناصر مكتبتك وإدارتها</string>
     <string name="trakt_library_source_trakt">Trakt</string>
-    <string name="trakt_library_source_nuvio">مكتبة SlugYard</string>
     <string name="trakt_library_source_trakt_selected">تم اختيار مكتبة Trakt</string>
-    <string name="trakt_library_source_nuvio_selected">تم اختيار مكتبة SlugYard</string>
     <string name="trakt_setting_on">مفعل</string>
     <string name="trakt_setting_off">معطل</string>
     <string name="trakt_watch_progress_trakt_selected">تم تعيين مصدر مستوى المشاهدة إلى Trakt</string>
-    <string name="trakt_watch_progress_nuvio_selected">تم تعيين مصدر مستوى المشاهدة إلى مزامنة SlugYard</string>
     <string name="trakt_continue_watching_window">نافذة متابعة المشاهدة</string>
     <string name="trakt_continue_watching_subtitle">تاريخ Trakt المعتمد لمتابعة المشاهدة</string>
     <string name="trakt_unaired_next_up">الحلقات التالية التي لم تعرض بعد</string>
@@ -1663,7 +1654,6 @@
     <string name="library_delete_subtitle">سيؤدي هذا لحذف القائمة وجميع عناصرها من Trakt.</string>
     <string name="library_delete_confirm">حذف</string>
     <string name="library_source_local">محلي</string>
-    <string name="library_source_nuvio">SLUGYARD</string>
     <string name="library_source_trakt">TRAKT</string>
     <string name="library_source_saved">محفوظ</string>
     <string name="library_source_cloud">سحابي</string>
@@ -2019,7 +2009,6 @@
     <string name="cd_preview">معاينة</string>
     <string name="cd_test">اختبار</string>
     <string name="cd_unlink">إلغاء الارتباط</string>
-    <string name="cd_nuvio_logo">SlugYard</string>
     <string name="cd_trakt_logo">شعار Trakt</string>
     <string name="cd_trakt_qr">رمز QR لتفعيل Trakt</string>
     <string name="cd_imdb">IMDb</string>
@@ -2030,8 +2019,6 @@
     <string name="cd_expand">توسيع %1$s</string>
     <string name="cd_collapse">طي %1$s</string>
     <string name="cd_qr_login">رمز QR لتسجيل الدخول</string>
-    <string name="cd_nuvio">SlugYard</string>
-
     <!-- Debug -->
     <string name="debug_signin_success">تم تسجيل الدخول بنجاح</string>
     <string name="debug_generate_description">Debug-generated %1$s item #%2$d</string>
