@@ -26,6 +26,24 @@ class RewriteAddonRegistryCodecTest {
 
         assertTrue(sanitizeCuratedRegistry(state).addons.isEmpty())
     }
+
+    @Test
+    fun `curated registry keeps provider configured manifest on the same allowlisted host`() {
+        val state = AddonRegistryState(
+            listOf(
+                ManagedAddon(
+                    manifestUrl = "https://torrentio.strem.fun/manifest.json",
+                    configuredManifestUrl = "https://torrentio.strem.fun/torbox=key/manifest.json",
+                    manifest = AddonManifestContract(id = "torrentio", name = "Torrentio"),
+                ),
+            ),
+        )
+
+        assertEquals(
+            "https://torrentio.strem.fun/torbox=key/manifest.json",
+            sanitizeCuratedRegistry(state).addons.single().configuredManifestUrl,
+        )
+    }
     @Test
     fun `registry round trip preserves enabled order configured url and catalog capabilities`() {
         val state = AddonRegistryState(

@@ -12,7 +12,6 @@ import com.sluggyard.tv.core.streamresolution.DebridService
 import com.sluggyard.tv.data.local.PlayerSettings
 import com.sluggyard.tv.data.local.TraktAuthState
 import com.sluggyard.tv.domain.model.DebridSettings
-import com.sluggyard.tv.domain.model.MDBListSettings
 import com.sluggyard.tv.domain.model.TmdbSettings
 import com.sluggyard.tv.ui.rewrite.data.RewriteHomeSettings
 import com.sluggyard.tv.ui.rewrite.data.RewriteProfileState
@@ -28,6 +27,7 @@ fun RewriteSettingsScreen(
     onRememberProfileChanged: (Boolean) -> Unit,
     debridConnection: RewriteDebridConnection,
     onConnect: suspend (DebridService, String) -> Unit,
+    onDebridEnabledChanged: suspend (Boolean) -> Unit,
     onSelect: suspend (DebridService) -> Unit,
     communityAddonCount: Int,
     modifier: Modifier = Modifier,
@@ -36,12 +36,10 @@ fun RewriteSettingsScreen(
     val scope = rememberCoroutineScope()
     val traktAuth by facade.traktAuth.collectAsState(initial = TraktAuthState())
     val tmdb by facade.tmdbSettings.collectAsState(initial = TmdbSettings())
-    val mdblist by facade.mdblistSettings.collectAsState(initial = MDBListSettings())
     val debrid by facade.debridSettings.collectAsState(initial = DebridSettings())
     val player by facade.playerSettings.collectAsState(initial = PlayerSettings())
     val openSubtitlesEnabled by facade.openSubtitlesEnabled.collectAsState(initial = false)
     val openSubtitlesKey by facade.openSubtitlesApiKey.collectAsState(initial = "")
-    val openSubtitlesAutoDownload by facade.openSubtitlesAutoDownload.collectAsState(initial = false)
 
     when (val current = destination) {
         SettingsDestination.Root -> RewriteSettingsCategoryList(
@@ -62,20 +60,18 @@ fun RewriteSettingsScreen(
                     facade,
                     tmdb,
                     onTmdbEnabled = { scope.launch { facade.setTmdbEnabled(it) } },
-                    onEnrichContinueWatching = { scope.launch { facade.setTmdbEnrichContinueWatching(it) } },
                     communityAddonCount,
                 )
                 RewriteSettingsCategory.Integrations -> IntegrationsSettings(
                     facade,
                     traktAuth,
                     tmdb,
-                    mdblist,
                     debrid,
                     openSubtitlesEnabled,
                     openSubtitlesKey,
-                    openSubtitlesAutoDownload,
                     debridConnection,
                     onConnect,
+                    onDebridEnabledChanged,
                     onSelect,
                 )
                 RewriteSettingsCategory.Display -> DisplaySettings(facade, player, scope)

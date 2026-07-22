@@ -13,6 +13,8 @@ import com.sluggyard.tv.data.remote.dto.PremiumizeDirectDownloadFileDto
 import com.sluggyard.tv.data.remote.dto.RealDebridTorrentFileDto
 import com.sluggyard.tv.data.remote.dto.TorboxTorrentFileDto
 import com.sluggyard.tv.domain.model.StreamClientResolve
+import com.sluggyard.tv.ui.rewrite.data.RewriteConfiguredAddonUrls
+import com.sluggyard.tv.ui.rewrite.data.RewriteProviderAddonConfigurator
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -35,6 +37,7 @@ class RewriteDebridRuntime(
     private val torbox: RewriteTorboxTransport = RewriteTorboxTransport(),
     private val premiumize: RewritePremiumizeTransport = RewritePremiumizeTransport(),
     private val realDebrid: RewriteRealDebridTransport = RewriteRealDebridTransport(),
+    private val addonConfigurator: RewriteProviderAddonConfigurator = RewriteProviderAddonConfigurator(),
 ) {
     val connection = credentials.state.map { RewriteDebridConnection(it.configuredServices, it.activeService) }
     val manualResolution = ManualStreamResolutionCoordinator(
@@ -64,6 +67,12 @@ class RewriteDebridRuntime(
     }
 
     suspend fun select(service: DebridService) = credentials.selectForActiveProfile(service)
+
+    suspend fun configuredAddonUrls(): RewriteConfiguredAddonUrls? {
+        val service = credentials.stateValue().activeService ?: return null
+        val key = credentials.keyForActiveProfile(service).takeIf(String::isNotBlank) ?: return null
+        return addonConfigurator.configure(service, key)
+    }
 }
 
 private class TorboxManualResolver(

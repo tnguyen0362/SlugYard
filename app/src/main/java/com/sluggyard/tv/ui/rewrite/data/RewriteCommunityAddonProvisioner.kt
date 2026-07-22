@@ -25,23 +25,34 @@ class RewriteCommunityAddonProvisioner(
     private val gateway: StremioAddonGateway,
     private val registry: RewriteAddonRegistry,
 ) {
-    suspend fun provision(): CommunityProvisioningReport {
-        val urls = PlayFlixCommunitySourcePolicy.bootstrapManifestUrls
+    suspend fun provision(configured: RewriteConfiguredAddonUrls? = null): CommunityProvisioningReport {
+        val requests = PlayFlixCommunitySourcePolicy.bootstrapManifestUrls.map { registryUrl ->
+            val requestUrl = when {
+                registryUrl.contains("torrentio", ignoreCase = true) -> configured?.torrentioManifestUrl
+                registryUrl.contains("mediafusion", ignoreCase = true) -> configured?.mediaFusionManifestUrl
+                else -> null
+            } ?: registryUrl
+            ManifestRequest(registryUrl, requestUrl)
+        }
         val curated = buildList {
             boundedAddonFanout(
-                tasks = urls.mapIndexed { index, manifestUrl ->
+                tasks = requests.mapIndexed { index, request ->
                     AddonFanoutTask(index.toString()) {
-                        when (val response = gateway.fetchManifest(manifestUrl)) {
-                            is AddonTransportResult.Success -> when (val validation = AddonManifestPolicy.validate(manifestUrl, response.value)) {
+                        when (val response = gateway.fetchManifest(request.requestUrl)) {
+                            is AddonTransportResult.Success -> when (val validation = AddonManifestPolicy.validate(request.requestUrl, response.value)) {
                                 is com.sluggyard.tv.core.addonprotocol.ManifestValidation.Accepted ->
-                                    ManagedAddon(validation.manifestUrl, validation.manifest)
+                                    ManagedAddon(
+                                        manifestUrl = request.registryUrl,
+                                        configuredManifestUrl = request.requestUrl.takeUnless { it == request.registryUrl },
+                                        manifest = validation.manifest,
+                                    )
                                 is com.sluggyard.tv.core.addonprotocol.ManifestValidation.Rejected -> null
                             }
                             else -> null
                         }
                     }
                 },
-                maxConcurrent = urls.size.coerceAtMost(4).coerceAtLeast(1),
+                maxConcurrent = requests.size.coerceAtMost(4).coerceAtLeast(1),
             ).collect { result ->
                 if (result is AddonFanoutResult.Success) {
                     result.value?.let(::add)
@@ -51,7 +62,12 @@ class RewriteCommunityAddonProvisioner(
         registry.ensureCurated(curated)
         return CommunityProvisioningReport(
             installedCount = curated.size,
-            unavailableCount = PlayFlixCommunitySourcePolicy.bootstrapManifestUrls.size - curated.size,
+            unavailableCount = requests.size - curated.size,
         )
     }
+
+    private data class ManifestRequest(
+        val registryUrl: String,
+        val requestUrl: String,
+    )
 }

@@ -15,8 +15,9 @@ import kotlinx.coroutines.withContext
 /**
  * Rewrite-owned, profile-scoped credential boundary.
  *
- * The key is never logged, put into navigation, or copied to the addon registry. A provider is
- * active only when its credential belongs to the currently selected rewrite profile.
+ * The key is never logged or put into navigation. A provider is active only when its credential
+ * belongs to the currently selected rewrite profile; addon provisioning may generate the
+ * provider's configured manifest URL from that credential without exposing it to Compose.
  */
 class RewriteDebridCredentialStore(
     private val dataStore: DataStore<Preferences>,

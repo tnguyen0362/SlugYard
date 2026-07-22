@@ -3,9 +3,9 @@ package com.sluggyard.tv.core.addonprotocol
 /**
  * Fixed backend manifest allowlist for the locked-down PlayFlix product.
  *
- * A customer's debrid credential is deliberately never embedded in a manifest URL. Torrent
- * hashes returned by community sources are resolved locally through the active rewrite-owned
- * provider transport instead. Torrentio stays provisioned even during a transient upstream
+ * Provider-specific manifest URLs are generated only for the two allowlisted content sources.
+ * Torrent hashes returned by those sources are still resolved locally through the active
+ * rewrite-owned provider transport. Torrentio stays provisioned even during a transient upstream
  * outage; endpoint availability is handled by the bounded transport, not by removing a source.
  */
 object PlayFlixCommunitySourcePolicy {

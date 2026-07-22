@@ -54,6 +54,7 @@ import com.sluggyard.tv.ui.rewrite.data.RewriteLibraryWatchStore
 import com.sluggyard.tv.ui.rewrite.data.RewritePlaybackProgressStore
 import com.sluggyard.tv.ui.rewrite.data.RewriteProfileStore
 import com.sluggyard.tv.ui.rewrite.data.RewriteHomeSettingsStore
+import com.sluggyard.tv.domain.model.DebridSettings
 import com.sluggyard.tv.ui.rewrite.details.RewriteDetailsDataSource
 import com.sluggyard.tv.ui.rewrite.details.RewriteDetailsLoadResult
 import com.sluggyard.tv.ui.rewrite.details.RewriteDetailsScreen
@@ -68,9 +69,12 @@ import com.sluggyard.tv.ui.rewrite.home.RewriteHomeRow
 import com.sluggyard.tv.ui.rewrite.home.RewriteHomeScreen
 import com.sluggyard.tv.ui.rewrite.home.RewriteHomeState
 import com.sluggyard.tv.ui.rewrite.home.withHeroEnrichment
+import com.sluggyard.tv.ui.rewrite.settings.effectiveProfileId
+import com.sluggyard.tv.ui.rewrite.streams.RewriteStreamCandidate
 import com.sluggyard.tv.ui.rewrite.streams.RewriteStreamGroup
 import com.sluggyard.tv.ui.rewrite.streams.RewriteStreamsDataSource
 import com.sluggyard.tv.ui.rewrite.streams.RewriteStreamsScreen
+import com.sluggyard.tv.ui.rewrite.streams.selectRewriteAutoPlayCandidate
 import com.sluggyard.tv.ui.rewrite.profiles.RewriteProfilesScreen
 import com.sluggyard.tv.ui.rewrite.settings.RewriteSettingsScreen
 import com.sluggyard.tv.ui.rewrite.settings.RewriteSettingsFacade
@@ -120,8 +124,8 @@ class RewriteAppGraph(
     val manualResolution = debridRuntime.manualResolution
 
     /** Best-effort network bootstrap; UI is already composed while this runs on the background IO path. */
-    suspend fun provisionCommunitySources() {
-        communityProvisioner.provision()
+    suspend fun provisionCommunitySources(debridEnabled: Boolean = true) {
+        communityProvisioner.provision(if (debridEnabled) debridRuntime.configuredAddonUrls() else null)
     }
 
 }
@@ -133,7 +137,7 @@ private sealed interface RewriteRootDestination {
     data object Profiles : RewriteRootDestination
     data object Settings : RewriteRootDestination
     data class Details(val addonId: String, val type: String, val id: String) : RewriteRootDestination
-    data class Streams(val type: String, val id: String, val title: String) : RewriteRootDestination
+    data class Streams(val type: String, val id: String, val title: String, val autoPick: Boolean = false) : RewriteRootDestination
 }
 
 /**
@@ -210,6 +214,10 @@ private fun RewriteAppContent(
     val playbackCheckpoints by graph.playbackProgress.checkpoints.collectAsState(initial = emptyList())
     val profiles by graph.profiles.state.collectAsState(initial = com.sluggyard.tv.ui.rewrite.data.RewriteProfileState())
     val homeSettings by graph.homeSettings.settings.collectAsState(initial = com.sluggyard.tv.ui.rewrite.data.RewriteHomeSettings())
+    val debridSettings by settingsFacade.debridSettings.collectAsState(initial = DebridSettings())
+    val showPosterLabels by settingsFacade.layoutPreferences.posterLabelsEnabled.collectAsState(initial = true)
+    val smoothFocusMovement by settingsFacade.layoutPreferences.smoothBringIntoViewEnabled.collectAsState(initial = true)
+    val fastHorizontalNavigation by settingsFacade.layoutPreferences.fastHorizontalNavigationEnabled.collectAsState(initial = false)
     val debridConnection by graph.debridRuntime.connection.collectAsState(initial = RewriteDebridConnection())
     var destination by remember { mutableStateOf<RewriteRootDestination>(RewriteRootDestination.Home) }
     var catalogState by remember { mutableStateOf(RewriteHomeCatalogState(emptyList())) }
@@ -218,10 +226,20 @@ private fun RewriteAppContent(
     var detailsMessage by remember { mutableStateOf<String?>(null) }
     var streamGroups by remember { mutableStateOf<List<RewriteStreamGroup>>(emptyList()) }
     var streamMessage by remember { mutableStateOf<String?>(null) }
+    var autoPickAttemptedFor by remember { mutableStateOf<String?>(null) }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
 
-    LaunchedEffect(graph) {
-        graph.provisionCommunitySources()
+    LaunchedEffect(graph, profiles.rememberLastProfile) {
+        val profileId = effectiveProfileId(
+            activeProfileId = profiles.activeProfileId,
+            rememberLastProfile = profiles.rememberLastProfile,
+            profileIds = profiles.profiles.map { it.id },
+        )
+        if (profileId != profiles.activeProfileId) graph.profiles.select(profileId)
+    }
+
+    LaunchedEffect(graph, profiles.activeProfileId, debridSettings.enabled) {
+        graph.provisionCommunitySources(debridSettings.enabled)
     }
 
     BackHandler(enabled = destination !is RewriteRootDestination.Home) {
@@ -253,13 +271,40 @@ private fun RewriteAppContent(
     }
     LaunchedEffect(destination, registry.addons) {
         val streams = destination as? RewriteRootDestination.Streams ?: return@LaunchedEffect
+        streamGroups = emptyList()
+        streamMessage = null
+        autoPickAttemptedFor = null
         graph.streamsDataSource.streamGroups(
             streams.type,
             streams.id,
-            configuredDebrid = graph.debridRuntime.configuredService(),
+            configuredDebrid = if (debridSettings.enabled) graph.debridRuntime.configuredService() else null,
         ).collect { groups ->
             streamGroups = groups
         }
+    }
+
+    fun resolveStreamCandidate(candidate: RewriteStreamCandidate, streams: RewriteRootDestination.Streams) {
+        scope.launch {
+            when (val result = graph.manualResolution.prepare(
+                ManualStreamSelection(candidate.id, candidate.directUrl, candidate.infoHash, candidate.fileIndex),
+                configuredService = if (debridSettings.enabled) graph.debridRuntime.configuredService() else null,
+            )) {
+                is ManualResolutionResult.Ready -> {
+                    streamMessage = null
+                    onLaunchRetainedPlayer(result.source, streams.title, streams.type, streams.id)
+                }
+                is ManualResolutionResult.Unavailable -> streamMessage = result.message
+                is ManualResolutionResult.Failed -> streamMessage = result.message
+            }
+        }
+    }
+
+    LaunchedEffect(destination, streamGroups) {
+        val streams = destination as? RewriteRootDestination.Streams ?: return@LaunchedEffect
+        if (!streams.autoPick || autoPickAttemptedFor == streams.id || streamGroups.any { it.state is com.sluggyard.tv.ui.rewrite.streams.RewriteStreamGroupState.Loading }) return@LaunchedEffect
+        val candidate = selectRewriteAutoPlayCandidate(streamGroups) ?: return@LaunchedEffect
+        autoPickAttemptedFor = streams.id
+        resolveStreamCandidate(candidate, streams)
     }
 
     SlugYardTvTheme {
@@ -276,6 +321,9 @@ private fun RewriteAppContent(
             when (destination) {
                 RewriteRootDestination.Home -> RewriteHomeScreen(
                     state = baseHomeState.withHeroEnrichment(heroEnrichment),
+                    showPosterLabels = showPosterLabels,
+                    smoothFocusMovement = smoothFocusMovement,
+                    fastHorizontalNavigation = fastHorizontalNavigation,
                     onPlay = { hero ->
                         destination = if (hero.contentType == "series") {
                             RewriteRootDestination.Details(
@@ -288,6 +336,7 @@ private fun RewriteAppContent(
                                 type = hero.contentType,
                                 id = hero.id,
                                 title = hero.title,
+                                autoPick = true,
                             )
                         }
                     },
@@ -338,8 +387,17 @@ private fun RewriteAppContent(
                     onHideUnreleasedChanged = { enabled -> scope.launch { graph.homeSettings.setHideUnreleased(enabled) } },
                     onRememberProfileChanged = { enabled -> scope.launch { graph.profiles.setRememberLastProfile(enabled) } },
                     debridConnection = debridConnection,
-                    onConnect = { service, apiKey -> graph.debridRuntime.connect(service, apiKey) },
-                    onSelect = { service -> graph.debridRuntime.select(service) },
+                    onConnect = {
+                        service, apiKey ->
+                        graph.debridRuntime.connect(service, apiKey)
+                        graph.provisionCommunitySources(settingsFacade.debridSettings.first().enabled)
+                    },
+                    onDebridEnabledChanged = { enabled -> graph.provisionCommunitySources(enabled) },
+                    onSelect = {
+                        service ->
+                        graph.debridRuntime.select(service)
+                        graph.provisionCommunitySources(settingsFacade.debridSettings.first().enabled)
+                    },
                     communityAddonCount = registry.addons.count { addon ->
                         addon.manifest.name.contains("PlayFlix", ignoreCase = true) ||
                             addon.manifestUrl.contains("torrentio", ignoreCase = true) ||
@@ -359,6 +417,7 @@ private fun RewriteAppContent(
                                         type = target.type,
                                         id = target.id,
                                         title = state.title,
+                                        autoPick = true,
                                     )
                                 }
                             },
@@ -426,19 +485,7 @@ private fun RewriteAppContent(
                             title = streams.title,
                             groups = streamGroups,
                             onStreamSelected = { candidate ->
-                                scope.launch {
-                                    when (val result = graph.manualResolution.prepare(
-                                        ManualStreamSelection(candidate.id, candidate.directUrl, candidate.infoHash, candidate.fileIndex),
-                                        configuredService = graph.debridRuntime.configuredService(),
-                                    )) {
-                                        is ManualResolutionResult.Ready -> {
-                                            streamMessage = null
-                                            onLaunchRetainedPlayer(result.source, streams.title, streams.type, streams.id)
-                                        }
-                                        is ManualResolutionResult.Unavailable -> streamMessage = result.message
-                                        is ManualResolutionResult.Failed -> streamMessage = result.message
-                                    }
-                                }
+                                resolveStreamCandidate(candidate, streams)
                             },
                             modifier = Modifier.weight(1f),
                         )

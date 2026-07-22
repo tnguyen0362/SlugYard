@@ -63,15 +63,20 @@ class RewriteAddonRegistryStore(
                 ?.let(RewriteAddonRegistryCodec::decode)
                 ?.let(::sanitizeCuratedRegistry)
                 ?: AddonRegistryState()
-            val existingIds = current.addons.mapTo(mutableSetOf()) { it.manifest.id }
-            val existingUrls = current.addons.mapTo(mutableSetOf()) { it.manifestUrl }
-            val additions = addons.filter { addon ->
-                addon.manifestUrl in PlayFlixCommunitySourcePolicy.bootstrapManifestUrls &&
-                addon.manifest.id !in existingIds && addon.manifestUrl !in existingUrls
-            }.map { it.copy(configuredManifestUrl = null) }
-            if (additions.isNotEmpty()) {
+            val curated = addons.filter { addon ->
+                addon.manifestUrl in PlayFlixCommunitySourcePolicy.bootstrapManifestUrls
+            }
+            val byUrl = curated.associateBy(ManagedAddon::manifestUrl)
+            val updated = current.addons.mapNotNull { existing ->
+                byUrl[existing.manifestUrl]?.copy(enabled = existing.enabled) ?: existing.takeIf {
+                    it.manifestUrl in PlayFlixCommunitySourcePolicy.bootstrapManifestUrls
+                }
+            }
+            val additions = curated.filter { candidate -> current.addons.none { it.manifestUrl == candidate.manifestUrl } }
+            val next = sanitizeCuratedRegistry(AddonRegistryState(updated + additions))
+            if (next != current) {
                 preferences[rewriteAddonRegistryKey] = RewriteAddonRegistryCodec.encode(
-                    sanitizeCuratedRegistry(current.copy(addons = current.addons + additions)),
+                    next,
                 )
             }
         }
@@ -83,8 +88,22 @@ internal fun sanitizeCuratedRegistry(state: AddonRegistryState): AddonRegistrySt
     AddonRegistryState(
         state.addons
             .filter { it.manifestUrl in PlayFlixCommunitySourcePolicy.bootstrapManifestUrls }
-            .map { it.copy(configuredManifestUrl = null) },
+            .map { addon ->
+                addon.copy(
+                    configuredManifestUrl = addon.configuredManifestUrl?.takeIf {
+                        isAllowedConfiguredManifest(addon.manifestUrl, it)
+                    },
+                )
+            },
     )
+
+private fun isAllowedConfiguredManifest(registryUrl: String, configuredUrl: String): Boolean = runCatching {
+    val registry = java.net.URI(registryUrl)
+    val configured = java.net.URI(configuredUrl)
+    registry.scheme == configured.scheme &&
+        registry.host.equals(configured.host, ignoreCase = true) &&
+        configured.path.endsWith("/manifest.json")
+}.getOrDefault(false)
 
 object RewriteAddonRegistryCodec {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }

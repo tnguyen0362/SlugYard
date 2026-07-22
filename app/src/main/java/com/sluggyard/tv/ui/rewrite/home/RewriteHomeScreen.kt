@@ -21,6 +21,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PlayArrow
@@ -31,14 +33,17 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -51,7 +56,11 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.sluggyard.tv.ui.design.SlugYardPalette
 import com.sluggyard.tv.ui.design.SlugYardTvMetrics
+import com.sluggyard.tv.ui.rewrite.settings.shouldShowPosterLabel
+import com.sluggyard.tv.ui.util.LocalFastHorizontalNavigationEnabled
+import com.sluggyard.tv.ui.util.dpadRepeatThrottle
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 data class RewriteHomePoster(
     val id: String,
@@ -96,22 +105,33 @@ fun RewriteHomeScreen(
     onPlay: (RewriteHero) -> Unit,
     onDetails: (RewriteHero) -> Unit,
     onPosterSelected: (RewriteHomePoster) -> Unit,
+    showPosterLabels: Boolean = true,
+    smoothFocusMovement: Boolean = true,
+    fastHorizontalNavigation: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
-    LazyColumn(
-        modifier = modifier
-            .fillMaxSize()
-            .background(SlugYardPalette.Canvas),
-        contentPadding = PaddingValues(bottom = 56.dp),
-        verticalArrangement = Arrangement.spacedBy(30.dp),
-    ) {
-        state.hero?.let { hero ->
-            item(key = "hero:${hero.id}") {
-                RewriteHeroPanel(hero = hero, onPlay = { onPlay(hero) }, onDetails = { onDetails(hero) })
+    CompositionLocalProvider(LocalFastHorizontalNavigationEnabled provides fastHorizontalNavigation) {
+        LazyColumn(
+            modifier = modifier
+                .fillMaxSize()
+                .background(SlugYardPalette.Canvas)
+                .dpadRepeatThrottle(),
+            contentPadding = PaddingValues(bottom = 56.dp),
+            verticalArrangement = Arrangement.spacedBy(30.dp),
+        ) {
+            state.hero?.let { hero ->
+                item(key = "hero:${hero.id}") {
+                    RewriteHeroPanel(hero = hero, onPlay = { onPlay(hero) }, onDetails = { onDetails(hero) })
+                }
             }
-        }
-        items(state.rows, key = RewriteHomeRow::id) { row ->
-            RewritePosterRow(row = row, onPosterSelected = onPosterSelected)
+            items(state.rows, key = RewriteHomeRow::id) { row ->
+                RewritePosterRow(
+                    row = row,
+                    showPosterLabels = showPosterLabels,
+                    smoothFocusMovement = smoothFocusMovement,
+                    onPosterSelected = onPosterSelected,
+                )
+            }
         }
     }
 }
@@ -213,6 +233,8 @@ private fun HeroActionButton(
 @Composable
 private fun RewritePosterRow(
     row: RewriteHomeRow,
+    showPosterLabels: Boolean,
+    smoothFocusMovement: Boolean,
     onPosterSelected: (RewriteHomePoster) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -226,7 +248,12 @@ private fun RewritePosterRow(
             horizontalArrangement = Arrangement.spacedBy(SlugYardTvMetrics.RowGap),
         ) {
             items(row.posters, key = RewriteHomePoster::id) { poster ->
-                RewritePosterCard(poster = poster, onClick = { onPosterSelected(poster) })
+                RewritePosterCard(
+                    poster = poster,
+                    showLabel = showPosterLabels,
+                    smoothFocusMovement = smoothFocusMovement,
+                    onClick = { onPosterSelected(poster) },
+                )
             }
         }
     }
@@ -235,17 +262,31 @@ private fun RewritePosterRow(
 @Composable
 private fun RewritePosterCard(
     poster: RewriteHomePoster,
+    showLabel: Boolean,
+    smoothFocusMovement: Boolean,
     onClick: () -> Unit,
 ) {
     val interactions = remember { MutableInteractionSource() }
     val focused by interactions.collectIsFocusedAsState()
+    val bringIntoViewRequester = remember { BringIntoViewRequester() }
+    val scope = rememberCoroutineScope()
     val scale by animateFloatAsState(
         targetValue = if (focused) SlugYardTvMetrics.FocusScale else 1f,
         label = "poster focus scale",
     )
 
+    val focusMovementModifier = if (smoothFocusMovement) {
+        Modifier
+            .bringIntoViewRequester(bringIntoViewRequester)
+            .onFocusChanged { state ->
+                if (state.isFocused) scope.launch { bringIntoViewRequester.bringIntoView() }
+            }
+    } else {
+        Modifier
+    }
+
     Box(
-        modifier = Modifier
+        modifier = focusMovementModifier
             .size(width = 176.dp, height = 264.dp)
             .graphicsLayer {
                 scaleX = scale
@@ -280,7 +321,7 @@ private fun RewritePosterCard(
                     .background(SlugYardPalette.Accent),
             )
         }
-        if (focused) {
+        if (shouldShowPosterLabel(showLabel, focused)) {
             Text(
                 poster.title,
                 modifier = Modifier
