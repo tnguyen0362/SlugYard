@@ -64,3 +64,21 @@ logs
 AGENTS.md
 docs/
 status-page/
+
+# Local production credentials and signing material
+*.jks
+*.keystore
+*.apk
+*.aab
+
+# Emulator captures and local readiness output
+.tmp/
+.tmp-*
+captures/
+*.uiautomator.xml
+*.xml.dump
+
+# Local exports and generated research output
+open_issues*.csv
+open_prs*.csv
+*_raw.txt
