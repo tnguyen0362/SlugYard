@@ -67,7 +67,7 @@ fun RewritePlayerPostPlayOverlay(
                         enabled = activeMode is PostPlayMode.StillWatching || episode.hasAired,
                         shape = RoundedCornerShape(4.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = SlugYardPalette.OnCanvas,
+                            containerColor = SlugYardPalette.Accent,
                             contentColor = SlugYardPalette.Canvas,
                         ),
                     ) { Text(if (activeMode is PostPlayMode.StillWatching) "Continue" else "Play next") }

@@ -53,7 +53,7 @@ fun RewritePlayerSkipOverlay(
                     onClick = actions.onSkip,
                     shape = RoundedCornerShape(4.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = SlugYardPalette.OnCanvas,
+                        containerColor = SlugYardPalette.Accent,
                         contentColor = SlugYardPalette.Canvas,
                     ),
                 ) { Text(skipLabel(intervalType)) }

@@ -93,7 +93,7 @@ private fun PlayerPaused(state: PlayerUiState, onResume: () -> Unit, modifier: M
             Button(
                 onClick = onResume,
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = SlugYardPalette.OnCanvas,
+                    containerColor = SlugYardPalette.Accent,
                     contentColor = SlugYardPalette.Canvas,
                 ),
             ) { Text("Resume") }

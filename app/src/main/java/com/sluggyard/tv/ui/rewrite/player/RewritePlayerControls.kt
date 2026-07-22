@@ -7,12 +7,10 @@ import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -66,7 +64,7 @@ fun RewritePlayerControls(
         verticalArrangement = Arrangement.SpaceBetween,
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-            PlayerControlButton(label = "Back", onClick = actions.onBack, primary = false)
+            PlayerControlButton(label = "Back", onClick = actions.onBack, emphasis = ButtonEmphasis.SECONDARY)
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
                     text = state.contentName ?: state.title,
@@ -84,18 +82,19 @@ fun RewritePlayerControls(
                 }
             }
         }
-        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                PlayerControlButton(label = "Rewind 10 seconds", onClick = actions.onSeekBackward, primary = false)
-                PlayerControlButton(label = if (state.isPlaying) "Pause" else "Play", onClick = actions.onPlayPause, primary = true)
-                PlayerControlButton(label = "Forward 10 seconds", onClick = actions.onSeekForward, primary = false)
-                Spacer(Modifier.width(10.dp))
-                PlayerControlButton(label = "Sources", onClick = actions.onSources, primary = false)
-                PlayerControlButton(label = "Audio", onClick = actions.onAudio, primary = false)
-                PlayerControlButton(label = "Subtitles", onClick = actions.onSubtitles, primary = false)
-                PlayerControlButton(label = "Speed", onClick = actions.onSpeed, primary = false)
+        Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                PlayerControlButton(label = "Rewind 10 seconds", onClick = actions.onSeekBackward, emphasis = ButtonEmphasis.SECONDARY)
+                PlayerControlButton(label = if (state.isPlaying) "Pause" else "Play", onClick = actions.onPlayPause, emphasis = ButtonEmphasis.PRIMARY)
+                PlayerControlButton(label = "Forward 10 seconds", onClick = actions.onSeekForward, emphasis = ButtonEmphasis.SECONDARY)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                PlayerControlButton(label = "Sources", onClick = actions.onSources, emphasis = ButtonEmphasis.SUBORDINATE)
+                PlayerControlButton(label = "Audio", onClick = actions.onAudio, emphasis = ButtonEmphasis.SUBORDINATE)
+                PlayerControlButton(label = "Subtitles", onClick = actions.onSubtitles, emphasis = ButtonEmphasis.SUBORDINATE)
+                PlayerControlButton(label = "Speed", onClick = actions.onSpeed, emphasis = ButtonEmphasis.SUBORDINATE)
                 if (state.contentType == "series") {
-                    PlayerControlButton(label = "Episodes", onClick = actions.onEpisodes, primary = false)
+                    PlayerControlButton(label = "Episodes", onClick = actions.onEpisodes, emphasis = ButtonEmphasis.SUBORDINATE)
                 }
             }
             streamLabel?.let { stream ->
@@ -111,6 +110,8 @@ fun RewritePlayerControls(
     }
 }
 
+private enum class ButtonEmphasis { PRIMARY, SECONDARY, SUBORDINATE }
+
 private fun String.cleanPlayerStreamLabel(): String =
     replace(Regex("[\\r\\n\\t]+"), " ")
         .replace(Regex("[\\uD800-\\uDBFF][\\uDC00-\\uDFFF]"), "")
@@ -120,32 +121,39 @@ private fun String.cleanPlayerStreamLabel(): String =
         .ifBlank { "Selected stream" }
 
 @Composable
-private fun PlayerControlButton(label: String, onClick: () -> Unit, primary: Boolean) {
+private fun PlayerControlButton(label: String, onClick: () -> Unit, emphasis: ButtonEmphasis) {
     val interactions = remember { MutableInteractionSource() }
     val focused by interactions.collectIsFocusedAsState()
-    val scale by animateFloatAsState(if (focused) 1.06f else 1f, label = "$label focus")
+    val scale by animateFloatAsState(if (focused) 1.08f else 1f, label = "$label focus")
+    val height = if (emphasis == ButtonEmphasis.PRIMARY) 56.dp else 44.dp
     val modifier = Modifier
-        .height(48.dp)
+        .height(height)
         .graphicsLayer { scaleX = scale; scaleY = scale }
         .semantics { contentDescription = label; role = Role.Button }
-    if (primary) {
-        Button(
+    when (emphasis) {
+        ButtonEmphasis.PRIMARY -> Button(
             onClick = onClick,
             modifier = modifier,
             interactionSource = interactions,
             shape = RoundedCornerShape(4.dp),
             colors = ButtonDefaults.buttonColors(
-                containerColor = SlugYardPalette.OnCanvas,
+                containerColor = SlugYardPalette.Accent,
                 contentColor = SlugYardPalette.Canvas,
             ),
         ) { Text(label, style = MaterialTheme.typography.labelLarge) }
-    } else {
-        OutlinedButton(
+        ButtonEmphasis.SECONDARY -> OutlinedButton(
             onClick = onClick,
             modifier = modifier,
             interactionSource = interactions,
             shape = RoundedCornerShape(4.dp),
             colors = ButtonDefaults.outlinedButtonColors(contentColor = SlugYardPalette.OnCanvas),
         ) { Text(label, style = MaterialTheme.typography.labelLarge) }
+        ButtonEmphasis.SUBORDINATE -> OutlinedButton(
+            onClick = onClick,
+            modifier = modifier,
+            interactionSource = interactions,
+            shape = RoundedCornerShape(4.dp),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = SlugYardPalette.OnCanvasMuted),
+        ) { Text(label, style = MaterialTheme.typography.labelMedium) }
     }
 }
