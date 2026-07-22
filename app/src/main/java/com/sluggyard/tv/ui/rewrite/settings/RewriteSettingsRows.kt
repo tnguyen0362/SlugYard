@@ -15,7 +15,9 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -93,9 +95,21 @@ internal fun RewriteActionRow(title: String, description: String, onClick: () ->
 
 @Composable
 internal fun RewriteCycleRow(title: String, value: String, values: List<String>, onValueChanged: (String) -> Unit) {
-    RewriteActionRow(title, value) {
-        val index = values.indexOf(value).takeIf { it >= 0 } ?: 0
-        onValueChanged(values[(index + 1) % values.size])
+    var showPicker by remember { mutableStateOf(false) }
+
+    RewriteActionRow(title, value) { showPicker = true }
+
+    if (showPicker) {
+        RewriteSettingsValuePicker(
+            title = title,
+            values = values,
+            selected = value,
+            onValueSelected = {
+                onValueChanged(it)
+                showPicker = false
+            },
+            onDismiss = { showPicker = false },
+        )
     }
 }
 
