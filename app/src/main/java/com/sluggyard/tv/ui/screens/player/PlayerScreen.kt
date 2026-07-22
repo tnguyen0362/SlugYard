@@ -142,7 +142,7 @@ fun PlayerScreen(
     onBackPress: (currentVideoId: String?, currentSeason: Int?, currentEpisode: Int?, autoPlayEnabled: Boolean, playbackCompleted: Boolean) -> Unit,
     onPlaybackErrorBack: () -> Unit = { onBackPress(null, null, null, false, false) },
     onPlaybackEnded: ((nextVideoId: String?, nextSeason: Int?, nextEpisode: Int?, exitReason: PlayerExitReason?) -> Unit)? = null,
-    controlsOverlay: @Composable (PlayerUiState, RewritePlayerControlActions) -> Unit,
+    controlsOverlay: @Composable (PlayerUiState, RewritePlayerControlActions, FocusRequester) -> Unit,
     secondaryOverlay: @Composable (PlayerUiState, RewritePlayerSecondaryActions) -> Unit,
     trackOverlay: @Composable (PlayerUiState, RewritePlayerTrackActions) -> Unit,
     skipOverlay: @Composable (PlayerUiState, RewritePlayerSkipActions) -> Unit,
@@ -157,7 +157,6 @@ fun PlayerScreen(
     val context = LocalContext.current
     val containerFocusRequester = remember { FocusRequester() }
     val playPauseFocusRequester = remember { FocusRequester() }
-    val progressBarFocusRequester = remember { FocusRequester() }
     val episodesFocusRequester = remember { FocusRequester() }
     val streamsFocusRequester = remember { FocusRequester() }
     val sourceStreamsFocusRequester = remember { FocusRequester() }
@@ -634,30 +633,15 @@ fun PlayerScreen(
                             }
                         }
                         KeyEvent.KEYCODE_DPAD_UP -> {
-                                if (!uiState.showControls) {
-                                    viewModel.onEvent(PlayerEvent.OnToggleControls)
-                                } else {
-                                    try {
-                                        progressBarFocusRequester.requestFocus()
-                                    } catch (_: Exception) {
-                                        val skipVisible = skipButtonActuallyVisible
-                                        if (skipVisible) {
-                                            try {
-                                                skipIntroFocusRequester.requestFocus()
-                                            } catch (_: Exception) {
-                                            }
-                                        } else if (uiState.postPlayMode is PostPlayMode.AutoPlay) {
-                                            try {
-                                                nextEpisodeFocusRequester.requestFocus()
-                                            } catch (_: Exception) {
-                                            }
-                                        } else {
-                                            viewModel.hideControls()
-                                        }
-                                    }
-                                }
+                            if (!uiState.showControls) {
+                                viewModel.onEvent(PlayerEvent.OnToggleControls)
                                 true
+                            } else {
+                                // With controls visible, the focused control owns UP traversal.
+                                // Do not consume it while targeting the hidden seek overlay.
+                                false
                             }
+                        }
                         KeyEvent.KEYCODE_DPAD_DOWN -> {
                             if (!uiState.showControls) {
                                 viewModel.onEvent(PlayerEvent.OnToggleControls)
@@ -906,7 +890,7 @@ fun PlayerScreen(
             enter = fadeIn(animationSpec = tween(200)),
             exit = fadeOut(animationSpec = tween(200))
         ) {
-            controlsOverlay(uiState, rewriteActions)
+            controlsOverlay(uiState, rewriteActions, playPauseFocusRequester)
         }
 
         // Aspect ratio indicator (floating pill)

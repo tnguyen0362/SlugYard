@@ -23,6 +23,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
@@ -42,8 +45,13 @@ import com.sluggyard.tv.ui.screens.player.RewritePlayerControlActions
 fun RewritePlayerControls(
     state: PlayerUiState,
     actions: RewritePlayerControlActions,
+    playPauseFocusRequester: FocusRequester,
     modifier: Modifier = Modifier,
 ) {
+    val backFocusRequester = remember { FocusRequester() }
+    val rewindFocusRequester = remember { FocusRequester() }
+    val forwardFocusRequester = remember { FocusRequester() }
+    val secondaryFocusRequester = remember { FocusRequester() }
     val streamLabel = state.currentStreamName?.cleanPlayerStreamLabel()
     Column(
         modifier = modifier
@@ -64,7 +72,13 @@ fun RewritePlayerControls(
         verticalArrangement = Arrangement.SpaceBetween,
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-            PlayerControlButton(label = "Back", onClick = actions.onBack, emphasis = ButtonEmphasis.SECONDARY)
+            PlayerControlButton(
+                label = "Back",
+                onClick = actions.onBack,
+                emphasis = ButtonEmphasis.SECONDARY,
+                focusRequester = backFocusRequester,
+                downFocusRequester = playPauseFocusRequester,
+            )
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
                     text = state.contentName ?: state.title,
@@ -84,17 +98,64 @@ fun RewritePlayerControls(
         }
         Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                PlayerControlButton(label = "Rewind 10 seconds", onClick = actions.onSeekBackward, emphasis = ButtonEmphasis.SECONDARY)
-                PlayerControlButton(label = if (state.isPlaying) "Pause" else "Play", onClick = actions.onPlayPause, emphasis = ButtonEmphasis.PRIMARY)
-                PlayerControlButton(label = "Forward 10 seconds", onClick = actions.onSeekForward, emphasis = ButtonEmphasis.SECONDARY)
+                PlayerControlButton(
+                    label = "Rewind 10 seconds",
+                    onClick = actions.onSeekBackward,
+                    emphasis = ButtonEmphasis.SECONDARY,
+                    focusRequester = rewindFocusRequester,
+                    upFocusRequester = backFocusRequester,
+                    downFocusRequester = secondaryFocusRequester,
+                )
+                PlayerControlButton(
+                    label = if (state.isPlaying) "Pause" else "Play",
+                    onClick = actions.onPlayPause,
+                    emphasis = ButtonEmphasis.PRIMARY,
+                    focusRequester = playPauseFocusRequester,
+                    upFocusRequester = backFocusRequester,
+                    downFocusRequester = secondaryFocusRequester,
+                )
+                PlayerControlButton(
+                    label = "Forward 10 seconds",
+                    onClick = actions.onSeekForward,
+                    emphasis = ButtonEmphasis.SECONDARY,
+                    focusRequester = forwardFocusRequester,
+                    upFocusRequester = backFocusRequester,
+                    downFocusRequester = secondaryFocusRequester,
+                )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                PlayerControlButton(label = "Sources", onClick = actions.onSources, emphasis = ButtonEmphasis.SUBORDINATE)
-                PlayerControlButton(label = "Audio", onClick = actions.onAudio, emphasis = ButtonEmphasis.SUBORDINATE)
-                PlayerControlButton(label = "Subtitles", onClick = actions.onSubtitles, emphasis = ButtonEmphasis.SUBORDINATE)
-                PlayerControlButton(label = "Speed", onClick = actions.onSpeed, emphasis = ButtonEmphasis.SUBORDINATE)
+                PlayerControlButton(
+                    label = "Sources",
+                    onClick = actions.onSources,
+                    emphasis = ButtonEmphasis.SUBORDINATE,
+                    focusRequester = secondaryFocusRequester,
+                    upFocusRequester = playPauseFocusRequester,
+                )
+                PlayerControlButton(
+                    label = "Audio",
+                    onClick = actions.onAudio,
+                    emphasis = ButtonEmphasis.SUBORDINATE,
+                    upFocusRequester = playPauseFocusRequester,
+                )
+                PlayerControlButton(
+                    label = "Subtitles",
+                    onClick = actions.onSubtitles,
+                    emphasis = ButtonEmphasis.SUBORDINATE,
+                    upFocusRequester = playPauseFocusRequester,
+                )
+                PlayerControlButton(
+                    label = "Speed",
+                    onClick = actions.onSpeed,
+                    emphasis = ButtonEmphasis.SUBORDINATE,
+                    upFocusRequester = playPauseFocusRequester,
+                )
                 if (state.contentType == "series") {
-                    PlayerControlButton(label = "Episodes", onClick = actions.onEpisodes, emphasis = ButtonEmphasis.SUBORDINATE)
+                    PlayerControlButton(
+                        label = "Episodes",
+                        onClick = actions.onEpisodes,
+                        emphasis = ButtonEmphasis.SUBORDINATE,
+                        upFocusRequester = playPauseFocusRequester,
+                    )
                 }
             }
             streamLabel?.let { stream ->
@@ -121,13 +182,29 @@ private fun String.cleanPlayerStreamLabel(): String =
         .ifBlank { "Selected stream" }
 
 @Composable
-private fun PlayerControlButton(label: String, onClick: () -> Unit, emphasis: ButtonEmphasis) {
+private fun PlayerControlButton(
+    label: String,
+    onClick: () -> Unit,
+    emphasis: ButtonEmphasis,
+    focusRequester: FocusRequester? = null,
+    upFocusRequester: FocusRequester? = null,
+    downFocusRequester: FocusRequester? = null,
+) {
     val interactions = remember { MutableInteractionSource() }
     val focused by interactions.collectIsFocusedAsState()
     val scale by animateFloatAsState(if (focused) 1.08f else 1f, label = "$label focus")
     val height = if (emphasis == ButtonEmphasis.PRIMARY) 56.dp else 44.dp
     val modifier = Modifier
         .height(height)
+        .then(focusRequester?.let { Modifier.focusRequester(it) } ?: Modifier)
+        .then(
+            if (upFocusRequester != null || downFocusRequester != null) {
+                Modifier.focusProperties {
+                    upFocusRequester?.let { up = it }
+                    downFocusRequester?.let { down = it }
+                }
+            } else Modifier
+        )
         .graphicsLayer { scaleX = scale; scaleY = scale }
         .semantics { contentDescription = label; role = Role.Button }
     when (emphasis) {

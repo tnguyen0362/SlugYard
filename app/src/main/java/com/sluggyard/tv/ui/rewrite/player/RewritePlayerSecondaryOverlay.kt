@@ -2,6 +2,7 @@ package com.sluggyard.tv.ui.rewrite.player
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -158,6 +159,7 @@ private fun StreamRows(streams: List<Stream>, onSelected: (Stream) -> Unit) {
         itemsIndexed(streams, key = { index, stream -> "$index:${stream.stableKey()}" }) { _, stream ->
             Column(
                 modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(SlugYardPalette.Surface)
+                    .focusable()
                     .clickable { onSelected(stream) }.padding(16.dp),
             ) {
                 Text(stream.getDisplayName(), style = MaterialTheme.typography.titleMedium)
@@ -174,6 +176,7 @@ private fun EpisodeRows(episodes: List<Video>, onSelected: (Video) -> Unit) {
         items(episodes, key = { it.id }) { episode ->
             Row(
                 modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(SlugYardPalette.Surface)
+                    .focusable()
                     .clickable { onSelected(episode) }.padding(16.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {

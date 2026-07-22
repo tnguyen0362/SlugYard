@@ -91,8 +91,12 @@ fun RewriteRetainedPlayerHost(
         viewModel = viewModel,
         onBackPress = { _, _, _, _, _ -> onBack() },
         onPlaybackErrorBack = onBack,
-        controlsOverlay = { state, actions ->
-            RewritePlayerControls(state = state, actions = actions)
+        controlsOverlay = { state, actions, playPauseFocusRequester ->
+            RewritePlayerControls(
+                state = state,
+                actions = actions,
+                playPauseFocusRequester = playPauseFocusRequester,
+            )
         },
         secondaryOverlay = { state, actions ->
             RewritePlayerSecondaryOverlay(state = state, actions = actions)
