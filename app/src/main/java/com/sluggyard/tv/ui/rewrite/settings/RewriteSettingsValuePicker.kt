@@ -33,8 +33,7 @@ import com.sluggyard.tv.ui.design.SlugYardPalette
 
 /**
  * Full-screen scrollable picker used in place of the old click-to-cycle interaction. Modeled on
- * [com.sluggyard.tv.ui.rewrite.player.RewritePlayerTrackOverlay]'s track sheet so both the player
- * and settings share one "pick a value from a list" pattern.
+ * the player's track-sheet pattern so both surfaces share one "pick a value from a list" idiom.
  */
 @Composable
 fun RewriteSettingsValuePicker(
