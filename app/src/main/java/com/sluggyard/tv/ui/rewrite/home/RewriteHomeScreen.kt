@@ -121,7 +121,7 @@ fun RewriteHomeScreen(
                 .background(SlugYardPalette.Canvas)
                 .dpadRepeatThrottle(),
             contentPadding = PaddingValues(bottom = 56.dp),
-            verticalArrangement = Arrangement.spacedBy(30.dp),
+            verticalArrangement = Arrangement.spacedBy(48.dp),
         ) {
             state.hero?.let { hero ->
                 item(key = "hero:${hero.id}") {
@@ -266,7 +266,7 @@ private fun RewritePosterRow(
     smoothFocusMovement: Boolean,
     onPosterSelected: (RewriteHomePoster) -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
         Text(
             text = row.title,
             modifier = Modifier.padding(horizontal = SlugYardTvMetrics.ScreenHorizontalInset),
