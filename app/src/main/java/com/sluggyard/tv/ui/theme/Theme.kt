@@ -147,9 +147,6 @@ object SlugYardTheme {
     val media: SlugYardMediaTokens
         get() = SlugYardMedia.tokens
 
-    val components: SlugYardComponentTokens
-        get() = SlugYardComponents.tokens
-
     val currentTheme: AppTheme
         @Composable
         @ReadOnlyComposable
