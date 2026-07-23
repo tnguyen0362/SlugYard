@@ -25,10 +25,22 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -45,6 +57,30 @@ fun RewritePlayerSecondaryOverlay(
     actions: RewritePlayerSecondaryActions,
     modifier: Modifier = Modifier,
 ) {
+    val firstEpisodeFocusRequester = remember { FocusRequester() }
+    val firstSourceFocusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(
+        state.showEpisodesPanel,
+        state.showEpisodeStreams,
+        state.episodes.firstOrNull()?.id,
+        state.episodeFilteredStreams.firstOrNull()?.stableKey(),
+        state.showSourcesPanel,
+        state.sourceFilteredStreams.firstOrNull()?.stableKey(),
+    ) {
+        when {
+            state.showEpisodesPanel && !state.showEpisodeStreams && state.episodes.isNotEmpty() -> {
+                firstEpisodeFocusRequester.requestRewritePlayerFocus()
+            }
+            state.showEpisodesPanel && state.showEpisodeStreams && state.episodeFilteredStreams.isNotEmpty() -> {
+                firstSourceFocusRequester.requestRewritePlayerFocus()
+            }
+            state.showSourcesPanel && state.sourceFilteredStreams.isNotEmpty() -> {
+                firstSourceFocusRequester.requestRewritePlayerFocus()
+            }
+        }
+    }
+
     when {
         state.showSourcesPanel -> RewritePlayerSheet(
             title = "Sources",
@@ -62,7 +98,11 @@ fun RewritePlayerSecondaryOverlay(
                 state.isLoadingSourceStreams -> SheetStatus("Finding sources…")
                 state.sourceStreamsError != null -> SheetStatus(state.sourceStreamsError, SlugYardPalette.Danger)
                 state.sourceFilteredStreams.isEmpty() -> SheetStatus("No sources available")
-                else -> StreamRows(state.sourceFilteredStreams, actions.onSelectSource)
+                else -> StreamRows(
+                    streams = state.sourceFilteredStreams,
+                    onSelected = actions.onSelectSource,
+                    firstFocusRequester = firstSourceFocusRequester,
+                )
             }
         }
         state.showEpisodesPanel -> RewritePlayerSheet(
@@ -83,7 +123,11 @@ fun RewritePlayerSecondaryOverlay(
                     state.isLoadingEpisodeStreams -> SheetStatus("Finding episode sources…")
                     state.episodeStreamsError != null -> SheetStatus(state.episodeStreamsError, SlugYardPalette.Danger)
                     state.episodeFilteredStreams.isEmpty() -> SheetStatus("No sources available")
-                    else -> StreamRows(state.episodeFilteredStreams, actions.onSelectEpisodeStream)
+                    else -> StreamRows(
+                        streams = state.episodeFilteredStreams,
+                        onSelected = actions.onSelectEpisodeStream,
+                        firstFocusRequester = firstSourceFocusRequester,
+                    )
                 }
             } else {
                 SeasonFilters(
@@ -95,7 +139,11 @@ fun RewritePlayerSecondaryOverlay(
                     state.isLoadingEpisodes -> SheetStatus("Loading episodes…")
                     state.episodesError != null -> SheetStatus(state.episodesError, SlugYardPalette.Danger)
                     state.episodes.isEmpty() -> SheetStatus("No episodes available")
-                    else -> EpisodeRows(state.episodes, actions.onSelectEpisode)
+                    else -> EpisodeRows(
+                        episodes = state.episodes,
+                        onSelected = actions.onSelectEpisode,
+                        firstFocusRequester = firstEpisodeFocusRequester,
+                    )
                 }
             }
         }
@@ -154,12 +202,24 @@ private fun SeasonFilters(seasons: List<Int>, selected: Int?, onSelected: (Int) 
 }
 
 @Composable
-private fun StreamRows(streams: List<Stream>, onSelected: (Stream) -> Unit) {
+private fun StreamRows(
+    streams: List<Stream>,
+    onSelected: (Stream) -> Unit,
+    firstFocusRequester: FocusRequester,
+) {
     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        itemsIndexed(streams, key = { index, stream -> "$index:${stream.stableKey()}" }) { _, stream ->
+        itemsIndexed(streams, key = { index, stream -> "$index:${stream.stableKey()}" }) { index, stream ->
+            var focused by remember(stream.stableKey()) { mutableStateOf(false) }
             Column(
-                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(SlugYardPalette.Surface)
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+                    .then(if (index == 0) Modifier.focusRequester(firstFocusRequester) else Modifier)
+                    .onFocusChanged { focused = it.isFocused }
                     .focusable()
+                    .background(if (focused) SlugYardPalette.SurfaceElevated else SlugYardPalette.Surface)
+                    .semantics(mergeDescendants = true) {
+                        contentDescription = stream.getDisplayName()
+                        role = Role.Button
+                    }
                     .clickable { onSelected(stream) }.padding(16.dp),
             ) {
                 Text(stream.getDisplayName(), style = MaterialTheme.typography.titleMedium)
@@ -171,12 +231,24 @@ private fun StreamRows(streams: List<Stream>, onSelected: (Stream) -> Unit) {
 }
 
 @Composable
-private fun EpisodeRows(episodes: List<Video>, onSelected: (Video) -> Unit) {
+private fun EpisodeRows(
+    episodes: List<Video>,
+    onSelected: (Video) -> Unit,
+    firstFocusRequester: FocusRequester,
+) {
     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        items(episodes, key = { it.id }) { episode ->
+        itemsIndexed(episodes, key = { _, it -> it.id }) { index, episode ->
+            var focused by remember(episode.id) { mutableStateOf(false) }
             Row(
-                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(SlugYardPalette.Surface)
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+                    .then(if (index == 0) Modifier.focusRequester(firstFocusRequester) else Modifier)
+                    .onFocusChanged { focused = it.isFocused }
                     .focusable()
+                    .background(if (focused) SlugYardPalette.SurfaceElevated else SlugYardPalette.Surface)
+                    .semantics(mergeDescendants = true) {
+                        contentDescription = episode.title
+                        role = Role.Button
+                    }
                     .clickable { onSelected(episode) }.padding(16.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {

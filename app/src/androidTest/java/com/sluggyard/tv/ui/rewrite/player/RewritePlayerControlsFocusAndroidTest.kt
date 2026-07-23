@@ -14,6 +14,8 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.sluggyard.tv.ui.screens.player.PlayerUiState
 import com.sluggyard.tv.ui.screens.player.RewritePlayerControlActions
+import com.sluggyard.tv.ui.screens.player.RewritePlayerSecondaryActions
+import com.sluggyard.tv.domain.model.Video
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -83,5 +85,45 @@ class RewritePlayerControlsFocusAndroidTest {
         composeRule.onNodeWithContentDescription("Episodes")
             .performSemanticsAction(SemanticsActions.RequestFocus)
             .assertIsFocused()
+    }
+
+    @Test
+    fun openingEpisodesPlacesFocusOnFirstEpisode() {
+        val episode = Video(
+            id = "show:1:1",
+            title = "Episode 1",
+            released = null,
+            thumbnail = null,
+            season = 1,
+            episode = 1,
+            overview = null,
+        )
+        val actions = RewritePlayerSecondaryActions(
+            onDismissSources = {},
+            onReloadSources = {},
+            onSelectSourceAddon = {},
+            onSelectSource = {},
+            onDismissEpisodes = {},
+            onBackToEpisodes = {},
+            onReloadEpisodeStreams = {},
+            onSelectEpisodeSeason = {},
+            onSelectEpisode = {},
+            onSelectEpisodeAddon = {},
+            onSelectEpisodeStream = {},
+        )
+
+        composeRule.setContent {
+            RewritePlayerSecondaryOverlay(
+                state = PlayerUiState(
+                    showEpisodesPanel = true,
+                    episodes = listOf(episode),
+                    episodesAvailableSeasons = listOf(1),
+                    episodesSelectedSeason = 1,
+                ),
+                actions = actions,
+            )
+        }
+
+        composeRule.onNodeWithContentDescription("Episode 1").assertIsFocused()
     }
 }
