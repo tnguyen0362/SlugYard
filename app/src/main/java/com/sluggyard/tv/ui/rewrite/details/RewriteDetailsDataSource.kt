@@ -6,6 +6,8 @@ import com.sluggyard.tv.core.addonprotocol.AddonTransportResult
 import com.sluggyard.tv.core.addonprotocol.StremioAddonGateway
 import com.sluggyard.tv.core.addonprotocol.StremioMetadataDecoder
 import com.sluggyard.tv.ui.rewrite.data.RewriteLibraryWatchState
+import com.sluggyard.tv.ui.util.formatEpisodeReleaseLabel
+import com.sluggyard.tv.ui.util.unescapeHtmlEntities
 
 sealed interface RewriteDetailsLoadResult {
     data class Ready(val state: RewriteDetailsState) : RewriteDetailsLoadResult
@@ -44,8 +46,8 @@ class RewriteDetailsDataSource(
                         RewriteDetailsEpisode(
                             id = episode.id,
                             number = episode.episode!!,
-                            title = episode.title,
-                            releaseLabel = episode.released,
+                            title = episode.title.unescapeHtmlEntities(),
+                            releaseLabel = formatEpisodeReleaseLabel(episode.released) ?: episode.released,
                             thumbnailUrl = episode.thumbnailUrl,
                             watched = episode.id in localState.watchedIds,
                         )
@@ -56,13 +58,13 @@ class RewriteDetailsDataSource(
         return RewriteDetailsLoadResult.Ready(
             RewriteDetailsState(
                 id = metadata.id,
-                title = metadata.title,
+                title = metadata.title.unescapeHtmlEntities(),
                 backdropUrl = metadata.backgroundUrl,
                 posterUrl = metadata.posterUrl,
                 metadata = metadata.releaseInfo ?: metadata.type.replaceFirstChar(Char::titlecase),
-                description = metadata.description.orEmpty(),
+                description = metadata.description.orEmpty().unescapeHtmlEntities(),
                 genres = metadata.genres,
-                cast = metadata.cast,
+                cast = metadata.cast.map { it.unescapeHtmlEntities() },
                 inLibrary = metadata.id in localState.libraryIds,
                 isSeries = metadata.type == "series",
                 seasons = seasons,

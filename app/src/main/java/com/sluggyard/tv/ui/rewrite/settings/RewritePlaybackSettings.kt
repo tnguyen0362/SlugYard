@@ -6,8 +6,17 @@ import com.sluggyard.tv.data.local.AudioLanguageOption
 import com.sluggyard.tv.data.local.AudioOutputChannels
 import com.sluggyard.tv.data.local.FrameRateMatchingMode
 import com.sluggyard.tv.data.local.PlayerSettings
+import com.sluggyard.tv.ui.util.languageCodeToName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+
+private fun languageOptionLabel(code: String): String = when (code) {
+    "None" -> "None"
+    AudioLanguageOption.DEVICE -> "Device language"
+    AudioLanguageOption.DEFAULT -> "Media default"
+    AudioLanguageOption.ORIGINAL -> "Original language"
+    else -> languageCodeToName(code)
+}
 
 @Composable
 internal fun DisplaySettings(facade: RewriteSettingsFacade, player: PlayerSettings, scope: CoroutineScope) {
@@ -23,8 +32,8 @@ internal fun SubtitleSettings(facade: RewriteSettingsFacade, player: PlayerSetti
     val style = player.subtitleStyle
     val languages = AVAILABLE_SUBTITLE_LANGUAGES.map { it.code }
     RewriteSettingsGroup("Subtitle selection") {
-        RewriteCycleRow("Preferred language", style.preferredLanguage, languages) { scope.launch { facade.setSubtitlePreferredLanguage(it) } }
-        RewriteCycleRow("Secondary language", style.secondaryPreferredLanguage ?: "None", listOf("None") + languages) { value -> scope.launch { facade.setSubtitleSecondaryLanguage(value.takeUnless { it == "None" }) } }
+        RewriteCycleRow("Preferred language", style.preferredLanguage, languages, valueLabel = ::languageOptionLabel) { scope.launch { facade.setSubtitlePreferredLanguage(it) } }
+        RewriteCycleRow("Secondary language", style.secondaryPreferredLanguage ?: "None", listOf("None") + languages, valueLabel = ::languageOptionLabel) { value -> scope.launch { facade.setSubtitleSecondaryLanguage(value.takeUnless { it == "None" }) } }
         RewriteToggleRow("Use forced subtitles", "Prefer forced subtitle tracks when available.", style.useForcedSubtitles) { scope.launch { facade.setUseForcedSubtitles(it) } }
         RewriteToggleRow("Preferred languages only", "Hide subtitle tracks outside your selected languages.", style.showOnlyPreferredLanguages) { scope.launch { facade.setSubtitleShowOnlyPreferredLanguages(it) } }
     }
@@ -39,8 +48,8 @@ internal fun SubtitleSettings(facade: RewriteSettingsFacade, player: PlayerSetti
 @Composable
 internal fun AudioSettings(facade: RewriteSettingsFacade, player: PlayerSettings, scope: CoroutineScope) {
     RewriteSettingsGroup("Audio selection") {
-        RewriteCycleRow("Preferred language", player.preferredAudioLanguage, listOf(AudioLanguageOption.DEVICE, AudioLanguageOption.DEFAULT, AudioLanguageOption.ORIGINAL) + AVAILABLE_SUBTITLE_LANGUAGES.map { it.code }) { scope.launch { facade.setPreferredAudioLanguage(it) } }
-        RewriteCycleRow("Secondary language", player.secondaryPreferredAudioLanguage ?: "None", listOf("None", AudioLanguageOption.DEVICE, AudioLanguageOption.ORIGINAL) + AVAILABLE_SUBTITLE_LANGUAGES.map { it.code }) { value -> scope.launch { facade.setSecondaryPreferredAudioLanguage(value.takeUnless { it == "None" }) } }
+        RewriteCycleRow("Preferred language", player.preferredAudioLanguage, listOf(AudioLanguageOption.DEVICE, AudioLanguageOption.DEFAULT, AudioLanguageOption.ORIGINAL) + AVAILABLE_SUBTITLE_LANGUAGES.map { it.code }, valueLabel = ::languageOptionLabel) { scope.launch { facade.setPreferredAudioLanguage(it) } }
+        RewriteCycleRow("Secondary language", player.secondaryPreferredAudioLanguage ?: "None", listOf("None", AudioLanguageOption.DEVICE, AudioLanguageOption.ORIGINAL) + AVAILABLE_SUBTITLE_LANGUAGES.map { it.code }, valueLabel = ::languageOptionLabel) { value -> scope.launch { facade.setSecondaryPreferredAudioLanguage(value.takeUnless { it == "None" }) } }
         RewriteToggleRow("Downmix", "Convert multichannel audio to the selected output layout.", player.downmixEnabled) { scope.launch { facade.setDownmixEnabled(it) } }
         RewriteCycleRow("Output channels", player.audioOutputChannels.displayLabel, AudioOutputChannels.entries.map { it.displayLabel }) { value -> scope.launch { facade.setAudioOutputChannels(AudioOutputChannels.entries.first { it.displayLabel == value }) } }
         RewriteToggleRow("Preserve original mix", "Keep the original channel balance while downmixing.", player.maintainOriginalAudioOnDownmix) { scope.launch { facade.setMaintainOriginalAudioOnDownmix(it) } }

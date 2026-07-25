@@ -90,9 +90,15 @@ class SlugYardApplication : Application(), SingletonImageLoader.Factory {
                     .build()
             }
             .crossfade(false)
-            .precision(coil3.size.Precision.INEXACT)
+            // EXACT makes Coil actually decode/scale to the size the poster card measures
+            // instead of reusing an approximately-sized cached bitmap, which was the source of
+            // visibly soft/blurry posters whenever a smaller cached decode got reused at a
+            // larger card size. allowRgb565 was trading poster color depth (16-bit, visible
+            // banding on the gradient-heavy skies/lighting typical of movie art) for a small
+            // memory saving that isn't worth it on the app's single most prominent visual asset.
+            .precision(coil3.size.Precision.EXACT)
             .allowHardware(true)
-            .allowRgb565(true)
+            .allowRgb565(false)
             // Three bounded decodes let the first visible rail populate faster
             // without flooding low-RAM Android TV devices.
             .bitmapFactoryMaxParallelism(3)

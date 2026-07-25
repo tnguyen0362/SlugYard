@@ -1,11 +1,13 @@
 package com.sluggyard.tv.core.aggregation
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withTimeout
 
 /**
  * A single independently-loadable unit of addon work.
@@ -40,10 +42,16 @@ sealed interface AddonFanoutResult<out T> {
  * consumer can render the first successful catalog or stream group immediately while slow or
  * failed addons remain isolated. Coroutine cancellation is propagated rather than presented as
  * an addon error, so leaving a screen stops unnecessary network work promptly.
+ *
+ * Each task is bounded by [perTaskTimeoutMs]: a single slow/hanging addon can otherwise pin one
+ * of the [maxConcurrent] permits indefinitely, starving faster addons behind it in the queue and
+ * making the whole scrape feel slow even though most sources responded quickly. A timed-out task
+ * surfaces as an ordinary [AddonFanoutResult.Failure] -- it never cancels sibling work.
  */
 fun <T> boundedAddonFanout(
     tasks: List<AddonFanoutTask<T>>,
     maxConcurrent: Int = DEFAULT_ADDON_CONCURRENCY,
+    perTaskTimeoutMs: Long = DEFAULT_ADDON_TIMEOUT_MS,
 ): Flow<AddonFanoutResult<T>> {
     require(maxConcurrent > 0) { "maxConcurrent must be greater than zero" }
 
@@ -53,7 +61,9 @@ fun <T> boundedAddonFanout(
             launch {
                 permits.withPermit {
                     val result = try {
-                        AddonFanoutResult.Success(task.key, task.load())
+                        AddonFanoutResult.Success(task.key, withTimeout(perTaskTimeoutMs) { task.load() })
+                    } catch (timedOut: TimeoutCancellationException) {
+                        AddonFanoutResult.Failure(task.key, timedOut)
                     } catch (cancelled: CancellationException) {
                         throw cancelled
                     } catch (failure: Throwable) {
@@ -67,3 +77,7 @@ fun <T> boundedAddonFanout(
 }
 
 const val DEFAULT_ADDON_CONCURRENCY = 6
+
+/** Generous enough for slow but legitimate addon responses, tight enough that one bad source
+ * can't stall the whole fanout past what a user will wait for. */
+const val DEFAULT_ADDON_TIMEOUT_MS = 12_000L

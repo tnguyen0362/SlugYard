@@ -41,9 +41,11 @@ fun RewriteRetainedPlayerHost(
     val title = entry.arguments?.getString("contentName").orEmpty()
         .ifBlank { entry.arguments?.getString("title").orEmpty() }
         .ifBlank { playerState.title }
+    val posterUrl = entry.arguments?.getString("posterUrl").orEmpty()
     var lastSavedPositionMs by remember(contentId) { mutableLongStateOf(0L) }
     val latestTimeline by rememberUpdatedState(timeline)
     val latestTitle by rememberUpdatedState(title)
+    val latestPosterUrl by rememberUpdatedState(posterUrl)
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(contentId, contentType, title, timeline.currentPosition, timeline.duration) {
@@ -58,6 +60,7 @@ fun RewriteRetainedPlayerHost(
                     contentId = contentId,
                     contentType = contentType,
                     title = title.ifBlank { "Untitled" },
+                    posterUrl = posterUrl.ifBlank { null },
                     positionMs = timeline.currentPosition,
                     durationMs = timeline.duration,
                     updatedAtEpochMs = System.currentTimeMillis(),
@@ -77,6 +80,7 @@ fun RewriteRetainedPlayerHost(
                             contentId = contentId,
                             contentType = contentType,
                             title = latestTitle.ifBlank { "Untitled" },
+                            posterUrl = latestPosterUrl.ifBlank { null },
                             positionMs = finalTimeline.currentPosition,
                             durationMs = finalTimeline.duration,
                             updatedAtEpochMs = System.currentTimeMillis(),
@@ -91,11 +95,14 @@ fun RewriteRetainedPlayerHost(
         viewModel = viewModel,
         onBackPress = { _, _, _, _, _ -> onBack() },
         onPlaybackErrorBack = onBack,
-        controlsOverlay = { state, actions, playPauseFocusRequester ->
+        controlsOverlay = { state, actions, playPauseFocusRequester, controlsTimeline ->
             RewritePlayerControls(
                 state = state,
                 actions = actions,
                 playPauseFocusRequester = playPauseFocusRequester,
+                currentPositionMs = controlsTimeline.currentPosition,
+                durationMs = controlsTimeline.duration,
+                bufferedPositionMs = controlsTimeline.bufferedPosition,
             )
         },
         secondaryOverlay = { state, actions ->

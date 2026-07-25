@@ -7,7 +7,17 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.OffsetDateTime
 import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
 import java.time.temporal.ChronoUnit
+import java.util.Locale
+
+private val episodeReleaseDateFormatter: DateTimeFormatter =
+    DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM).withLocale(Locale.getDefault())
+
+/** Formats a raw ISO release timestamp (e.g. from an addon's episode metadata) for display. */
+fun formatEpisodeReleaseLabel(raw: String?): String? =
+    parseEpisodeReleaseDate(raw)?.format(episodeReleaseDateFormatter)
 
 internal fun parseEpisodeReleaseDate(raw: String?): LocalDate? {
     if (raw.isNullOrBlank()) return null

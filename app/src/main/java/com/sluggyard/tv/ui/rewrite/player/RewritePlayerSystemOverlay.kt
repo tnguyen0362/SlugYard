@@ -7,9 +7,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -39,7 +36,9 @@ fun RewritePlayerSystemOverlay(
     when {
         state.error != null -> PlayerFailure(state.error, actions.onExitError, modifier)
         state.showLoadingOverlay -> PlayerPreparing(state, modifier)
-        state.showPauseOverlay -> PlayerPaused(state, actions.onDismissPause, modifier)
+        // Pausing is a deliberate user action; the transport controls already show the
+        // paused state via the play icon, so a blocking "Paused" card is just noise.
+        // (state.showPauseOverlay intentionally has no visual here.)
     }
 }
 
@@ -74,29 +73,6 @@ private fun PlayerPreparing(state: PlayerUiState, modifier: Modifier) {
                     trackColor = SlugYardPalette.SurfaceElevated,
                 )
             }
-        }
-    }
-}
-
-@Composable
-private fun PlayerPaused(state: PlayerUiState, onResume: () -> Unit, modifier: Modifier) {
-    Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(
-            modifier = Modifier
-                .background(SlugYardPalette.Surface.copy(alpha = .96f), RoundedCornerShape(8.dp))
-                .padding(28.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            Text("Paused", style = MaterialTheme.typography.headlineLarge)
-            Text(state.contentName ?: state.title ?: "", color = SlugYardPalette.OnCanvasMuted)
-            Button(
-                onClick = onResume,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = SlugYardPalette.Accent,
-                    contentColor = SlugYardPalette.Canvas,
-                ),
-            ) { Text("Resume") }
         }
     }
 }

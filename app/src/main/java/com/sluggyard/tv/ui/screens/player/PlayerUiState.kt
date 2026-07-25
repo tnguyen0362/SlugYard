@@ -339,6 +339,7 @@ data class RewritePlayerTrackActions(
     val onSelectSubtitleTrack: (Int) -> Unit,
     val onDisableSubtitles: () -> Unit,
     val onSelectAddonSubtitle: (Subtitle) -> Unit,
+    val onRetrySubtitleSearch: () -> Unit,
     val onOpenSubtitleStyle: () -> Unit,
     val onCloseSubtitleStyle: () -> Unit,
     val onSetSubtitleSize: (Int) -> Unit,
@@ -364,6 +365,7 @@ sealed class PlayerEvent {
     data class OnSelectSubtitleTrack(val index: Int) : PlayerEvent()
     data object OnDisableSubtitles : PlayerEvent()
     data class OnSelectAddonSubtitle(val subtitle: Subtitle) : PlayerEvent()
+    data object OnRetrySubtitleSearch : PlayerEvent()
     data class OnSetPlaybackSpeed(val speed: Float) : PlayerEvent()
     data object OnToggleControls : PlayerEvent()
     data object OnShowAudioOverlay : PlayerEvent()

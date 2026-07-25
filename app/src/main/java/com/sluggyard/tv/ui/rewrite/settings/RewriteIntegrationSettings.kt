@@ -3,6 +3,7 @@ package com.sluggyard.tv.ui.rewrite.settings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
@@ -57,16 +58,52 @@ internal fun IntegrationsSettings(
 
     RewriteSettingsGroup("Trakt") {
         RewriteValueRow("Connection", if (traktAuth.isAuthenticated) "Connected${traktAuth.username?.let { " as $it" } ?: ""}" else "Not connected")
-        RewriteActionRow("Authorize this device", "Use Trakt device authorization. No API key is required.") {
-            scope.launch { facade.startTraktDeviceAuth().onSuccess { traktCode = it }.onFailure { traktMessage = it.message } }
-        }
-        traktCode?.let { code ->
-            RewriteValueRow("Open", code.verificationUrl)
-            RewriteValueRow("Code", code.userCode)
-            RewriteActionRow("Finish authorization", "Poll Trakt after entering the code.") {
-                scope.launch {
-                    traktMessage = facade.pollTraktDeviceAuth().toString()
-                    traktCode = null
+        if (!traktAuth.isAuthenticated) {
+            RewriteActionRow("Connect with Trakt", "Scan a QR code with your phone to link this device.") {
+                scope.launch { facade.startTraktDeviceAuth().onSuccess { traktCode = it }.onFailure { traktMessage = it.message } }
+            }
+            traktCode?.let { code ->
+                val activationUrl = remember(code) {
+                    val base = code.verificationUrl.trimEnd('/')
+                    "$base/${code.userCode}"
+                }
+                RewriteTraktQrCard(
+                    activationUrl = activationUrl,
+                    userCode = code.userCode,
+                    verificationUrl = code.verificationUrl,
+                )
+                LaunchedEffect(code) {
+                    var intervalMs = 2500L
+                    while (true) {
+                        kotlinx.coroutines.delay(intervalMs)
+                        when (val result = facade.pollTraktDeviceAuth()) {
+                            is com.sluggyard.tv.data.repository.TraktTokenPollResult.Pending,
+                            is com.sluggyard.tv.data.repository.TraktTokenPollResult.AlreadyUsed -> Unit
+                            is com.sluggyard.tv.data.repository.TraktTokenPollResult.SlowDown -> {
+                                intervalMs = (result.pollIntervalSeconds.coerceAtLeast(1) * 1000L)
+                            }
+                            is com.sluggyard.tv.data.repository.TraktTokenPollResult.Approved -> {
+                                traktMessage = "Connected${result.username?.let { " as $it" } ?: ""}"
+                                traktCode = null
+                                break
+                            }
+                            is com.sluggyard.tv.data.repository.TraktTokenPollResult.Denied -> {
+                                traktMessage = "Authorization denied."
+                                traktCode = null
+                                break
+                            }
+                            is com.sluggyard.tv.data.repository.TraktTokenPollResult.Expired -> {
+                                traktMessage = "QR code expired. Try again."
+                                traktCode = null
+                                break
+                            }
+                            is com.sluggyard.tv.data.repository.TraktTokenPollResult.Failed -> {
+                                traktMessage = result.reason
+                                traktCode = null
+                                break
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -149,6 +186,26 @@ internal fun IntegrationsSettings(
                 }
             },
             onDismiss = { apiKey = ""; credentialError = null; credentialTarget = null },
+        )
+    }
+}
+
+@Composable
+private fun RewriteTraktQrCard(
+    activationUrl: String,
+    userCode: String,
+    verificationUrl: String,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        RewriteQrCode(content = activationUrl, modifier = Modifier.padding(vertical = 8.dp))
+        Text("Scan with your phone's camera to connect", style = androidx.compose.material3.MaterialTheme.typography.bodyMedium)
+        Text(
+            "Or visit $verificationUrl and enter code $userCode",
+            style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+            color = com.sluggyard.tv.ui.design.SlugYardPalette.OnCanvasMuted,
         )
     }
 }

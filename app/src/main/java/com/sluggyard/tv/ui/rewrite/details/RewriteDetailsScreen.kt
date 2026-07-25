@@ -1,7 +1,9 @@
 package com.sluggyard.tv.ui.rewrite.details
 
+import com.sluggyard.tv.ui.rewrite.requestFocusReliably
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,12 +17,16 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -31,6 +37,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -85,6 +92,14 @@ fun RewriteDetailsScreen(
 ) {
     val selectedSeason = state.seasons.firstOrNull { it.number == state.selectedSeason }
         ?: state.seasons.firstOrNull()
+    // One FocusRequester per episode so DPAD up/down between rows is an explicit, single-step
+    // hop instead of relying on Compose's geometric focus search -- the prior implementation
+    // nested a separately-focusable "Mark watched" OutlinedButton inside a clickable Row, which
+    // created TWO focus stops per episode and made up/down navigation feel like it randomly got
+    // "stuck" skipping between them.
+    val episodeFocusRequesters = remember(selectedSeason?.number, selectedSeason?.episodes?.size) {
+        List(selectedSeason?.episodes?.size ?: 0) { FocusRequester() }
+    }
     LazyColumn(
         modifier = modifier.fillMaxSize().background(SlugYardPalette.Canvas),
         verticalArrangement = Arrangement.spacedBy(24.dp),
@@ -118,9 +133,12 @@ fun RewriteDetailsScreen(
                     }
                 }
             }
-            items(selectedSeason.episodes, key = RewriteDetailsEpisode::id) { episode ->
+            itemsIndexed(selectedSeason.episodes, key = { _, ep -> ep.id }) { index, episode ->
                 EpisodeRow(
                     episode = episode,
+                    focusRequester = episodeFocusRequesters[index],
+                    upNeighbor = episodeFocusRequesters.getOrNull(index - 1),
+                    downNeighbor = episodeFocusRequesters.getOrNull(index + 1),
                     onOpen = { onEpisodeSelected(episode) },
                     onWatchedChanged = { watched -> onEpisodeWatchedChanged(episode, watched) },
                 )
@@ -137,7 +155,7 @@ private fun DetailsHeader(
     onLibraryChanged: (Boolean) -> Unit,
 ) {
     val playFocusRequester = remember(state.id) { FocusRequester() }
-    LaunchedEffect(state.id) { playFocusRequester.requestFocus() }
+    LaunchedEffect(state.id) { playFocusRequester.requestFocusReliably() }
     Box(modifier = Modifier.fillMaxWidth().height(470.dp).background(SlugYardPalette.Surface)) {
         AsyncImage(
             model = state.backdropUrl,
@@ -230,18 +248,30 @@ private fun SeasonSelector(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun EpisodeRow(
     episode: RewriteDetailsEpisode,
+    focusRequester: FocusRequester,
+    upNeighbor: FocusRequester?,
+    downNeighbor: FocusRequester?,
     onOpen: () -> Unit,
     onWatchedChanged: (Boolean) -> Unit,
 ) {
+    // Single focus stop per row: primary click opens the episode, a long-press (hold OK/Center)
+    // toggles watched. Previously an inner OutlinedButton was its own separate focus target,
+    // which is what made DPAD up/down feel like it "got stuck" mid-list.
     Row(
         modifier = Modifier
             .padding(horizontal = SlugYardTvMetrics.ScreenHorizontalInset)
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .clickable(onClick = onOpen)
+            .focusRequester(focusRequester)
+            .focusProperties {
+                upNeighbor?.let { up = it }
+                downNeighbor?.let { down = it }
+            }
+            .combinedClickable(onClick = onOpen, onLongClick = { onWatchedChanged(!episode.watched) })
             .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -255,12 +285,11 @@ private fun EpisodeRow(
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text("${episode.number}. ${episode.title}", style = MaterialTheme.typography.titleMedium)
             episode.releaseLabel?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = SlugYardPalette.OnCanvasMuted) }
-            if (episode.watched) {
-                Text("Watched", style = MaterialTheme.typography.labelMedium, color = SlugYardPalette.Accent)
-            }
         }
-        OutlinedButton(onClick = { onWatchedChanged(!episode.watched) }) {
-            Text(if (episode.watched) "Watched" else "Mark watched")
-        }
+        Icon(
+            imageVector = if (episode.watched) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+            contentDescription = if (episode.watched) "Watched" else "Not watched",
+            tint = if (episode.watched) SlugYardPalette.Accent else SlugYardPalette.OnCanvasMuted,
+        )
     }
 }

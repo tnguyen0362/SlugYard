@@ -70,8 +70,19 @@ fun RewritePlayerTrackOverlay(
             } else if (state.addonSubtitles.isNotEmpty()) {
                 Text("Community subtitles", style = MaterialTheme.typography.titleSmall, color = SlugYardPalette.OnCanvasMuted)
                 AddonSubtitleList(state.addonSubtitles, state.selectedAddonSubtitle, actions.onSelectAddonSubtitle)
-            } else if (state.subtitleTracks.isEmpty()) {
-                TrackStatus("No subtitles available")
+                Text(
+                    "Not the right match?",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = SlugYardPalette.OnCanvasMuted,
+                )
+                OutlinedButton(onClick = actions.onRetrySubtitleSearch) { Text("Search OpenSubtitles again") }
+            } else {
+                // Automatic file-matching handles ~95% of cases; this manual retry is the
+                // edge-case fallback when the embedded/auto-picked subtitle isn't right.
+                if (state.subtitleTracks.isEmpty()) {
+                    TrackStatus("No subtitles found automatically")
+                }
+                OutlinedButton(onClick = actions.onRetrySubtitleSearch) { Text("Search OpenSubtitles") }
             }
         }
         state.showSubtitleStylePanel -> RewriteTrackSheet("Subtitle style", actions.onCloseSubtitleStyle, modifier) {

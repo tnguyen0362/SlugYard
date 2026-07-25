@@ -81,4 +81,12 @@ object AddonManifestPolicy {
                 catalog.extras.none(AddonCatalogExtra::required)
         }
     }
+
+    /** A catalog can serve a text search if it declares a "search" extra parameter. */
+    fun searchEligibleCatalogs(manifest: AddonManifestContract): List<AddonCatalogDeclaration> {
+        if (AddonResource.CATALOG !in manifest.resources) return emptyList()
+        return manifest.catalogs.filter { catalog ->
+            catalog.id.isNotBlank() && catalog.extras.any { it.name == "search" }
+        }
+    }
 }

@@ -8,13 +8,18 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Text
@@ -23,12 +28,20 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.text.font.FontWeight
@@ -124,6 +137,10 @@ class RewriteAppGraph(
         gateway = gateway,
         proactiveCacheCheckers = debridRuntime.proactiveCacheCheckers,
     )
+    val searchDataSource = com.sluggyard.tv.ui.rewrite.search.RewriteSearchDataSource(
+        registrySnapshot = { registry.state.firstValue() },
+        gateway = gateway,
+    )
     val manualResolution = debridRuntime.manualResolution
 
     /** Best-effort network bootstrap; UI is already composed while this runs on the background IO path. */
@@ -139,8 +156,15 @@ private sealed interface RewriteRootDestination {
     data object Home : RewriteRootDestination
     data object Profiles : RewriteRootDestination
     data object Settings : RewriteRootDestination
+    data object Search : RewriteRootDestination
     data class Details(val addonId: String, val type: String, val id: String) : RewriteRootDestination
-    data class Streams(val type: String, val id: String, val title: String, val autoPick: Boolean = false) : RewriteRootDestination
+    data class Streams(
+        val type: String,
+        val id: String,
+        val title: String,
+        val autoPick: Boolean = false,
+        val posterUrl: String? = null,
+    ) : RewriteRootDestination
 }
 
 /**
@@ -170,9 +194,9 @@ fun RewriteAppShell(
                 RewriteAppContent(
                     graph = graph,
                     settingsFacade = settingsFacade,
-                    onLaunchRetainedPlayer = { source, title, type, id ->
+                    onLaunchRetainedPlayer = { source, title, type, id, posterUrl ->
                         navController.navigate(
-                            RewritePlayerRoute.create(source.url, title, id, type),
+                            RewritePlayerRoute.create(source.url, title, id, type, posterUrl),
                         )
                     },
                     modifier = Modifier.fillMaxSize(),
@@ -199,17 +223,17 @@ fun RewriteAppShell(
 
 /** Independent route contract for the retained player boundary; it has no legacy navigation dependency. */
 private object RewritePlayerRoute {
-    const val pattern = "rewrite_player/{streamUrl}/{title}?contentId={contentId}&contentType={contentType}&contentName={contentName}&videoId={videoId}&returnToHomeOnBack={returnToHomeOnBack}"
+    const val pattern = "rewrite_player/{streamUrl}/{title}?contentId={contentId}&contentType={contentType}&contentName={contentName}&videoId={videoId}&returnToHomeOnBack={returnToHomeOnBack}&posterUrl={posterUrl}"
 
-    fun create(streamUrl: String, title: String, contentId: String, contentType: String): String =
-        "rewrite_player/${Uri.encode(streamUrl)}/${Uri.encode(title)}?contentId=${Uri.encode(contentId)}&contentType=${Uri.encode(contentType)}&contentName=${Uri.encode(title)}&videoId=${Uri.encode(contentId)}&returnToHomeOnBack=true"
+    fun create(streamUrl: String, title: String, contentId: String, contentType: String, posterUrl: String = ""): String =
+        "rewrite_player/${Uri.encode(streamUrl)}/${Uri.encode(title)}?contentId=${Uri.encode(contentId)}&contentType=${Uri.encode(contentType)}&contentName=${Uri.encode(title)}&videoId=${Uri.encode(contentId)}&returnToHomeOnBack=true&posterUrl=${Uri.encode(posterUrl)}"
 }
 
 @Composable
 private fun RewriteAppContent(
     graph: RewriteAppGraph,
     settingsFacade: RewriteSettingsFacade,
-    onLaunchRetainedPlayer: (ResolvedPlaybackSource, String, String, String) -> Unit,
+    onLaunchRetainedPlayer: (ResolvedPlaybackSource, String, String, String, String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val registry by graph.registry.state.collectAsState(initial = com.sluggyard.tv.core.addonprotocol.AddonRegistryState())
@@ -231,6 +255,14 @@ private fun RewriteAppContent(
     var streamMessage by remember { mutableStateOf<String?>(null) }
     var autoPickAttemptedFor by remember { mutableStateOf<String?>(null) }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
+    // The floating nav header sits visually above Home's content but Compose's 2D focus search
+    // does not reliably find the hero's Play button below it (the vertical gap and the header's
+    // own focus group both interfere) -- pressing DPAD_DOWN from any header item (avatar, search,
+    // Home/Profiles/Settings tabs) previously did nothing at all, trapping D-pad users in the
+    // header forever with no way to reach Home's rows. Explicitly wiring the header's down
+    // neighbor to the hero Play button's own FocusRequester fixes this for the common case where
+    // Home has hero data loaded.
+    val homeContentFocusRequester = remember { FocusRequester() }
 
     LaunchedEffect(graph, profiles.rememberLastProfile) {
         val profileId = effectiveProfileId(
@@ -258,7 +290,17 @@ private fun RewriteAppContent(
             catalogState = state
         }
     }
-    val baseHomeState = catalogState.toScreenState(playbackCheckpoints)
+    val rawHomeState = catalogState.toScreenState(playbackCheckpoints)
+    // Catalog rows can transiently flicker load state as later refinements arrive, which would
+    // otherwise flip the computed hero to null for a frame and force-recreate the hero panel
+    // (losing its focus/scroll handoff). Stick with the last real hero across those blips.
+    var stickyHero by remember { mutableStateOf<com.sluggyard.tv.ui.rewrite.home.RewriteHero?>(null) }
+    if (rawHomeState.hero != null) stickyHero = rawHomeState.hero
+    val baseHomeState = if (rawHomeState.hero == null && stickyHero != null) {
+        rawHomeState.copy(hero = stickyHero)
+    } else {
+        rawHomeState
+    }
     LaunchedEffect(baseHomeState.hero?.id, baseHomeState.hero?.addonId, baseHomeState.hero?.contentType) {
         val hero = baseHomeState.hero
         heroEnrichment = if (hero == null) null else graph.heroEnrichmentDataSource.enrich(hero)
@@ -294,7 +336,13 @@ private fun RewriteAppContent(
             )) {
                 is ManualResolutionResult.Ready -> {
                     streamMessage = null
-                    onLaunchRetainedPlayer(result.source, streams.title, streams.type, streams.id)
+                    onLaunchRetainedPlayer(
+                        result.source,
+                        streams.title,
+                        streams.type,
+                        streams.id,
+                        streams.posterUrl ?: detailsState?.posterUrl.orEmpty(),
+                    )
                 }
                 is ManualResolutionResult.Unavailable -> streamMessage = result.message
                 is ManualResolutionResult.Failed -> streamMessage = result.message
@@ -312,21 +360,57 @@ private fun RewriteAppContent(
 
     SlugYardTvTheme {
         CompositionLocalProvider(LocalContentColor provides SlugYardPalette.OnCanvas) {
-        Column(modifier = modifier.fillMaxSize().background(SlugYardPalette.Canvas)) {
-            RewriteRootNavigation(
-                destination = when (destination) {
-                    RewriteRootDestination.Home, is RewriteRootDestination.Details, is RewriteRootDestination.Streams -> RewriteRootDestination.Home
-                    RewriteRootDestination.Profiles -> RewriteRootDestination.Profiles
-                    RewriteRootDestination.Settings -> RewriteRootDestination.Settings
-                },
-                onDestinationChanged = { destination = it },
-            )
+        val navDestination = when (destination) {
+            RewriteRootDestination.Home, is RewriteRootDestination.Details, is RewriteRootDestination.Streams -> RewriteRootDestination.Home
+            RewriteRootDestination.Profiles -> RewriteRootDestination.Profiles
+            RewriteRootDestination.Settings -> RewriteRootDestination.Settings
+            RewriteRootDestination.Search -> RewriteRootDestination.Search
+        }
+        // Home's hero art and Details' backdrop both bleed to the very top of the screen; the
+        // nav bar floats over them on a gradient scrim instead of pushing them down, so there is
+        // no hard seam. This must check the actual visible `destination`, not `navDestination`
+        // -- the latter folds Details AND Streams into the "Home" tab for nav-highlighting
+        // purposes only, which previously made this true even on the plain Streams list screen
+        // (since Home's hero data stays loaded in the background regardless of which screen is
+        // showing) and skipped RootNavBarHeight's top padding there, letting content -- most
+        // visibly the red "no debrid provider" error text -- render underneath the nav bar.
+        val hasHeroBackdrop = (destination == RewriteRootDestination.Home && baseHomeState.hero != null) ||
+            destination is RewriteRootDestination.Details
+        Box(modifier = modifier.fillMaxSize().background(SlugYardPalette.Canvas)) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .let { if (hasHeroBackdrop) it else it.padding(top = SlugYardTvMetrics.RootNavBarHeight) },
+            ) {
+            // Shared by Home's catalog rows/Continue Watching and Search results: posters that
+            // carry a catalog addonId go to Details, resume tiles/search hits without one route
+            // straight to Streams (see the branch comment below for why).
+            val onHomePosterSelected: (com.sluggyard.tv.ui.rewrite.home.RewriteHomePoster) -> Unit = { poster ->
+                poster.addonId?.let { addonId ->
+                    destination = RewriteRootDestination.Details(
+                        addonId = addonId,
+                        type = poster.contentType ?: "movie",
+                        id = poster.id,
+                    )
+                } ?: run {
+                    // Resume tiles are locally persisted playback state, so they do not
+                    // have a catalog-specific addon id. They must still enter the
+                    // rewrite stream flow instead of becoming a dead-end focus target.
+                    destination = RewriteRootDestination.Streams(
+                        type = poster.contentType ?: "movie",
+                        id = poster.id,
+                        title = poster.title,
+                        posterUrl = poster.imageUrl,
+                    )
+                }
+            }
             when (destination) {
                 RewriteRootDestination.Home -> RewriteHomeScreen(
                     state = baseHomeState.withHeroEnrichment(heroEnrichment),
                     showPosterLabels = showPosterLabels,
                     smoothFocusMovement = smoothFocusMovement,
                     fastHorizontalNavigation = fastHorizontalNavigation,
+                    contentFocusRequester = homeContentFocusRequester,
                     onPlay = { hero ->
                         destination = if (hero.contentType == "series") {
                             RewriteRootDestination.Details(
@@ -340,6 +424,7 @@ private fun RewriteAppContent(
                                 id = hero.id,
                                 title = hero.title,
                                 autoPick = true,
+                                posterUrl = hero.posterUrl,
                             )
                         }
                     },
@@ -350,25 +435,14 @@ private fun RewriteAppContent(
                             id = hero.id,
                         )
                     },
-                    onPosterSelected = { poster ->
-                        poster.addonId?.let { addonId ->
-                            destination = RewriteRootDestination.Details(
-                                addonId = addonId,
-                                type = poster.contentType ?: "movie",
-                                id = poster.id,
-                            )
-                        } ?: run {
-                            // Resume tiles are locally persisted playback state, so they do not
-                            // have a catalog-specific addon id. They must still enter the
-                            // rewrite stream flow instead of becoming a dead-end focus target.
-                            destination = RewriteRootDestination.Streams(
-                                type = poster.contentType ?: "movie",
-                                id = poster.id,
-                                title = poster.title,
-                            )
-                        }
-                    },
-                    modifier = Modifier.weight(1f),
+                    onPosterSelected = onHomePosterSelected,
+                    modifier = Modifier.fillMaxSize(),
+                )
+                RewriteRootDestination.Search -> com.sluggyard.tv.ui.rewrite.search.RewriteSearchScreen(
+                    search = { query -> graph.searchDataSource.search(query) },
+                    onPosterSelected = onHomePosterSelected,
+                    showPosterLabels = showPosterLabels,
+                    modifier = Modifier.fillMaxSize(),
                 )
                 RewriteRootDestination.Profiles -> RewriteProfilesScreen(
                     state = profiles,
@@ -381,7 +455,7 @@ private fun RewriteAppContent(
                     onCreate = { name -> scope.launch { graph.profiles.create(name) } },
                     onRename = { profile, name -> scope.launch { graph.profiles.rename(profile.id, name) } },
                     onRemove = { profile -> scope.launch { graph.profiles.remove(profile.id) } },
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.fillMaxSize(),
                 )
                 RewriteRootDestination.Settings -> RewriteSettingsScreen(
                     facade = settingsFacade,
@@ -410,7 +484,7 @@ private fun RewriteAppContent(
                             addon.manifestUrl.contains("torrentio", ignoreCase = true) ||
                             addon.manifestUrl.contains("mediafusion", ignoreCase = true)
                     },
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.fillMaxSize(),
                 )
                 is RewriteRootDestination.Details -> {
                     val state = detailsState
@@ -425,6 +499,7 @@ private fun RewriteAppContent(
                                         id = target.id,
                                         title = state.title,
                                         autoPick = true,
+                                        posterUrl = state.posterUrl,
                                     )
                                 }
                             },
@@ -467,7 +542,7 @@ private fun RewriteAppContent(
                                     }
                                 }
                             },
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.fillMaxSize(),
                         )
                     } else {
                         Text(
@@ -479,27 +554,118 @@ private fun RewriteAppContent(
                 }
                 is RewriteRootDestination.Streams -> {
                     val streams = destination as RewriteRootDestination.Streams
-                    Column(modifier = Modifier.weight(1f)) {
-                        streamMessage?.let { message ->
-                            Text(
-                                message,
-                                modifier = Modifier.padding(horizontal = SlugYardTvMetrics.ScreenHorizontalInset, vertical = 8.dp),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = SlugYardPalette.Danger,
+                    // Auto-pick flow (Play button / Continue Watching / hero) never shows the raw
+                    // link list: we go straight from "Building player" to the retained player. The
+                    // manual chooser (streams.autoPick == false, reached via "Choose a stream") is
+                    // the only path that still renders the link list, and only once auto-pick has
+                    // failed (streamMessage set) or the user explicitly asked to pick manually.
+                    val showBuildingPlayer = streams.autoPick && streamMessage == null &&
+                        autoPickAttemptedFor != streams.id
+                    if (showBuildingPlayer) {
+                        RewriteBuildingPlayerScreen(posterUrl = streams.posterUrl, title = streams.title)
+                    } else {
+                        Column(modifier = Modifier.fillMaxSize()) {
+                            streamMessage?.let { message ->
+                                Text(
+                                    message,
+                                    modifier = Modifier.padding(horizontal = SlugYardTvMetrics.ScreenHorizontalInset, vertical = 8.dp),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = SlugYardPalette.Danger,
+                                )
+                            }
+                            RewriteStreamsScreen(
+                                title = streams.title,
+                                groups = streamGroups,
+                                onStreamSelected = { candidate ->
+                                    resolveStreamCandidate(candidate, streams)
+                                },
+                                modifier = Modifier.weight(1f),
                             )
                         }
-                        RewriteStreamsScreen(
-                            title = streams.title,
-                            groups = streamGroups,
-                            onStreamSelected = { candidate ->
-                                resolveStreamCandidate(candidate, streams)
-                            },
-                            modifier = Modifier.weight(1f),
-                        )
                     }
                 }
             }
+            }
+            // Search is a full-bleed, distraction-free surface on Netflix/Nuvio-style TV apps --
+            // it does not carry the persistent Home/Profiles/Settings tab strip, since that strip
+            // has nothing to do with searching and only steals focus-traversal space above the
+            // keyboard/results grid. The physical back button (BackHandler above) still returns
+            // to Home from here, so hiding the header does not strand navigation.
+            if (destination != RewriteRootDestination.Search) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .align(Alignment.TopStart)
+                        .background(
+                            if (hasHeroBackdrop) {
+                                Brush.verticalGradient(
+                                    listOf(Color.Black.copy(alpha = 0.78f), Color.Transparent),
+                                )
+                            } else {
+                                Brush.verticalGradient(listOf(SlugYardPalette.Canvas, SlugYardPalette.Canvas))
+                            },
+                        ),
+                ) {
+                    RewriteRootNavigation(
+                        destination = navDestination,
+                        onDestinationChanged = { destination = it },
+                        profileInitial = profiles.profiles.find { it.id == profiles.activeProfileId }
+                            ?.name?.trim()?.firstOrNull()?.uppercaseChar()?.toString() ?: "S",
+                        downFocusRequester = if (destination == RewriteRootDestination.Home) homeContentFocusRequester else null,
+                    )
+                }
+            }
         }
+        }
+    }
+}
+
+/**
+ * Shown while the auto-picker is resolving a playable link. The chosen poster fills the
+ * background (scrimmed for text contrast) so the user sees the title they picked instead of
+ * a blank/black screen or a raw link list while sources are being searched and ranked.
+ */
+@Composable
+private fun RewriteBuildingPlayerScreen(posterUrl: String?, title: String) {
+    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+        if (!posterUrl.isNullOrBlank()) {
+            coil3.compose.AsyncImage(
+                model = posterUrl,
+                contentDescription = null,
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(Color.Black.copy(alpha = 0.35f), Color.Black.copy(alpha = 0.85f)),
+                    ),
+                ),
+        )
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .fillMaxWidth()
+                .padding(horizontal = SlugYardTvMetrics.ScreenHorizontalInset, vertical = 48.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Text(
+                title,
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+            )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                androidx.compose.material3.CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    strokeWidth = 2.dp,
+                    color = Color.White,
+                )
+                Text("Building player…", style = MaterialTheme.typography.bodyLarge, color = Color.White.copy(alpha = 0.9f))
+            }
         }
     }
 }
@@ -520,27 +686,94 @@ private fun RewriteDetailsState.toWatchPolicyEpisodes() = seasons.flatMap { seas
 private fun RewriteRootNavigation(
     destination: RewriteRootDestination,
     onDestinationChanged: (RewriteRootDestination) -> Unit,
+    profileInitial: String = "S",
+    downFocusRequester: FocusRequester? = null,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(
-            horizontal = SlugYardTvMetrics.ScreenHorizontalInset,
-            vertical = 14.dp,
-        ),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(
+                horizontal = SlugYardTvMetrics.ScreenHorizontalInset,
+                vertical = 14.dp,
+            )
+            // Every nav item (avatar, search icon, Home/Profiles/Settings tabs) inherits this as
+            // its down-neighbor unless overridden closer to the leaf, which is what lets DPAD_DOWN
+            // escape the header into content instead of doing nothing. See the comment on
+            // homeContentFocusRequester in RewriteAppContent for the underlying bug.
+            .let { base ->
+                if (downFocusRequester != null) {
+                    base.focusProperties { down = downFocusRequester }
+                } else {
+                    base
+                }
+            },
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(20.dp),
     ) {
-        Text(
-            text = "SLUGYARD",
-            style = MaterialTheme.typography.titleLarge,
-            color = SlugYardPalette.OnCanvas,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 1.2.sp,
-        )
-        Spacer(Modifier.width(28.dp))
+        val avatarInteraction = remember { MutableInteractionSource() }
+        val avatarFocused by avatarInteraction.collectIsFocusedAsState()
+        Box(
+            modifier = Modifier
+                .size(34.dp)
+                .graphicsLayer(
+                    scaleX = if (avatarFocused) 1.1f else 1f,
+                    scaleY = if (avatarFocused) 1.1f else 1f,
+                )
+                .clip(RoundedCornerShape(8.dp))
+                .background(SlugYardPalette.Accent)
+                .clickable(
+                    interactionSource = avatarInteraction,
+                    indication = null,
+                    onClick = { onDestinationChanged(RewriteRootDestination.Profiles) },
+                )
+                .semantics { contentDescription = "Switch profile"; role = Role.Button },
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = profileInitial,
+                color = Color(0xFF181818),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+        val searchInteraction = remember { MutableInteractionSource() }
+        val searchFocused by searchInteraction.collectIsFocusedAsState()
+        Box(
+            modifier = Modifier
+                .graphicsLayer(
+                    scaleX = if (searchFocused) 1.15f else 1f,
+                    scaleY = if (searchFocused) 1.15f else 1f,
+                )
+                .clip(RoundedCornerShape(50))
+                .clickable(
+                    interactionSource = searchInteraction,
+                    indication = null,
+                    onClick = { onDestinationChanged(RewriteRootDestination.Search) },
+                )
+                .padding(6.dp)
+                .semantics { contentDescription = "Search"; role = Role.Button },
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Search,
+                contentDescription = null,
+                tint = if (searchFocused || destination == RewriteRootDestination.Search) {
+                    SlugYardPalette.OnCanvas
+                } else {
+                    SlugYardPalette.OnCanvasMuted
+                },
+                modifier = Modifier.size(22.dp),
+            )
+        }
         RewriteRootNavigationItem("Home", destination == RewriteRootDestination.Home) { onDestinationChanged(RewriteRootDestination.Home) }
         RewriteRootNavigationItem("Profiles", destination == RewriteRootDestination.Profiles) { onDestinationChanged(RewriteRootDestination.Profiles) }
         RewriteRootNavigationItem("Settings", destination == RewriteRootDestination.Settings) { onDestinationChanged(RewriteRootDestination.Settings) }
         Spacer(Modifier.weight(1f))
+        Text(
+            text = "SLUGYARD",
+            style = MaterialTheme.typography.titleMedium,
+            color = SlugYardPalette.OnCanvasMuted,
+            fontWeight = FontWeight.Bold,
+        )
     }
 }
 
@@ -548,21 +781,29 @@ private fun RewriteRootNavigation(
 private fun RewriteRootNavigationItem(label: String, selected: Boolean, onClick: () -> Unit) {
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
-    Text(
-        text = label,
+    Box(
         modifier = Modifier
             .graphicsLayer(
                 scaleX = if (focused) 1.06f else 1f,
                 scaleY = if (focused) 1.06f else 1f,
-                alpha = if (selected || focused) 1f else 0.68f,
             )
-            .clip(RoundedCornerShape(3.dp))
+            .clip(RoundedCornerShape(50))
+            .background(if (selected) SlugYardPalette.OnCanvas else Color.Transparent)
             .clickable(interactionSource = interaction, indication = null, onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 6.dp),
-        color = SlugYardPalette.OnCanvas,
-        style = MaterialTheme.typography.labelLarge,
-        fontWeight = if (selected || focused) FontWeight.SemiBold else FontWeight.Normal,
-    )
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = label,
+            color = when {
+                selected -> Color(0xFF181818)
+                focused -> SlugYardPalette.OnCanvas
+                else -> SlugYardPalette.OnCanvasMuted
+            },
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+        )
+    }
 }
 
 private fun RewriteHomeCatalogState.toScreenState(
@@ -572,7 +813,7 @@ private fun RewriteHomeCatalogState.toScreenState(
         val content = row.loadState as? RewriteCatalogLoadState.Content ?: return@mapNotNull null
         RewriteHomeRow(id = "${row.key.addonId}:${row.key.catalogId}", title = row.title, posters = content.posters)
     }
-    val heroPoster = catalogRows.firstOrNull()?.posters?.firstOrNull()
+    val heroPoster = catalogRows.firstNotNullOfOrNull { it.posters.firstOrNull() }
     return RewriteHomeState(
         hero = heroPoster?.let { poster ->
             val type = poster.contentType ?: "movie"
@@ -581,6 +822,7 @@ private fun RewriteHomeCatalogState.toScreenState(
                 id = poster.id,
                 title = poster.title,
                 backdropUrl = poster.imageUrl,
+                posterUrl = poster.imageUrl,
                 summary = "Browse details and choose a stream.",
                 contextTag = type.replaceFirstChar(Char::titlecase),
                 addonId = addonId,

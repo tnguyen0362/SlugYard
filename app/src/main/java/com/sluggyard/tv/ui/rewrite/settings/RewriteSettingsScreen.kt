@@ -1,5 +1,6 @@
 package com.sluggyard.tv.ui.rewrite.settings
 
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -33,6 +34,8 @@ fun RewriteSettingsScreen(
     modifier: Modifier = Modifier,
 ) {
     var destination by remember { mutableStateOf<SettingsDestination>(SettingsDestination.Root) }
+    var lastOpenedCategory by remember { mutableStateOf<RewriteSettingsCategory?>(null) }
+    val categoryListState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val traktAuth by facade.traktAuth.collectAsState(initial = TraktAuthState())
     val tmdb by facade.tmdbSettings.collectAsState(initial = TmdbSettings())
@@ -44,8 +47,13 @@ fun RewriteSettingsScreen(
     when (val current = destination) {
         SettingsDestination.Root -> RewriteSettingsCategoryList(
             categories = facade.categories,
-            onOpen = { destination = SettingsDestination.Detail(it) },
+            onOpen = {
+                lastOpenedCategory = it
+                destination = SettingsDestination.Detail(it)
+            },
             modifier = modifier,
+            state = categoryListState,
+            restoreFocusCategory = lastOpenedCategory,
         )
 
         is SettingsDestination.Detail -> RewriteSettingsDetailScaffold(

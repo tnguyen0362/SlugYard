@@ -497,6 +497,9 @@ dependencies {
     // Markdown rendering
     implementation(libs.markdown.renderer.m3)
 
+    // QR code generation (Trakt device-auth QR login)
+    implementation("com.google.zxing:core:3.5.3")
+
 
     implementation(libs.sentry.android)
 

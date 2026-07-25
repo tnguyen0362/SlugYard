@@ -10,7 +10,6 @@ import com.sluggyard.tv.ui.theme.SlugYardMotion
 
 import com.sluggyard.tv.ui.theme.SlugYardTheme
 
-import android.util.Log
 import android.view.KeyEvent
 import android.view.View
 import androidx.annotation.RawRes
@@ -142,7 +141,7 @@ fun PlayerScreen(
     onBackPress: (currentVideoId: String?, currentSeason: Int?, currentEpisode: Int?, autoPlayEnabled: Boolean, playbackCompleted: Boolean) -> Unit,
     onPlaybackErrorBack: () -> Unit = { onBackPress(null, null, null, false, false) },
     onPlaybackEnded: ((nextVideoId: String?, nextSeason: Int?, nextEpisode: Int?, exitReason: PlayerExitReason?) -> Unit)? = null,
-    controlsOverlay: @Composable (PlayerUiState, RewritePlayerControlActions, FocusRequester) -> Unit,
+    controlsOverlay: @Composable (PlayerUiState, RewritePlayerControlActions, FocusRequester, PlaybackTimelineState) -> Unit,
     secondaryOverlay: @Composable (PlayerUiState, RewritePlayerSecondaryActions) -> Unit,
     trackOverlay: @Composable (PlayerUiState, RewritePlayerTrackActions) -> Unit,
     skipOverlay: @Composable (PlayerUiState, RewritePlayerSkipActions) -> Unit,
@@ -890,7 +889,13 @@ fun PlayerScreen(
             enter = fadeIn(animationSpec = tween(200)),
             exit = fadeOut(animationSpec = tween(200))
         ) {
-            controlsOverlay(uiState, rewriteActions, playPauseFocusRequester)
+            ControlsOverlayHost(
+                viewModel = viewModel,
+                uiState = uiState,
+                actions = rewriteActions,
+                playPauseFocusRequester = playPauseFocusRequester,
+                controlsOverlay = controlsOverlay,
+            )
         }
 
         // Aspect ratio indicator (floating pill)
@@ -1000,6 +1005,7 @@ fun PlayerScreen(
                 onSelectSubtitleTrack = { viewModel.onEvent(PlayerEvent.OnSelectSubtitleTrack(it)) },
                 onDisableSubtitles = { viewModel.onEvent(PlayerEvent.OnDisableSubtitles) },
                 onSelectAddonSubtitle = { viewModel.onEvent(PlayerEvent.OnSelectAddonSubtitle(it)) },
+                onRetrySubtitleSearch = { viewModel.onEvent(PlayerEvent.OnRetrySubtitleSearch) },
                 onOpenSubtitleStyle = { viewModel.onEvent(PlayerEvent.OnOpenSubtitleStylePanel) },
                 onCloseSubtitleStyle = { viewModel.onEvent(PlayerEvent.OnDismissSubtitleStylePanel) },
                 onSetSubtitleSize = { viewModel.onEvent(PlayerEvent.OnSetSubtitleSize(it)) },
@@ -1490,6 +1496,18 @@ private fun SeekOverlay(
             )
         }
     }
+}
+
+@Composable
+private fun ControlsOverlayHost(
+    viewModel: PlayerViewModel,
+    uiState: PlayerUiState,
+    actions: RewritePlayerControlActions,
+    playPauseFocusRequester: FocusRequester,
+    controlsOverlay: @Composable (PlayerUiState, RewritePlayerControlActions, FocusRequester, PlaybackTimelineState) -> Unit,
+) {
+    val playbackTimeline by viewModel.playbackTimeline.collectAsState()
+    controlsOverlay(uiState, actions, playPauseFocusRequester, playbackTimeline)
 }
 
 @Composable
