@@ -19,6 +19,7 @@ import com.sluggyard.tv.core.sync.RewriteProgressSyncBridge
 import com.sluggyard.tv.core.profile.ProfileManager
 import com.sluggyard.tv.ui.rewrite.RewriteAppGraph
 import com.sluggyard.tv.ui.rewrite.RewriteAppShell
+import com.sluggyard.tv.ui.rewrite.data.RewriteLibraryWatchRepository
 import com.sluggyard.tv.ui.rewrite.settings.RewriteSettingsFacade
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -72,6 +73,9 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var rewriteProgressSyncBridge: RewriteProgressSyncBridge
 
+    @Inject
+    lateinit var rewriteLibraryWatchRepository: RewriteLibraryWatchRepository
+
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
@@ -89,6 +93,7 @@ class MainActivity : ComponentActivity() {
                     profileManager = profileManager,
                     rewriteDataStore = rewriteDataStore,
                     progressSyncBridge = rewriteProgressSyncBridge,
+                    libraryWatchRepository = rewriteLibraryWatchRepository,
                 )
             }
             SlugYardTvTheme {

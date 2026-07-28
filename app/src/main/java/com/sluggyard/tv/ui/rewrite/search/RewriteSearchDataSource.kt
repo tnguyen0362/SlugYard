@@ -6,6 +6,7 @@ import com.sluggyard.tv.core.addonprotocol.AddonTransportResult
 import com.sluggyard.tv.core.addonprotocol.StremioAddonGateway
 import com.sluggyard.tv.core.addonprotocol.StremioResponseDecoder
 import com.sluggyard.tv.ui.rewrite.home.RewriteHomePoster
+import com.sluggyard.tv.ui.rewrite.rewritePosterDedupeKey
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -55,7 +56,7 @@ class RewriteSearchDataSource(
                         }.getOrDefault(emptyList())
                     }
                 }
-            }.awaitAll().flatten().distinctBy { it.id }
+            }.awaitAll().flatten().distinctBy { rewritePosterDedupeKey(it.contentType, it.id) }
         }
     }
 }

@@ -1,7 +1,7 @@
 package com.sluggyard.tv.ui.rewrite.search
 
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -45,6 +47,8 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.shape.RoundedCornerShape
 import com.sluggyard.tv.ui.design.SlugYardPalette
@@ -85,11 +89,11 @@ fun RewriteSearchScreen(
     var resultState: RewriteSearchResultState by remember { mutableStateOf(RewriteSearchResultState.Idle) }
     var retryNonce by remember { mutableStateOf(0) }
     val fieldFocusRequester = remember { FocusRequester() }
+    val browseMoviesFocusRequester = remember { FocusRequester() }
+    val browseShowsFocusRequester = remember { FocusRequester() }
     val firstResultFocusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
     val initialFocusRequester = contentFocusRequester ?: fieldFocusRequester
-
-    BackHandler(onBack = onBack)
 
     LaunchedEffect(initialFocusRequester) {
         initialFocusRequester.requestFocusReliably(retries = 8)
@@ -136,7 +140,14 @@ fun RewriteSearchScreen(
                     if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                     when (event.key) {
                         Key.DirectionDown -> {
-                            focusManager.moveFocus(FocusDirection.Down)
+                            when {
+                                query.isBlank() -> browseMoviesFocusRequester.requestFocus()
+                                resultState is RewriteSearchResultState.Loaded &&
+                                    (resultState as RewriteSearchResultState.Loaded).posters.isNotEmpty() -> {
+                                    firstResultFocusRequester.requestFocus()
+                                }
+                                else -> browseMoviesFocusRequester.requestFocus()
+                            }
                             true
                         }
                         Key.DirectionUp -> {
@@ -173,6 +184,9 @@ fun RewriteSearchScreen(
             SearchCategoryRail(
                 onBrowseMovies = onBrowseMovies,
                 onBrowseShows = onBrowseShows,
+                moviesFocusRequester = browseMoviesFocusRequester,
+                showsFocusRequester = browseShowsFocusRequester,
+                upFocusRequester = initialFocusRequester,
                 modifier = Modifier.width(240.dp),
             )
             Box(modifier = Modifier.weight(1f).fillMaxSize()) {
@@ -199,9 +213,15 @@ fun RewriteSearchScreen(
 private fun SearchCategoryRail(
     onBrowseMovies: () -> Unit,
     onBrowseShows: () -> Unit,
+    moviesFocusRequester: FocusRequester,
+    showsFocusRequester: FocusRequester,
+    upFocusRequester: FocusRequester,
     modifier: Modifier = Modifier,
 ) {
-    val browseItems = listOf("Movies" to onBrowseMovies, "TV Shows" to onBrowseShows)
+    val browseItems = listOf(
+        Triple("Movies", onBrowseMovies, moviesFocusRequester),
+        Triple("TV Shows", onBrowseShows, showsFocusRequester),
+    )
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
@@ -219,19 +239,60 @@ private fun SearchCategoryRail(
                 fontWeight = FontWeight.Medium,
             )
         }
-        items(browseItems, key = { it.first }) { (label, onSelect) ->
-            Text(
-                text = label,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(SlugYardPalette.Surface)
-                    .clickable(onClick = onSelect)
-                    .padding(horizontal = 18.dp, vertical = 14.dp),
-                color = SlugYardPalette.OnCanvasMuted,
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.Medium,
+        items(browseItems.size, key = { browseItems[it].first }) { index ->
+            val (label, onSelect, focusRequester) = browseItems[index]
+            SearchBrowseRailItem(
+                label = label,
+                onClick = onSelect,
+                focusRequester = focusRequester,
+                upFocusRequester = if (index == 0) upFocusRequester else browseItems[index - 1].third,
+                downFocusRequester = if (index == browseItems.lastIndex) null else browseItems[index + 1].third,
             )
         }
+    }
+}
+
+@Composable
+private fun SearchBrowseRailItem(
+    label: String,
+    onClick: () -> Unit,
+    focusRequester: FocusRequester,
+    upFocusRequester: FocusRequester,
+    downFocusRequester: FocusRequester?,
+) {
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp)
+            .graphicsLayer {
+                scaleX = if (focused) 1.03f else 1f
+                scaleY = if (focused) 1.03f else 1f
+            }
+            .clip(RoundedCornerShape(6.dp))
+            .focusRequester(focusRequester)
+            .focusProperties {
+                up = upFocusRequester
+                downFocusRequester?.let { down = it }
+            }
+            .background(if (focused) SlugYardPalette.SurfaceElevated else Color.Transparent)
+            .then(
+                if (focused) {
+                    Modifier.border(2.dp, SlugYardPalette.Accent, RoundedCornerShape(6.dp))
+                } else {
+                    Modifier
+                },
+            )
+            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 14.dp),
+    ) {
+        Text(
+            text = label,
+            color = if (focused) SlugYardPalette.OnCanvas else SlugYardPalette.OnCanvasMuted,
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = FontWeight.Medium,
+        )
     }
 }
 
@@ -242,7 +303,7 @@ private fun SearchResultsGrid(
     firstFocusRequester: FocusRequester,
 ) {
     LazyVerticalGrid(
-        columns = GridCells.Fixed(5),
+        columns = GridCells.Fixed(4),
         contentPadding = PaddingValues(
             horizontal = SlugYardTvMetrics.ScreenHorizontalInset,
             vertical = 4.dp,
@@ -251,17 +312,13 @@ private fun SearchResultsGrid(
         verticalArrangement = Arrangement.spacedBy(SlugYardTvMetrics.RowGap),
         modifier = Modifier.fillMaxSize(),
     ) {
-        itemsIndexed(posters, key = { _, poster -> poster.id }) { index, poster ->
+        itemsIndexed(posters, key = { _, poster -> "${poster.contentType.orEmpty()}:${poster.id}" }) { index, poster ->
             RewritePosterCard(
                 poster = poster,
-                // Search previously hardcoded this to false, so focus never scrolled the grid
-                // into view -- pressing D-pad down from the search field looked like nothing
-                // happened at all. Matches the Home rows' behavior now.
                 smoothFocusMovement = true,
                 onClick = { onPosterSelected(poster) },
+                showTypeBadge = true,
                 focusRequester = if (index == 0) firstFocusRequester else null,
-                cardWidth = 132.dp,
-                cardHeight = 198.dp,
             )
         }
     }

@@ -62,8 +62,9 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-import com.sluggyard.tv.core.addonprotocol.StremioAddonTransport
+import com.sluggyard.tv.core.addonprotocol.AddonRegistryState
 import com.sluggyard.tv.core.addonprotocol.AddonRegistryAction
+import com.sluggyard.tv.core.addonprotocol.StremioAddonTransport
 import com.sluggyard.tv.core.profile.ProfileManager
 import com.sluggyard.tv.core.streamresolution.ManualStreamSelection
 import com.sluggyard.tv.core.streamresolution.ManualResolutionResult
@@ -75,16 +76,23 @@ import com.sluggyard.tv.ui.design.SlugYardPalette
 import com.sluggyard.tv.ui.design.SlugYardTvMetrics
 import com.sluggyard.tv.ui.design.SlugYardTvTheme
 import com.sluggyard.tv.ui.rewrite.data.RewriteCommunityAddonProvisioner
+import com.sluggyard.tv.ui.rewrite.data.CommunityProvisioningReport
 import com.sluggyard.tv.ui.rewrite.data.RewriteAddonRegistryStore
 import com.sluggyard.tv.ui.rewrite.data.RewriteLibraryWatchStore
+import com.sluggyard.tv.ui.rewrite.data.RewriteLibraryWatchRepository
 import com.sluggyard.tv.ui.rewrite.data.RewriteLibraryWatchState
 import com.sluggyard.tv.ui.rewrite.data.RewritePlaybackProgressStore
 import com.sluggyard.tv.core.sync.RewriteProgressSyncBridge
 import com.sluggyard.tv.ui.rewrite.data.RewriteProfileStore
 import com.sluggyard.tv.ui.rewrite.data.RewriteHomeSettingsStore
 import com.sluggyard.tv.ui.rewrite.data.RewriteGuestSessionStore
+import com.sluggyard.tv.ui.rewrite.data.RewriteDataIntegrityStore
 import com.sluggyard.tv.ui.rewrite.data.PriorProfileSnapshot
 import com.sluggyard.tv.ui.rewrite.data.RewriteProfile
+import com.sluggyard.tv.ui.rewrite.data.RewriteProfileCodec
+import com.sluggyard.tv.ui.rewrite.data.RewriteProfileState
+import com.sluggyard.tv.ui.rewrite.data.RewriteCloudSyncNotices
+import com.sluggyard.tv.ui.rewrite.data.remapNonIntegerProfileIds
 import com.sluggyard.tv.ui.rewrite.data.RewriteLibraryEntry
 import com.sluggyard.tv.domain.model.DebridSettings
 import com.sluggyard.tv.ui.rewrite.details.RewriteDetailsDataSource
@@ -99,6 +107,8 @@ import com.sluggyard.tv.ui.rewrite.home.RewriteHomeDataSource
 import com.sluggyard.tv.ui.rewrite.home.RewriteHeroEnrichment
 import com.sluggyard.tv.ui.rewrite.home.RewriteHeroEnrichmentDataSource
 import com.sluggyard.tv.ui.rewrite.home.RewriteHomeRow
+import com.sluggyard.tv.ui.rewrite.home.RewriteContinueWatchingOptionsDialog
+import com.sluggyard.tv.ui.rewrite.home.RewriteHomePoster
 import com.sluggyard.tv.ui.rewrite.home.RewriteHomeScreen
 import com.sluggyard.tv.ui.rewrite.home.RewriteHomeState
 import com.sluggyard.tv.ui.rewrite.home.withHeroEnrichments
@@ -106,6 +116,7 @@ import com.sluggyard.tv.ui.rewrite.settings.effectiveProfileId
 import com.sluggyard.tv.ui.rewrite.streams.RewriteStreamCandidate
 import com.sluggyard.tv.ui.rewrite.streams.RewriteStreamGroup
 import com.sluggyard.tv.ui.rewrite.streams.RewriteStreamsDataSource
+import com.sluggyard.tv.ui.rewrite.streams.RewriteSubtitleDataSource
 import com.sluggyard.tv.ui.rewrite.streams.RewriteStreamsScreen
 import com.sluggyard.tv.ui.rewrite.streams.selectRewriteAutoPlayCandidate
 import com.sluggyard.tv.ui.rewrite.streams.hasRewritePendingCacheChecks
@@ -114,6 +125,7 @@ import com.sluggyard.tv.ui.rewrite.settings.RewriteSettingsScreen
 import com.sluggyard.tv.ui.rewrite.settings.RewriteSettingsFacade
 import com.sluggyard.tv.ui.rewrite.player.RewriteRetainedPlayerHost
 import com.sluggyard.tv.ui.rewrite.auth.RewriteAuthGate
+import com.sluggyard.tv.ui.util.LocalFastHorizontalNavigationEnabled
 import com.sluggyard.tv.ui.rewrite.debrid.RewriteDebridRuntime
 import com.sluggyard.tv.ui.rewrite.debrid.RewriteDebridConnection
 import com.sluggyard.tv.ui.rewrite.debrid.RewriteDebridCredentialStore
@@ -121,9 +133,17 @@ import com.sluggyard.tv.ui.rewrite.debrid.RewriteCloudManagerScreen
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 
 /** Runtime composition root for the rewritten application path. */
 class RewriteAppGraph(
@@ -131,17 +151,35 @@ class RewriteAppGraph(
     private val profileManager: ProfileManager,
     private val rewriteDataStore: DataStore<Preferences>,
     progressSyncBridge: RewriteProgressSyncBridge,
+    libraryWatchRepository: RewriteLibraryWatchRepository,
 ) {
+    private val playbackSources = java.util.concurrent.ConcurrentHashMap<String, ResolvedPlaybackSource>()
+
+    fun stagePlaybackSource(source: ResolvedPlaybackSource): String {
+        val key = java.util.UUID.randomUUID().toString()
+        playbackSources[key] = source
+        return key
+    }
+
+    fun playbackSource(key: String): ResolvedPlaybackSource? = playbackSources[key]
+
+    fun clearPlaybackSource(key: String) {
+        playbackSources.remove(key)
+    }
+
     val registry = RewriteAddonRegistryStore(rewriteDataStore)
     val profiles = RewriteProfileStore(rewriteDataStore)
-    val libraryWatch = RewriteLibraryWatchStore(rewriteDataStore, profiles)
+    val libraryWatch = libraryWatchRepository
     val playbackProgress = RewritePlaybackProgressStore(rewriteDataStore, profiles, progressSyncBridge)
     private val debridCredentials = RewriteDebridCredentialStore(rewriteDataStore, profiles)
     val debridRuntime = RewriteDebridRuntime(debridCredentials)
     val homeSettings = RewriteHomeSettingsStore(rewriteDataStore, profiles)
+    val dataIntegrity = RewriteDataIntegrityStore(rewriteDataStore)
     val guestSession = RewriteGuestSessionStore(rewriteDataStore)
     private val gateway = StremioAddonTransport(RewriteNetworkClient.create())
     private val communityProvisioner = RewriteCommunityAddonProvisioner(gateway, registry)
+    private val _communityProvisioningReport = MutableStateFlow<CommunityProvisioningReport?>(null)
+    val communityProvisioningReport: StateFlow<CommunityProvisioningReport?> = _communityProvisioningReport
     val homeDataSource = RewriteHomeDataSource(
         registrySnapshot = { registry.state.firstValue() },
         gateway = gateway,
@@ -161,6 +199,10 @@ class RewriteAppGraph(
         gateway = gateway,
         proactiveCacheCheckers = debridRuntime.proactiveCacheCheckers,
     )
+    val subtitleDataSource = RewriteSubtitleDataSource(
+        registrySnapshot = { registry.state.firstValue() },
+        gateway = gateway,
+    )
     val searchDataSource = com.sluggyard.tv.ui.rewrite.search.RewriteSearchDataSource(
         registrySnapshot = { registry.state.firstValue() },
         gateway = gateway,
@@ -169,32 +211,61 @@ class RewriteAppGraph(
 
     /** Best-effort network bootstrap; UI is already composed while this runs on the background IO path. */
     suspend fun provisionCommunitySources(debridEnabled: Boolean = true) {
-        communityProvisioner.provision(if (debridEnabled) debridRuntime.configuredAddonUrls() else null)
+        _communityProvisioningReport.value = communityProvisioner.provision(
+            if (debridEnabled) debridRuntime.configuredAddonUrls() else null,
+        )
     }
 
     suspend fun synchronizeProfiles() {
-        // The first rewrite build stored its default profile under "default". Preserve those
-        // values before importing the legacy integer profile list, otherwise Home preferences,
-        // progress, and credentials would become invisible after the id changes to "1".
+        // Remap legacy "default"/UUID Rewrite profile ids onto integer ids required by
+        // Supabase profile_id columns, and copy scoped DataStore blobs so Home prefs,
+        // progress, library, and credentials stay visible after the id change.
         rewriteDataStore.edit { preferences ->
-            listOf(
-                "rewrite_home_settings_v2_",
-                "rewrite_library_watch_v2_",
-                "rewrite_playback_progress_v2_",
-                "rewrite_debrid_active_v1_",
-                "rewrite_debrid_v2_",
-            ).forEach { prefix ->
-                val from = stringPreferencesKey("${prefix}default")
-                val to = stringPreferencesKey("${prefix}1")
-                val value = preferences[from]
-                if (value != null && preferences[to] == null) preferences[to] = value
+            val migrationMarker = stringPreferencesKey("rewrite_profile_migration_v3")
+            if (preferences[migrationMarker] == "complete") return@edit
+            val profileKey = stringPreferencesKey("rewrite_profiles_v1")
+            val current = preferences[profileKey]?.let(RewriteProfileCodec::decode) ?: RewriteProfileState()
+            val (remapped, remaps) = remapNonIntegerProfileIds(current)
+            if (remaps.isNotEmpty()) {
+                preferences[profileKey] = RewriteProfileCodec.encode(remapped)
+                val prefixes = listOf(
+                    "rewrite_home_settings_v2_",
+                    "rewrite_library_watch_v2_",
+                    "rewrite_playback_progress_v2_",
+                    "rewrite_debrid_active_v1_",
+                    "rewrite_debrid_v2_",
+                )
+                remaps.forEach { (fromId, toId) ->
+                    prefixes.forEach { prefix ->
+                        val from = stringPreferencesKey("$prefix$fromId")
+                        val to = stringPreferencesKey("$prefix$toId")
+                        val value = preferences[from]
+                        if (value != null && preferences[to] == null) preferences[to] = value
+                    }
+                }
+            } else {
+                // Preserve the earlier default→1 blob copy for installs that already use "1".
+                listOf(
+                    "rewrite_home_settings_v2_",
+                    "rewrite_library_watch_v2_",
+                    "rewrite_playback_progress_v2_",
+                    "rewrite_debrid_active_v1_",
+                    "rewrite_debrid_v2_",
+                ).forEach { prefix ->
+                    val from = stringPreferencesKey("${prefix}default")
+                    val to = stringPreferencesKey("${prefix}1")
+                    val value = preferences[from]
+                    if (value != null && preferences[to] == null) preferences[to] = value
+                }
             }
+            preferences[migrationMarker] = "complete"
         }
         profiles.migrateIfDefault(
             profiles = profileManager.profiles.value.map { PriorProfileSnapshot(it.id.toString(), it.name) },
             activeProfileId = profileManager.activeProfileId.value.toString(),
             rememberLastProfile = profileManager.rememberLastProfileEnabled.value,
         )
+        dataIntegrity.scan()
     }
 
     suspend fun selectProfile(profileId: String) {
@@ -259,6 +330,7 @@ private sealed interface RewriteRootDestination {
         val addonId: String? = null,
         val parentId: String? = null,
         val parentType: String? = null,
+        val resumePositionMs: Long = 0L,
     ) : RewriteRootDestination
 }
 
@@ -285,6 +357,7 @@ fun RewriteAppShell(
 ) {
     val navController = rememberNavController()
     var accessGranted by remember { mutableStateOf(false) }
+    var forceAuthChoice by remember { mutableStateOf(false) }
     NavHost(
         navController = navController,
         startDestination = "rewrite_root",
@@ -295,11 +368,12 @@ fun RewriteAppShell(
                 RewriteAppContent(
                     graph = graph,
                     settingsFacade = settingsFacade,
-                    onSignedOut = { accessGranted = false },
-                    onLaunchRetainedPlayer = { source, title, type, id, posterUrl, season, episode, addonId, parentId, parentType ->
+                    onSignedOut = { accessGranted = false; forceAuthChoice = false },
+                    onOpenAuth = { forceAuthChoice = true; accessGranted = false },
+                    onLaunchRetainedPlayer = { source, title, type, id, posterUrl, season, episode, addonId, parentId, parentType, resumePositionMs ->
                         navController.navigate(
                             RewritePlayerRoute.create(
-                                source.url,
+                                graph.stagePlaybackSource(source),
                                 title,
                                 id,
                                 type,
@@ -309,42 +383,58 @@ fun RewriteAppShell(
                                 addonId,
                                 parentId,
                                 parentType,
+                                resumePositionMs,
                             ),
                         )
                     },
                     modifier = Modifier.fillMaxSize(),
                 )
             } else {
-                RewriteAuthGate(
+                    RewriteAuthGate(
                     context = context,
                     auth = auth,
                     sessions = sessions,
-                    guestSession = graph.guestSession,
-                    onAuthenticated = { accessGranted = true },
+                        guestSession = graph.guestSession,
+                        forceChoice = forceAuthChoice,
+                        onAuthenticated = { accessGranted = true },
                     modifier = Modifier.fillMaxSize(),
                 )
             }
         }
         composable(RewritePlayerRoute.pattern) {
-            RewriteRetainedPlayerHost(
-                entry = it,
-                progressRepository = graph.playbackProgress,
-                streamsDataSource = graph.streamsDataSource,
-                detailsDataSource = graph.detailsDataSource,
-                manualResolution = graph.manualResolution,
-                configuredDebrid = { graph.debridRuntime.configuredService() },
-                onBack = { navController.popBackStack() },
-            )
+            val playbackKey = it.arguments?.getString("playbackKey").orEmpty()
+            val source = graph.playbackSource(playbackKey)
+            if (source == null) {
+                RewritePlaybackExpiredScreen(onBack = { navController.popBackStack() })
+            } else {
+                RewriteRetainedPlayerHost(
+                    entry = it,
+                    initialSource = source,
+                    progressRepository = graph.playbackProgress,
+                    streamsDataSource = graph.streamsDataSource,
+                    subtitleDataSource = graph.subtitleDataSource,
+                    detailsDataSource = graph.detailsDataSource,
+                    manualResolution = graph.manualResolution,
+                    configuredDebrid = {
+                        graph.debridRuntime.configuredService()
+                            .takeIf { settingsFacade.debridSettings.first().enabled }
+                    },
+                    onBack = {
+                        graph.clearPlaybackSource(playbackKey)
+                        navController.popBackStack()
+                    },
+                )
+            }
         }
     }
 }
 
 /** Independent route contract for the retained player boundary; it has no legacy navigation dependency. */
 private object RewritePlayerRoute {
-    const val pattern = "rewrite_player/{streamUrl}/{title}?contentId={contentId}&contentType={contentType}&contentName={contentName}&videoId={videoId}&posterUrl={posterUrl}&season={season}&episode={episode}&addonId={addonId}&parentId={parentId}&parentType={parentType}"
+    const val pattern = "rewrite_player/{playbackKey}/{title}?contentId={contentId}&contentType={contentType}&contentName={contentName}&videoId={videoId}&posterUrl={posterUrl}&season={season}&episode={episode}&addonId={addonId}&parentId={parentId}&parentType={parentType}&startPositionMs={startPositionMs}"
 
     fun create(
-        streamUrl: String,
+        playbackKey: String,
         title: String,
         contentId: String,
         contentType: String,
@@ -354,8 +444,19 @@ private object RewritePlayerRoute {
         addonId: String? = null,
         parentId: String? = null,
         parentType: String? = null,
+        startPositionMs: Long = 0L,
     ): String =
-        "rewrite_player/${Uri.encode(streamUrl)}/${Uri.encode(title)}?contentId=${Uri.encode(contentId)}&contentType=${Uri.encode(contentType)}&contentName=${Uri.encode(title)}&videoId=${Uri.encode(contentId)}&posterUrl=${Uri.encode(posterUrl)}&season=${season?.toString().orEmpty()}&episode=${episode?.toString().orEmpty()}&addonId=${Uri.encode(addonId.orEmpty())}&parentId=${Uri.encode(parentId.orEmpty())}&parentType=${Uri.encode(parentType.orEmpty())}"
+        "rewrite_player/${Uri.encode(playbackKey)}/${Uri.encode(title)}?contentId=${Uri.encode(contentId)}&contentType=${Uri.encode(contentType)}&contentName=${Uri.encode(title)}&videoId=${Uri.encode(contentId)}&posterUrl=${Uri.encode(posterUrl)}&season=${season?.toString().orEmpty()}&episode=${episode?.toString().orEmpty()}&addonId=${Uri.encode(addonId.orEmpty())}&parentId=${Uri.encode(parentId.orEmpty())}&parentType=${Uri.encode(parentType.orEmpty())}&startPositionMs=$startPositionMs"
+}
+
+@Composable
+private fun RewritePlaybackExpiredScreen(onBack: () -> Unit) {
+    Box(
+        modifier = Modifier.fillMaxSize().background(Color.Black),
+        contentAlignment = Alignment.Center,
+    ) {
+        OutlinedButton(onClick = onBack) { Text("Playback session expired") }
+    }
 }
 
 @Composable
@@ -363,7 +464,8 @@ private fun RewriteAppContent(
     graph: RewriteAppGraph,
     settingsFacade: RewriteSettingsFacade,
     onSignedOut: () -> Unit,
-    onLaunchRetainedPlayer: (ResolvedPlaybackSource, String, String, String, String, Int?, Int?, String?, String?, String?) -> Unit,
+    onOpenAuth: () -> Unit,
+    onLaunchRetainedPlayer: (ResolvedPlaybackSource, String, String, String, String, Int?, Int?, String?, String?, String?, Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val registry by graph.registry.state.collectAsState(initial = com.sluggyard.tv.core.addonprotocol.AddonRegistryState())
@@ -371,12 +473,15 @@ private fun RewriteAppContent(
     val libraryWatch by graph.libraryWatch.state.collectAsState(initial = RewriteLibraryWatchState())
     val profiles by graph.profiles.state.collectAsState(initial = com.sluggyard.tv.ui.rewrite.data.RewriteProfileState())
     val homeSettings by graph.homeSettings.settings.collectAsState(initial = com.sluggyard.tv.ui.rewrite.data.RewriteHomeSettings())
+    val dataCorruptionNotices by graph.dataIntegrity.notices.collectAsState(initial = emptyList())
     val debridSettings by settingsFacade.debridSettings.collectAsState(initial = DebridSettings())
     val smoothFocusMovement by settingsFacade.layoutPreferences.smoothBringIntoViewEnabled.collectAsState(initial = true)
+    val fastHorizontalNavigation by settingsFacade.layoutPreferences.fastHorizontalNavigationEnabled.collectAsState(initial = false)
     val debridConnection by graph.debridRuntime.connection.collectAsState(initial = RewriteDebridConnection())
     var routeStack by remember { mutableStateOf(listOf<RewriteRootDestination>(RewriteRootDestination.Home)) }
     val destination = routeStack.last()
     var catalogState by remember { mutableStateOf(RewriteHomeCatalogState(emptyList())) }
+    var browseCatalogState by remember { mutableStateOf(RewriteHomeCatalogState(emptyList())) }
     // Held outside the `when(destination)` branch below so Home's (and Browse's) per-row
     // horizontal scroll positions and hero rotation index survive navigating to Details/Streams
     // and back -- RewriteHomeScreen itself is fully disposed/recomposed on that round trip since
@@ -388,6 +493,7 @@ private fun RewriteAppContent(
     val browseHeroIndexState = remember { mutableStateOf(0) }
     val browseLastHeroKeyState = remember { mutableStateOf<String?>(null) }
     var heroEnrichments by remember { mutableStateOf<Map<String, RewriteHeroEnrichment>>(emptyMap()) }
+    val communityProvisioningReport by graph.communityProvisioningReport.collectAsState()
     var detailsState by remember { mutableStateOf<RewriteDetailsState?>(null) }
     var detailsMessage by remember { mutableStateOf<String?>(null) }
     var detailsReloadNonce by remember { mutableStateOf(0) }
@@ -400,7 +506,13 @@ private fun RewriteAppContent(
     var homeReloadNonce by remember { mutableStateOf(0) }
     var streamResolutionJob by remember { mutableStateOf<Job?>(null) }
     var resolvingCandidateId by remember { mutableStateOf<String?>(null) }
+    var continueWatchingMenuPoster by remember { mutableStateOf<RewriteHomePoster?>(null) }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
+
+    fun resumeFor(contentId: String, season: Int? = null, episode: Int? = null): Long =
+        playbackCheckpoints.firstOrNull {
+            it.contentId == contentId && it.season == season && it.episode == episode
+        }?.positionMs ?: 0L
 
     fun openRoot(next: RewriteRootDestination) {
         routeStack = listOf(next)
@@ -428,13 +540,17 @@ private fun RewriteAppContent(
     val streamsContentFocusRequester = remember { FocusRequester() }
     val searchContentFocusRequester = remember { FocusRequester() }
     val searchHeaderFocusRequester = remember { FocusRequester() }
+    var homeInitialFocusRequested by remember { mutableStateOf(false) }
+    var profilesReturnDestination by remember { mutableStateOf<RewriteRootDestination>(RewriteRootDestination.Home) }
 
     LaunchedEffect(graph) {
         graph.synchronizeProfiles()
         profileBridgeReady = true
     }
 
-    LaunchedEffect(graph, profiles.rememberLastProfile, profileBridgeReady) {
+    // Apply the startup preference once after legacy profiles are bridged. A later profile choice
+    // is an in-session selection and must not be reset when the setting snapshot recomposes.
+    LaunchedEffect(graph, profileBridgeReady) {
         if (!profileBridgeReady) return@LaunchedEffect
         val profileId = effectiveProfileId(
             activeProfileId = profiles.activeProfileId,
@@ -494,17 +610,23 @@ private fun RewriteAppContent(
         }
     }
     LaunchedEffect(homeCatalogReloadKey, homeReloadNonce) {
-        android.util.Log.d("SlugYardDebug", "HomeEffect(RESTART) addons=${registry.addons.size} settings=$homeSettings")
         val requests = graph.homeDataSource.catalogRequests()
         com.sluggyard.tv.ui.rewrite.home.loadRewriteHomeCatalogs(
             requests,
             savedOrder = homeSettings.savedCatalogOrder(),
         ).collect { state ->
             catalogState = state
-            android.util.Log.d(
-                "SlugYardDebug",
-                "HomeEffect(EMIT) rows=${state.rows.map { "${it.key}:${it.loadState.javaClass.simpleName}" }}",
-            )
+        }
+    }
+    LaunchedEffect(destination, homeCatalogReloadKey, homeReloadNonce) {
+        val browse = destination as? RewriteRootDestination.Browse ?: return@LaunchedEffect
+        if (browse.filter == RewriteBrowseFilter.WATCHLIST) return@LaunchedEffect
+        val requests = graph.homeDataSource.catalogRequests()
+        com.sluggyard.tv.ui.rewrite.home.loadRewriteHomeCatalogs(
+            requests,
+            savedOrder = homeSettings.savedCatalogOrder(),
+        ).collect { state ->
+            browseCatalogState = state
         }
     }
     val rawHomeState = catalogState.toScreenState(playbackCheckpoints)
@@ -522,11 +644,40 @@ private fun RewriteAppContent(
         "${hero.addonId}:${hero.contentType}:${hero.id}"
     }
     LaunchedEffect(heroCandidateKey) {
-        heroEnrichments = baseHomeState.heroCandidates.mapNotNull { hero ->
-            graph.heroEnrichmentDataSource.enrich(hero)?.let { hero.id to it }
-        }.toMap()
+        val limiter = Semaphore(permits = 4)
+        heroEnrichments = coroutineScope {
+            baseHomeState.heroCandidates.map { hero ->
+                async {
+                    limiter.withPermit {
+                        graph.heroEnrichmentDataSource.enrich(hero)?.let { hero.id to it }
+                    }
+                }
+            }.awaitAll().filterNotNull().toMap()
+        }
     }
-    val enrichedHomeState = baseHomeState.withHeroEnrichments(heroEnrichments)
+    val communityStatusMessage = communityProvisioningReport
+        ?.takeIf { it.unavailableCount > 0 }
+        ?.let { report ->
+            if (report.installedCount == 0) {
+                "Community sources are unavailable. Check Debrid settings or retry."
+            } else {
+                "${report.unavailableCount} community source${if (report.unavailableCount == 1) "" else "s"} unavailable."
+            }
+        }
+    val integrityStatusMessage = dataCorruptionNotices.takeIf { it.isNotEmpty() }?.let {
+        "Some local settings could not be read. They were kept for recovery; review Settings or retry."
+    }
+    val cloudSyncNotice by RewriteCloudSyncNotices.latestNotice.collectAsState(initial = null)
+    val enrichedHomeState = baseHomeState
+        .withHeroEnrichments(heroEnrichments)
+        .let { state ->
+            state.copy(
+                statusMessage = state.statusMessage
+                    ?: cloudSyncNotice
+                    ?: communityStatusMessage
+                    ?: integrityStatusMessage,
+            )
+        }
     LaunchedEffect(destination, detailsReloadNonce) {
         val details = destination as? RewriteRootDestination.Details ?: return@LaunchedEffect
         detailsState = null
@@ -543,23 +694,14 @@ private fun RewriteAppContent(
         streamMessage = null
         autoPickFinishedFor = null
         autoPickRejectedIds = emptySet()
-        android.util.Log.d(
-            "SlugYardPlayback",
-            "discover start id=${streams.id} type=${streams.type} activeDebrid=${debridConnection.activeService} legacyDebridEnabled=${debridSettings.enabled}",
-        )
         graph.streamsDataSource.streamGroups(
             streams.type,
             streams.id,
-            configuredDebrid = debridConnection.activeService,
+            configuredDebrid = debridConnection.activeService.takeIf { debridSettings.enabled },
         ).collect { groups ->
             streamGroups = groups
-            android.util.Log.d(
-                "SlugYardPlayback",
-                "discover update id=${streams.id} groups=${groups.map { group -> "${group.addonId}:${group.state::class.simpleName}" }}",
-            )
         }
         streamDiscoveryComplete = true
-        android.util.Log.d("SlugYardPlayback", "discover complete id=${streams.id}")
     }
 
     fun resolveStreamCandidate(candidate: RewriteStreamCandidate, streams: RewriteRootDestination.Streams) {
@@ -567,18 +709,20 @@ private fun RewriteAppContent(
         resolvingCandidateId = candidate.id
         streamResolutionJob = scope.launch {
             try {
-                android.util.Log.d(
-                    "SlugYardPlayback",
-                    "resolve start candidate=${candidate.id} addon=${candidate.sourceLabel} direct=${!candidate.directUrl.isNullOrBlank()} torrent=${!candidate.infoHash.isNullOrBlank()} cache=${candidate.cacheState} debrid=${debridConnection.activeService}",
-                )
                 when (val result = withTimeout(45_000L) {
                     graph.manualResolution.prepare(
-                        ManualStreamSelection(candidate.id, candidate.directUrl, candidate.infoHash, candidate.fileIndex),
-                        configuredService = debridConnection.activeService,
+                        ManualStreamSelection(
+                            candidate.id,
+                            candidate.directUrl,
+                            candidate.infoHash,
+                            candidate.fileIndex,
+                            streams.season,
+                            streams.episode,
+                        ),
+                        configuredService = debridConnection.activeService.takeIf { debridSettings.enabled },
                     )
                 }) {
                     is ManualResolutionResult.Ready -> {
-                        android.util.Log.d("SlugYardPlayback", "resolve ready candidate=${candidate.id}")
                         if (routeStack.lastOrNull() != streams) return@launch
                         streamMessage = null
                         routeStack = routeStack.dropLast(1).ifEmpty { listOf(RewriteRootDestination.Home) }
@@ -593,25 +737,24 @@ private fun RewriteAppContent(
                             streams.addonId,
                             streams.parentId,
                             streams.parentType,
+                            streams.resumePositionMs,
                         )
                     }
                     is ManualResolutionResult.Unavailable -> {
-                        android.util.Log.w("SlugYardPlayback", "resolve unavailable candidate=${candidate.id}: ${result.message}")
                         streamMessage = result.message
                         if (streams.autoPick) autoPickRejectedIds = autoPickRejectedIds + candidate.id
                     }
                     is ManualResolutionResult.Failed -> {
-                        android.util.Log.e("SlugYardPlayback", "resolve failed candidate=${candidate.id}: ${result.message}", result.cause)
                         streamMessage = result.message
                         if (streams.autoPick) autoPickRejectedIds = autoPickRejectedIds + candidate.id
                     }
                 }
             } catch (_: TimeoutCancellationException) {
-                android.util.Log.e("SlugYardPlayback", "resolve timed out candidate=${candidate.id}")
-                streamMessage = "TorBox did not resolve this stream within 45 seconds. Choose another source."
+                streamMessage = "The configured debrid provider did not resolve this stream within 45 seconds. Choose another source."
                 if (streams.autoPick) autoPickRejectedIds = autoPickRejectedIds + candidate.id
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (failure: Exception) {
-                android.util.Log.e("SlugYardPlayback", "resolve crashed candidate=${candidate.id}", failure)
                 streamMessage = failure.message?.takeIf { it.isNotBlank() }
                     ?: "The selected stream could not be resolved. Choose another source."
                 if (streams.autoPick) autoPickRejectedIds = autoPickRejectedIds + candidate.id
@@ -649,15 +792,14 @@ private fun RewriteAppContent(
             streamMessage = "No playable stream was found. Choose a source or try again."
             return@LaunchedEffect
         }
-        android.util.Log.d(
-            "SlugYardPlayback",
-            "auto-pick id=${streams.id} candidate=${candidate.id} addon=${candidate.sourceLabel} direct=${!candidate.directUrl.isNullOrBlank()} torrent=${!candidate.infoHash.isNullOrBlank()} cache=${candidate.cacheState}",
-        )
         resolveStreamCandidate(candidate, streams)
     }
 
     SlugYardTvTheme {
-        CompositionLocalProvider(LocalContentColor provides SlugYardPalette.OnCanvas) {
+        CompositionLocalProvider(
+            LocalContentColor provides SlugYardPalette.OnCanvas,
+            LocalFastHorizontalNavigationEnabled provides fastHorizontalNavigation,
+        ) {
         val navDestination = when (destination) {
             RewriteRootDestination.Home, is RewriteRootDestination.Details, is RewriteRootDestination.Streams -> RewriteRootDestination.Home
             RewriteRootDestination.Profiles -> RewriteRootDestination.Profiles
@@ -679,7 +821,12 @@ private fun RewriteAppContent(
                 ) {
                     RewriteRootNavigation(
                         destination = navDestination,
-                        onDestinationChanged = ::openRoot,
+                        onDestinationChanged = { next ->
+                            if (next == RewriteRootDestination.Profiles) {
+                                profilesReturnDestination = RewriteRootDestination.Home
+                            }
+                            openRoot(next)
+                        },
                         profileInitial = profiles.profiles.find { it.id == profiles.activeProfileId }
                             ?.name?.trim()?.firstOrNull()?.uppercaseChar()?.toString() ?: "S",
                         searchFocusRequester = searchHeaderFocusRequester,
@@ -724,6 +871,10 @@ private fun RewriteAppContent(
                         posterUrl = poster.imageUrl,
                         season = poster.season,
                         episode = poster.episode,
+                        addonId = poster.addonId,
+                        parentId = poster.parentId,
+                        parentType = poster.parentType,
+                        resumePositionMs = poster.resumePositionMs,
                     ))
                 }
             }
@@ -733,6 +884,8 @@ private fun RewriteAppContent(
                     smoothFocusMovement = smoothFocusMovement,
                      contentFocusRequester = homeContentFocusRequester,
                      headerFocusRequester = homeHeaderFocusRequester,
+                     requestInitialFocus = !homeInitialFocusRequested,
+                     onInitialFocusRequested = { homeInitialFocusRequested = true },
                     rowScrollStates = homeRowScrollStates,
                     heroIndexState = homeHeroIndexState,
                     lastHeroKeyState = homeLastHeroKeyState,
@@ -750,6 +903,7 @@ private fun RewriteAppContent(
                                 title = hero.title,
                                 autoPick = true,
                                 posterUrl = hero.posterUrl,
+                                resumePositionMs = resumeFor(hero.id),
                             )
                         })
                     },
@@ -761,6 +915,7 @@ private fun RewriteAppContent(
                         ))
                     },
                     onPosterSelected = onHomePosterSelected,
+                    onContinueWatchingLongPress = { continueWatchingMenuPoster = it },
                     onRetry = { homeReloadNonce++ },
                     modifier = Modifier.fillMaxSize(),
                 )
@@ -784,7 +939,11 @@ private fun RewriteAppContent(
                     modifier = Modifier.fillMaxSize(),
                 )
                 is RewriteRootDestination.Browse -> RewriteHomeScreen(
-                         state = baseHomeState.forBrowse(destination.filter, libraryWatch),
+                          state = if (destination.filter == RewriteBrowseFilter.WATCHLIST) {
+                              baseHomeState.forBrowse(destination.filter, libraryWatch)
+                          } else {
+                              browseCatalogState.toScreenState(emptyList()).forBrowse(destination.filter, libraryWatch)
+                          },
                     smoothFocusMovement = smoothFocusMovement,
                     contentFocusRequester = homeContentFocusRequester,
                     rowScrollStates = browseRowScrollStates,
@@ -809,6 +968,7 @@ private fun RewriteAppContent(
                         push(RewriteRootDestination.Details(hero.addonId, hero.contentType, hero.id))
                     },
                     onPosterSelected = onHomePosterSelected,
+                    onContinueWatchingLongPress = { continueWatchingMenuPoster = it },
                     onRetry = { homeReloadNonce++ },
                     modifier = Modifier.fillMaxSize(),
                 )
@@ -817,30 +977,25 @@ private fun RewriteAppContent(
                     onSelect = { profile ->
                         scope.launch {
                             graph.selectProfile(profile.id)
-                            openRoot(RewriteRootDestination.Home)
+                            openRoot(profilesReturnDestination)
                         }
                     },
                     onCreate = { name -> scope.launch { graph.createProfile(name) } },
                     onRename = { profile, name -> scope.launch { graph.renameProfile(profile, name) } },
                     onRemove = { profile -> scope.launch { graph.removeProfile(profile) } },
+                    onBack = ::popRoute,
                     contentFocusRequester = profilesContentFocusRequester,
                     modifier = Modifier.fillMaxSize(),
                 )
                 RewriteRootDestination.Settings -> RewriteSettingsScreen(
                     facade = settingsFacade,
                     onSignedOut = onSignedOut,
-                    onOpenAuth = {
-                        scope.launch {
-                            // Explicitly opening auth suspends guest restoration until the user
-                            // chooses Guest again or completes real authentication.
-                            graph.guestSession.setGuest(false)
-                            onSignedOut()
-                        }
-                    },
+                    onOpenAuth = onOpenAuth,
                     homeSettings = homeSettings,
                     profileState = profiles,
                     onHideUnreleasedChanged = { enabled -> scope.launch { graph.homeSettings.setHideUnreleased(enabled) } },
                      onRememberProfileChanged = { enabled -> scope.launch { graph.setRememberLastProfile(enabled) } },
+                     onCatalogOrderChanged = { order -> scope.launch { graph.homeSettings.setCatalogOrder(order) } },
                     debridConnection = debridConnection,
                      onConnect = {
                          service, apiKey ->
@@ -858,13 +1013,13 @@ private fun RewriteAppContent(
                          graph.provisionCommunitySources(settingsFacade.debridSettings.first().enabled)
                      },
                       rewriteAddons = registry.addons,
-                       onAddonEnabledChanged = { addonId, enabled ->
-                           scope.launch { graph.registry.dispatch(AddonRegistryAction.SetEnabled(addonId, enabled)) }
-                       },
                        onConfigureAutoSources = {
                            graph.provisionCommunitySources(settingsFacade.debridSettings.first().enabled)
                        },
-                        onOpenProfiles = { push(RewriteRootDestination.Profiles) },
+                         onOpenProfiles = {
+                             profilesReturnDestination = RewriteRootDestination.Settings
+                             push(RewriteRootDestination.Profiles)
+                         },
                      contentFocusRequester = settingsContentFocusRequester,
                      modifier = Modifier.fillMaxSize(),
                  )
@@ -874,21 +1029,27 @@ private fun RewriteAppContent(
                          RewriteDetailsScreen(
                              state = state,
                             onPlay = {
-                                (destination as? RewriteRootDestination.Details)?.let { details ->
-                                    val target = state.playbackTarget(details.type, details.id)
-                                    replaceCurrent(RewriteRootDestination.Streams(
-                                        type = target.type,
-                                        id = target.id,
-                                        title = state.title,
-                                        autoPick = true,
-                                        posterUrl = state.posterUrl,
-                                        season = target.season,
-                                        episode = target.episode,
-                                        addonId = details.addonId,
-                                        parentId = details.id,
-                                        parentType = details.type,
-                                    ))
-                                }
+                                 (destination as? RewriteRootDestination.Details)?.let { details ->
+                                     val target = state.playbackTarget(details.type, details.id)
+                                     if (target == null) {
+                                         detailsMessage = "No playable episode is available for this series."
+                                         detailsState = null
+                                     } else {
+                                         replaceCurrent(RewriteRootDestination.Streams(
+                                             type = target.type,
+                                             id = target.id,
+                                             title = state.title,
+                                             autoPick = true,
+                                             posterUrl = state.posterUrl,
+                                             season = target.season,
+                                             episode = target.episode,
+                                              addonId = details.addonId,
+                                              parentId = details.id,
+                                              parentType = details.type,
+                                              resumePositionMs = resumeFor(target.id, target.season, target.episode),
+                                          ))
+                                     }
+                                 }
                             },
                              onLibraryChanged = { inLibrary ->
                                  detailsState = state.copy(inLibrary = inLibrary)
@@ -920,10 +1081,17 @@ private fun RewriteAppContent(
                                         state.toWatchPolicyEpisodes(),
                                         season,
                                     )
-                                     detailsState = state.withWatchPolicy(updated)
-                                     updated.filter { it.watched }.forEach { episode ->
-                                         graph.libraryWatch.setWatched(episode.id, true)
-                                     }
+                                      detailsState = state.withWatchPolicy(updated)
+                                      updated.filter { it.watched }.forEach { episode ->
+                                          graph.libraryWatch.setWatched(
+                                              id = episode.id,
+                                              watched = true,
+                                              contentType = "series",
+                                              title = state.title,
+                                              season = episode.season,
+                                              episode = episode.episode,
+                                          )
+                                      }
                                 }
                             },
                              onEpisodeSelected = { seasonNumber, episode ->
@@ -936,10 +1104,11 @@ private fun RewriteAppContent(
                                      posterUrl = state.posterUrl,
                                      season = seasonNumber,
                                      episode = episode.number,
-                                     addonId = details?.addonId,
-                                     parentId = details?.id,
-                                     parentType = details?.type,
-                                 ))
+                                      addonId = details?.addonId,
+                                      parentId = details?.id,
+                                      parentType = details?.type,
+                                      resumePositionMs = resumeFor(episode.id, seasonNumber, episode.number),
+                                  ))
                             },
                              onEpisodeWatchedChanged = { episode, watched ->
                                  val currentEpisodes = state.toWatchPolicyEpisodes()
@@ -954,7 +1123,16 @@ private fun RewriteAppContent(
                                  scope.launch {
                                      updated.filter { next ->
                                          next.id == episode.id || (watched && next.watched)
-                                     }.forEach { next -> graph.libraryWatch.setWatched(next.id, next.watched) }
+                                      }.forEach { next ->
+                                          graph.libraryWatch.setWatched(
+                                              id = next.id,
+                                              watched = next.watched,
+                                              contentType = "series",
+                                              title = state.title,
+                                              season = next.season,
+                                              episode = next.episode,
+                                          )
+                                      }
                                  }
                              },
                              contentFocusRequester = detailsContentFocusRequester,
@@ -980,6 +1158,7 @@ private fun RewriteAppContent(
                             title = streams.title,
                             statusMessage = streamMessage,
                             onBack = ::popRoute,
+                            onChooseSource = { replaceCurrent(streams.copy(autoPick = false)) },
                         )
                     } else {
                         Column(modifier = Modifier.fillMaxSize()) {
@@ -1005,6 +1184,45 @@ private fun RewriteAppContent(
                     }
                 }
             }
+            continueWatchingMenuPoster?.let { poster ->
+                RewriteContinueWatchingOptionsDialog(
+                    title = poster.title,
+                    onViewDetails = {
+                        val addonId = poster.addonId ?: resolveMetadataAddonId(registry)
+                        if (addonId != null) {
+                            val (detailsId, detailsType) = rewriteDetailsTarget(
+                                contentId = poster.id,
+                                contentType = poster.contentType,
+                                parentId = poster.parentId,
+                                parentType = poster.parentType,
+                                season = poster.season,
+                                episode = poster.episode,
+                            )
+                            push(
+                                RewriteRootDestination.Details(
+                                    addonId = addonId,
+                                    type = detailsType,
+                                    id = detailsId,
+                                ),
+                            )
+                        } else {
+                            onHomePosterSelected(poster)
+                        }
+                        continueWatchingMenuPoster = null
+                    },
+                    onRemove = {
+                        scope.launch {
+                            graph.playbackProgress.remove(
+                                contentId = poster.id,
+                                season = poster.season,
+                                episode = poster.episode,
+                            )
+                        }
+                        continueWatchingMenuPoster = null
+                    },
+                    onDismiss = { continueWatchingMenuPoster = null },
+                )
+            }
             }
         }
         }
@@ -1022,7 +1240,10 @@ private fun RewriteBuildingPlayerScreen(
     title: String,
     statusMessage: String?,
     onBack: () -> Unit,
+    onChooseSource: () -> Unit,
 ) {
+    val backFocusRequester = remember { FocusRequester() }
+    LaunchedEffect(statusMessage) { runCatching { backFocusRequester.requestFocus() } }
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
         if (!posterUrl.isNullOrBlank()) {
             coil3.compose.AsyncImage(
@@ -1066,7 +1287,15 @@ private fun RewriteBuildingPlayerScreen(
                     color = if (statusMessage == null) Color.White.copy(alpha = 0.9f) else SlugYardPalette.Danger,
                 )
             }
-            OutlinedButton(onClick = onBack) { Text("Back") }
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (statusMessage != null) {
+                    Button(onClick = onChooseSource) { Text("Choose source") }
+                }
+                OutlinedButton(
+                    onClick = onBack,
+                    modifier = Modifier.focusRequester(backFocusRequester),
+                ) { Text("Back") }
+            }
         }
     }
 }
@@ -1201,10 +1430,20 @@ private fun RewriteRootNavigation(
             destination == RewriteRootDestination.Browse(RewriteBrowseFilter.WATCHLIST),
             downFocusRequester,
         ) { onDestinationChanged(RewriteRootDestination.Browse(RewriteBrowseFilter.WATCHLIST)) }
+        RewriteRootNavigationItem(
+            "Movies",
+            destination == RewriteRootDestination.Browse(RewriteBrowseFilter.MOVIES),
+            downFocusRequester,
+        ) { onDestinationChanged(RewriteRootDestination.Browse(RewriteBrowseFilter.MOVIES)) }
+        RewriteRootNavigationItem(
+            "TV Shows",
+            destination == RewriteRootDestination.Browse(RewriteBrowseFilter.TV_SHOWS),
+            downFocusRequester,
+        ) { onDestinationChanged(RewriteRootDestination.Browse(RewriteBrowseFilter.TV_SHOWS)) }
         RewriteRootIconItem(
             icon = Icons.Filled.Cloud,
             label = "Cloud Manager",
-            selected = false,
+            selected = destination == RewriteRootDestination.CloudManager,
             downFocusRequester = downFocusRequester,
          ) { onDestinationChanged(RewriteRootDestination.CloudManager) }
         RewriteRootIconItem(
@@ -1294,6 +1533,22 @@ private fun RewriteRootNavigationItem(
     }
 }
 
+private fun resolveMetadataAddonId(registry: AddonRegistryState): String? {
+    fun looksLikeCinemeta(addon: com.sluggyard.tv.core.addonprotocol.ManagedAddon): Boolean {
+        val haystacks = listOf(
+            addon.manifest.id,
+            addon.manifest.name,
+            addon.manifestUrl,
+            addon.configuredManifestUrl.orEmpty(),
+        )
+        return haystacks.any { it.contains("cinemeta", ignoreCase = true) }
+    }
+    return registry.enabledAddons.firstOrNull(::looksLikeCinemeta)?.manifest?.id
+        ?: registry.enabledAddons.firstOrNull { addon ->
+            com.sluggyard.tv.core.addonprotocol.AddonResource.META in addon.manifest.resources
+        }?.manifest?.id
+}
+
 private fun RewriteHomeCatalogState.toScreenState(
     playbackCheckpoints: List<com.sluggyard.tv.ui.rewrite.data.RewritePlaybackCheckpoint>,
 ): RewriteHomeState {
@@ -1301,11 +1556,13 @@ private fun RewriteHomeCatalogState.toScreenState(
         val content = row.loadState as? RewriteCatalogLoadState.Content ?: return@mapNotNull null
         RewriteHomeRow(id = "${row.key.addonId}:${row.key.catalogId}", title = row.title, posters = content.posters)
     }
+    val catalogPostersById = catalogRows.flatMap { it.posters }.associateBy(RewriteHomePoster::id)
     val hasContent = catalogRows.isNotEmpty()
     val isLoading = !hasContent && (rows.isEmpty() || rows.any { it.loadState is RewriteCatalogLoadState.Loading })
     val errorCount = rows.count { it.loadState is RewriteCatalogLoadState.Error }
-    val statusMessage = if (!hasContent && !isLoading && errorCount > 0) {
-        "Home catalogs could not load. Check your connection and try again."
+    val statusMessage = if (errorCount > 0) {
+        if (hasContent) "Some catalogs could not load. Check your connection and try again."
+        else "Home catalogs could not load. Check your connection and try again."
     } else {
         null
     }
@@ -1340,14 +1597,20 @@ private fun RewriteHomeCatalogState.toScreenState(
                     id = "continue_watching",
                     title = "Continue Watching",
                     posters = playbackCheckpoints.map { checkpoint ->
+                        val catalogMatch = catalogPostersById[checkpoint.contentId]
+                            ?: checkpoint.parentId?.let(catalogPostersById::get)
                         com.sluggyard.tv.ui.rewrite.home.RewriteHomePoster(
                             id = checkpoint.contentId,
                             title = checkpoint.title,
-                            imageUrl = checkpoint.posterUrl,
+                            imageUrl = checkpoint.posterUrl ?: catalogMatch?.imageUrl,
                             progressFraction = checkpoint.progressFraction?.toFloat(),
                             contentType = checkpoint.contentType,
+                            addonId = checkpoint.addonId ?: catalogMatch?.addonId,
                             season = checkpoint.season,
                             episode = checkpoint.episode,
+                            parentId = checkpoint.parentId ?: catalogMatch?.parentId,
+                            parentType = checkpoint.parentType ?: catalogMatch?.parentType,
+                            resumePositionMs = checkpoint.positionMs,
                         )
                     },
                 ),
@@ -1394,7 +1657,12 @@ private fun RewriteHomeState.forBrowse(
         hero = null,
         heroCandidates = emptyList(),
         rows = rows,
-        statusMessage = if (rows.isEmpty()) "No ${filter.title().lowercase()} are available yet." else null,
+        statusMessage = if (rows.isEmpty()) {
+            when (filter) {
+                RewriteBrowseFilter.WATCHLIST -> "Your watchlist is empty."
+                else -> "No ${filter.title().lowercase()} are available yet."
+            }
+        } else null,
         isLoading = false,
     )
 }

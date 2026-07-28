@@ -7,6 +7,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.BringIntoViewSpec
 import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -62,6 +63,11 @@ import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -75,6 +81,9 @@ import coil3.compose.AsyncImage
 import com.sluggyard.tv.ui.design.SlugYardPalette
 import com.sluggyard.tv.ui.design.SlugYardTvMetrics
 import com.sluggyard.tv.ui.rewrite.requestFocusReliably
+import com.sluggyard.tv.ui.rewrite.rewriteContentTypeLabel
+import com.sluggyard.tv.ui.rewrite.rewriteEpisodeLabel
+import com.sluggyard.tv.ui.util.dpadRepeatThrottle
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -90,6 +99,9 @@ data class RewriteHomePoster(
     // through to Streams(...) so resuming an episode doesn't lose season/episode identity.
     val season: Int? = null,
     val episode: Int? = null,
+    val parentId: String? = null,
+    val parentType: String? = null,
+    val resumePositionMs: Long = 0L,
 )
 
 data class RewriteHomeRow(
@@ -149,6 +161,7 @@ fun RewriteHomeScreen(
     onPlay: (RewriteHero) -> Unit,
     onDetails: (RewriteHero) -> Unit,
     onPosterSelected: (RewriteHomePoster) -> Unit,
+    onContinueWatchingLongPress: ((RewriteHomePoster) -> Unit)? = null,
     onRetry: () -> Unit,
     smoothFocusMovement: Boolean = true,
     // Lets the root nav header's DPAD_DOWN focus search land directly on the hero's Play button
@@ -156,6 +169,8 @@ fun RewriteHomeScreen(
     // exists.
     contentFocusRequester: FocusRequester? = null,
     headerFocusRequester: FocusRequester? = null,
+    requestInitialFocus: Boolean = true,
+    onInitialFocusRequested: () -> Unit = {},
     modifier: Modifier = Modifier,
     // Persisted by the caller (outside this composable's own lifecycle) so returning from
     // Details/Streams doesn't reset which hero was showing or scroll every row back to the
@@ -172,7 +187,8 @@ fun RewriteHomeScreen(
     val scrollScope = rememberCoroutineScope()
     val heroKey = state.heroCandidates.joinToString(separator = "|") { it.id }
     var heroIndex by heroIndexState
-    LaunchedEffect(heroKey) {
+    var heroActionFocused by remember { mutableStateOf(false) }
+    LaunchedEffect(heroKey, heroActionFocused) {
         // Only reset to the first hero when the candidate set actually changed identity (a
         // fresh catalog load) -- not merely because this composable remounted after returning
         // from Details, which would otherwise always snap back to index 0.
@@ -180,21 +196,18 @@ fun RewriteHomeScreen(
             heroIndex = 0
             lastHeroKeyState.value = heroKey
         }
-        if (state.heroCandidates.size > 1) {
+        if (state.heroCandidates.size > 1 && !heroActionFocused) {
             while (true) {
                 delay(11_000)
                 heroIndex = (heroIndex + 1) % state.heroCandidates.size
             }
         }
     }
-    LaunchedEffect(contentFocusRequester, state.hero != null) {
+    LaunchedEffect(contentFocusRequester, requestInitialFocus, state.hero != null) {
+        if (!requestInitialFocus) return@LaunchedEffect
         if (state.hero != null) scrollState.scrollTo(0)
         contentFocusRequester?.requestFocusReliably(retries = 8)
-    }
-    if (state.hero == null && contentFocusRequester != null) {
-        LaunchedEffect(contentFocusRequester, state.rows.map { it.id }, state.statusMessage) {
-            contentFocusRequester.requestFocusReliably(retries = 8)
-        }
+        onInitialFocusRequested()
     }
     val visibleHero = state.heroCandidates.getOrNull(heroIndex) ?: state.hero
     CompositionLocalProvider(LocalBringIntoViewSpec provides RewriteHomeBringIntoViewSpec) {
@@ -202,9 +215,18 @@ fun RewriteHomeScreen(
             modifier = modifier
                 .fillMaxSize()
                 .background(SlugYardPalette.Canvas)
+                .dpadRepeatThrottle()
                 .verticalScroll(scrollState),
             verticalArrangement = Arrangement.spacedBy(40.dp),
         ) {
+            if (state.statusMessage != null && (visibleHero != null || state.rows.isNotEmpty())) {
+                Text(
+                    state.statusMessage,
+                    modifier = Modifier.padding(horizontal = SlugYardTvMetrics.ScreenHorizontalInset),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = SlugYardPalette.OnCanvasMuted,
+                )
+            }
             if (visibleHero == null && state.rows.isEmpty()) {
                 RewriteHomeStatusPanel(
                     isLoading = state.isLoading,
@@ -221,9 +243,10 @@ fun RewriteHomeScreen(
                     contentFocusRequester = contentFocusRequester,
                     headerFocusRequester = headerFocusRequester,
                     downFocusRequester = rowFocusRequesters.firstOrNull(),
-                    onHeroFocused = {
-                        scrollScope.launch { scrollState.scrollTo(0) }
-                    },
+                     onHeroFocusChanged = { focused ->
+                         heroActionFocused = focused
+                         scrollScope.launch { scrollState.scrollTo(0) }
+                     },
                 )
             }
             state.rows.forEachIndexed { index, row ->
@@ -232,6 +255,11 @@ fun RewriteHomeScreen(
                     scrollState = rowScrollStates.getOrPut(row.id) { ScrollState(0) },
                     smoothFocusMovement = smoothFocusMovement,
                     onPosterSelected = onPosterSelected,
+                    onPosterLongPress = if (row.id == "continue_watching") {
+                        onContinueWatchingLongPress
+                    } else {
+                        null
+                    },
                     entryFocusRequester = when {
                         index == 0 && visibleHero == null -> contentFocusRequester ?: rowFocusRequesters[index]
                         else -> rowFocusRequesters[index]
@@ -300,7 +328,7 @@ private fun RewriteHeroPanel(
     contentFocusRequester: FocusRequester? = null,
     headerFocusRequester: FocusRequester? = null,
     downFocusRequester: FocusRequester? = null,
-    onHeroFocused: () -> Unit = {},
+    onHeroFocusChanged: (Boolean) -> Unit = {},
 ) {
     val playFocusRequester = remember { FocusRequester() }
     val initialFocusRequester = contentFocusRequester ?: playFocusRequester
@@ -396,7 +424,7 @@ private fun RewriteHeroPanel(
                 Text(
                     hero.summary,
                     style = MaterialTheme.typography.bodyLarge,
-                    maxLines = 1,
+                    maxLines = 3,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
@@ -416,7 +444,7 @@ private fun RewriteHeroPanel(
                                 Modifier.focusProperties { up = requester }
                             } ?: Modifier,
                         )
-                            .onFocusChanged { if (it.isFocused) onHeroFocused() }
+                            .onFocusChanged { onHeroFocusChanged(it.isFocused) }
                             .focusProperties { downFocusRequester?.let { down = it } },
                     )
                     HeroActionButton(
@@ -425,7 +453,7 @@ private fun RewriteHeroPanel(
                         onDetails,
                         primary = false,
                         modifier = Modifier
-                            .onFocusChanged { if (it.isFocused) onHeroFocused() }
+                             .onFocusChanged { onHeroFocusChanged(it.isFocused) }
                             .focusProperties { downFocusRequester?.let { down = it } },
                     )
                 }
@@ -488,6 +516,7 @@ private fun RewritePosterRow(
     row: RewriteHomeRow,
     smoothFocusMovement: Boolean,
     onPosterSelected: (RewriteHomePoster) -> Unit,
+    onPosterLongPress: ((RewriteHomePoster) -> Unit)? = null,
     entryFocusRequester: FocusRequester? = null,
     upFocusRequester: FocusRequester? = null,
     downFocusRequester: FocusRequester? = null,
@@ -511,6 +540,13 @@ private fun RewritePosterRow(
                     poster = poster,
                     smoothFocusMovement = smoothFocusMovement,
                     onClick = { onPosterSelected(poster) },
+                    onLongClick = onPosterLongPress?.let { handler -> { handler(poster) } },
+                    showTypeBadge = row.id == "continue_watching",
+                    episodeLabel = if (row.id == "continue_watching") {
+                        rewriteEpisodeLabel(poster.season, poster.episode)
+                    } else {
+                        null
+                    },
                     // Each row's first card is the stable vertical focus anchor.
                     focusRequester = if (index == 0) entryFocusRequester else null,
                     upFocusRequester = if (index == 0) upFocusRequester else null,
@@ -521,16 +557,20 @@ private fun RewritePosterRow(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun RewritePosterCard(
     poster: RewriteHomePoster,
     smoothFocusMovement: Boolean,
     onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
     focusRequester: FocusRequester? = null,
     upFocusRequester: FocusRequester? = null,
     downFocusRequester: FocusRequester? = null,
     cardWidth: Dp = 176.dp,
     cardHeight: Dp = 264.dp,
+    showTypeBadge: Boolean = false,
+    episodeLabel: String? = null,
 ) {
     val interactions = remember { MutableInteractionSource() }
     val focused by interactions.collectIsFocusedAsState()
@@ -557,6 +597,21 @@ internal fun RewritePosterCard(
             }
     } else Modifier
 
+    val interactionModifier = if (onLongClick != null) {
+        Modifier.combinedClickable(
+            interactionSource = interactions,
+            indication = null,
+            onClick = onClick,
+            onLongClick = onLongClick,
+        )
+    } else {
+        Modifier.clickable(
+            interactionSource = interactions,
+            indication = null,
+            onClick = onClick,
+        )
+    }
+
     Box(
         modifier = focusMovementModifier
             .let { if (focusRequester != null) it.focusRequester(focusRequester) else it }
@@ -579,14 +634,31 @@ internal fun RewritePosterCard(
             .clip(RoundedCornerShape(SlugYardTvMetrics.CardCornerRadius))
             .background(SlugYardPalette.SurfaceElevated)
             .semantics {
-                contentDescription = poster.title
+                contentDescription = buildString {
+                    append(poster.title)
+                    episodeLabel?.let { append(". $it") }
+                    rewriteContentTypeLabel(poster.contentType)?.let { append(". $it") }
+                    if (onLongClick != null) {
+                        append(". Hold Select or press Menu for more options")
+                    }
+                }
                 role = Role.Button
             }
-            .clickable(
-                interactionSource = interactions,
-                indication = null,
-                onClick = onClick,
-            ),
+            .then(
+                if (onLongClick != null) {
+                    Modifier.onPreviewKeyEvent { event ->
+                        if (event.type == KeyEventType.KeyDown && event.key == Key.Menu) {
+                            onLongClick()
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                } else {
+                    Modifier
+                },
+            )
+            .then(interactionModifier),
         contentAlignment = Alignment.Center,
     ) {
         // Drawn underneath the image so a failed/missing load (Coil renders nothing on
@@ -607,6 +679,42 @@ internal fun RewritePosterCard(
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
             )
+        }
+        episodeLabel?.let { label ->
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(8.dp)
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(SlugYardPalette.Canvas.copy(alpha = 0.88f))
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+            ) {
+                Text(
+                    label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = SlugYardPalette.OnCanvas,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        }
+        if (showTypeBadge) {
+            rewriteContentTypeLabel(poster.contentType)?.let { typeLabel ->
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(8.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(SlugYardPalette.Accent)
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                ) {
+                    Text(
+                        typeLabel.uppercase(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color(0xFF181818),
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
+            }
         }
         poster.progressFraction?.let { progress ->
             androidx.compose.foundation.layout.Box(

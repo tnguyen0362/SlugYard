@@ -43,6 +43,13 @@ class RewritePlaybackTargetTest {
     }
 
     @Test
+    fun `series without an episode does not query the parent show id`() {
+        val state = seriesState().copy(seasons = emptyList())
+
+        assertEquals(null, state.playbackTarget("series", "show"))
+    }
+
+    @Test
     fun `series play skips specials when a regular season exists`() {
         val special = RewriteDetailsEpisode("show:0:1", 1, "Special", null, null, watched = false)
         val regular = RewriteDetailsEpisode("show:1:1", 1, "Pilot", null, null, watched = false)

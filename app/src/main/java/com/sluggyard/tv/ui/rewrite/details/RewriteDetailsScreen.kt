@@ -48,6 +48,10 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -143,6 +147,7 @@ fun RewriteDetailsScreen(
                     seasons = state.seasons,
                     selectedSeason = selectedSeason.number,
                     selectedFocusRequester = selectedSeasonFocusRequester,
+                    downFocusRequester = episodeFocusRequesters.firstOrNull(),
                     onSeasonSelected = onSeasonSelected,
                 )
             }
@@ -160,6 +165,14 @@ fun RewriteDetailsScreen(
                         Text(if (selectedSeason.fullyWatched) "Watched" else "Mark season watched")
                     }
                 }
+            }
+            item(key = "watched_hint") {
+                Text(
+                    "Hold OK on an episode to mark it watched or unwatched.",
+                    modifier = Modifier.padding(horizontal = SlugYardTvMetrics.ScreenHorizontalInset),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = SlugYardPalette.OnCanvasMuted,
+                )
             }
             itemsIndexed(
                 items = selectedSeason.episodes,
@@ -197,7 +210,7 @@ private fun DetailsHeader(
 ) {
     val playFocusRequester = remember(state.id) { FocusRequester() }
     LaunchedEffect(state.id) {
-        playFocusRequester.requestFocusReliably(retries = 10)
+        (contentFocusRequester ?: playFocusRequester).requestFocusReliably(retries = 10)
     }
     Box(modifier = Modifier.fillMaxWidth().height(410.dp).background(SlugYardPalette.Surface)) {
         AsyncImage(
@@ -246,7 +259,7 @@ private fun DetailsHeader(
                 if (state.genres.isNotEmpty()) {
                     Text(state.genres.joinToString("  •  "), style = MaterialTheme.typography.bodyMedium)
                 }
-                Text(state.description, style = MaterialTheme.typography.bodyLarge, maxLines = 3)
+                 Text(state.description, style = MaterialTheme.typography.bodyLarge, maxLines = 5)
                 if (state.cast.isNotEmpty()) {
                     Text(
                         "Cast: ${state.cast.take(4).joinToString(", ")}",
@@ -259,8 +272,7 @@ private fun DetailsHeader(
                     Button(
                         onClick = onPlay,
                         modifier = Modifier
-                            .focusRequester(playFocusRequester)
-                            .then(if (contentFocusRequester != null) Modifier.focusRequester(contentFocusRequester) else Modifier),
+                            .focusRequester(contentFocusRequester ?: playFocusRequester),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = SlugYardPalette.OnCanvas,
                             contentColor = SlugYardPalette.Canvas,
@@ -271,7 +283,7 @@ private fun DetailsHeader(
                         Text("Play")
                     }
                     OutlinedButton(onClick = { onLibraryChanged(!state.inLibrary) }) {
-                        Text(if (state.inLibrary) "In My List" else "Add to My List")
+                         Text(if (state.inLibrary) "Remove from Watchlist" else "Add to Watchlist")
                     }
                 }
             }
@@ -284,6 +296,7 @@ private fun SeasonSelector(
     seasons: List<RewriteDetailsSeason>,
     selectedSeason: Int,
     selectedFocusRequester: FocusRequester,
+    downFocusRequester: FocusRequester?,
     onSeasonSelected: (Int) -> Unit,
 ) {
     LazyRow(
@@ -292,7 +305,9 @@ private fun SeasonSelector(
     ) {
         items(seasons, key = RewriteDetailsSeason::number) { season ->
             FilterChip(
-                modifier = if (season.number == selectedSeason) Modifier.focusRequester(selectedFocusRequester) else Modifier,
+                modifier = Modifier
+                    .then(if (season.number == selectedSeason) Modifier.focusRequester(selectedFocusRequester) else Modifier)
+                    .focusProperties { downFocusRequester?.let { down = it } },
                 selected = season.number == selectedSeason,
                 onClick = { onSeasonSelected(season.number) },
                 label = { Text(seasonDisplayLabel(season.number)) },
@@ -326,6 +341,11 @@ private fun EpisodeRow(
             .bringIntoViewRequester(bringIntoViewRequester)
             .onFocusChanged { focusState ->
                 if (focusState.isFocused) scope.launch { bringIntoViewRequester.bringIntoView() }
+            }
+            .semantics {
+                contentDescription = "Episode ${episode.displayNumber}: ${episode.title}. " +
+                    if (episode.watched) "Watched. Hold OK to mark unwatched." else "Not watched. Hold OK to mark watched."
+                role = Role.Button
             }
             .combinedClickable(onClick = onOpen, onLongClick = { onWatchedChanged(!episode.watched) })
             .background(SlugYardPalette.Surface)
