@@ -989,7 +989,7 @@ fun PlayerRuntimeController.onEvent(event: PlayerEvent) {
             }
         }
         is PlayerEvent.OnEpisodeSeasonSelected -> selectEpisodesSeason(event.season)
-        is PlayerEvent.OnEpisodeSelected -> loadStreamsForEpisode(event.video, forceRefresh = true, showPicker = false)
+        is PlayerEvent.OnEpisodeSelected -> loadStreamsForEpisode(event.video, forceRefresh = true, showPicker = true)
         PlayerEvent.OnReloadEpisodeStreams -> reloadEpisodeStreams()
         is PlayerEvent.OnEpisodeAddonFilterSelected -> filterEpisodeStreamsByAddon(event.addonName)
         is PlayerEvent.OnEpisodeStreamSelected -> switchToEpisodeStream(event.stream)
@@ -998,6 +998,7 @@ fun PlayerRuntimeController.onEvent(event: PlayerEvent) {
         PlayerEvent.OnReloadSourceStreams -> loadSourceStreams(forceRefresh = true)
         is PlayerEvent.OnSourceAddonFilterSelected -> filterSourceStreamsByAddon(event.addonName)
         is PlayerEvent.OnSourceStreamSelected -> switchToSourceStream(event.stream)
+        is PlayerEvent.OnRewritePlaybackSourceSelected -> switchToRewritePlaybackSource(event.source)
         PlayerEvent.OnDismissTransientOverlay -> dismissTransientOverlay()
         PlayerEvent.OnRetry -> handleRetry()
         PlayerEvent.OnReportPlaybackIssue -> submitPlaybackIssueReport()

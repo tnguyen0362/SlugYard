@@ -1,6 +1,8 @@
 package com.sluggyard.tv.core.di
 
 import android.content.Context
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.preferencesDataStoreFile
 import com.sluggyard.tv.BuildConfig
@@ -11,6 +13,7 @@ import com.sluggyard.tv.core.sync.SyncCoordinator
 import com.sluggyard.tv.core.sync.SyncMutationRecorder
 import com.sluggyard.tv.core.sync.SyncSchemaValidator
 import com.sluggyard.tv.core.sync.DefaultSupabaseSchemaProbe
+import com.sluggyard.tv.core.sync.RewriteProgressSyncBridge
 import com.sluggyard.tv.core.sync.auth.DataStoreSupabaseSessionStore
 import com.sluggyard.tv.core.sync.auth.DefaultSupabaseAuthGateway
 import com.sluggyard.tv.core.sync.auth.SupabaseAuthGateway
@@ -20,6 +23,7 @@ import com.sluggyard.tv.core.sync.remote.DefaultSupabaseCredentialVaultGateway
 import com.sluggyard.tv.core.sync.remote.SupabaseCredentialVaultGateway
 import com.sluggyard.tv.core.sync.remote.SupabaseDataGateway
 import com.sluggyard.tv.core.sync.remote.SupabaseHttpTransport
+import com.sluggyard.tv.ui.rewrite.data.DataStoreRewritePlaybackProgressSyncBridge
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -102,7 +106,8 @@ object SyncModule {
         sessions: SupabaseSessionStore,
         remote: SupabaseDataGateway,
         local: LocalSyncStore,
-    ): SyncCoordinator = SyncCoordinator(sessions, remote, local)
+        rewriteProgress: RewriteProgressSyncBridge,
+    ): SyncCoordinator = SyncCoordinator(sessions, remote, local, rewriteProgress = rewriteProgress)
 
     @Provides
     @Singleton
@@ -110,6 +115,23 @@ object SyncModule {
         sessions: SupabaseSessionStore,
         local: LocalSyncStore,
     ): SyncMutationRecorder = SyncMutationRecorder(sessions, local)
+
+    @Provides
+    @Singleton
+    @Named("rewrite")
+    fun provideRewriteDataStore(
+        @ApplicationContext context: Context,
+    ): DataStore<Preferences> = PreferenceDataStoreFactory.create(
+        scope = CoroutineScope(Dispatchers.IO),
+        produceFile = { context.preferencesDataStoreFile("playflix_rewrite") },
+    )
+
+    @Provides
+    @Singleton
+    fun provideRewriteProgressSyncBridge(
+        @Named("rewrite") dataStore: DataStore<Preferences>,
+        mutationRecorder: SyncMutationRecorder,
+    ): RewriteProgressSyncBridge = DataStoreRewritePlaybackProgressSyncBridge(dataStore, mutationRecorder)
 
     @Provides
     @Singleton

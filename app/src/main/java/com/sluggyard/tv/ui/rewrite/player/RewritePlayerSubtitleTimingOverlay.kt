@@ -89,13 +89,14 @@ private fun DelayCard(
                 .padding(28.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
-            Text("Subtitle timing", fontWeight = FontWeight.SemiBold)
+            Text("Subtitle timing", fontWeight = FontWeight.SemiBold, color = SlugYardPalette.OnCanvas)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 OutlinedButton(onClick = { onAdjust(-SUBTITLE_DELAY_STEP_MS) }) { Text("−0.1 s") }
                 Text(
                     formatDelay(delayMs),
                     modifier = Modifier.weight(1f),
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    color = SlugYardPalette.OnCanvas,
                 )
                 OutlinedButton(onClick = { onAdjust(SUBTITLE_DELAY_STEP_MS) }) { Text("+0.1 s") }
             }
@@ -156,7 +157,7 @@ private fun SyncCard(
                 .padding(SlugYardTvMetrics.ScreenHorizontalInset),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            Text("Sync subtitle timing", fontWeight = FontWeight.SemiBold)
+            Text("Sync subtitle timing", fontWeight = FontWeight.SemiBold, color = SlugYardPalette.OnCanvas)
             Text(
                 if (capturedAt == null) "Pause at the spoken line, then capture the video time."
                 else "Choose the subtitle line that is being spoken.",

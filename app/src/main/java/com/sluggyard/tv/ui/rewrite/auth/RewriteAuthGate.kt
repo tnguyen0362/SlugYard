@@ -35,6 +35,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import com.sluggyard.tv.core.sync.SupabaseSyncScheduler
@@ -43,6 +44,7 @@ import com.sluggyard.tv.core.sync.auth.SupabaseSessionState
 import com.sluggyard.tv.core.sync.auth.SyncFailureKind
 import com.sluggyard.tv.core.sync.auth.SyncResult
 import com.sluggyard.tv.core.sync.auth.SupabaseSessionStore
+import com.sluggyard.tv.ui.rewrite.data.RewriteGuestSessionStore
 import com.sluggyard.tv.ui.design.SlugYardPalette
 import com.sluggyard.tv.ui.design.SlugYardTvMetrics
 import com.sluggyard.tv.ui.design.SlugYardTvTheme
@@ -59,6 +61,7 @@ fun RewriteAuthGate(
     context: Context,
     auth: SupabaseAuthGateway,
     sessions: SupabaseSessionStore,
+    guestSession: RewriteGuestSessionStore,
     onAuthenticated: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -72,7 +75,7 @@ fun RewriteAuthGate(
     val choiceFocusRequester = remember { FocusRequester() }
     val emailFocusRequester = remember { FocusRequester() }
 
-    LaunchedEffect(auth, sessions) {
+    LaunchedEffect(auth, sessions, guestSession) {
         when (val state = sessions.read()) {
             is SupabaseSessionState.Active -> {
                 val result = if (state.session.isExpired()) auth.refresh() else SyncResult.Success(state.session)
@@ -86,7 +89,12 @@ fun RewriteAuthGate(
                 }
             }
             SupabaseSessionState.Corrupt -> message = "The saved session could not be restored. Sign in again."
-            SupabaseSessionState.SignedOut -> Unit
+            SupabaseSessionState.SignedOut -> {
+                // Guest is an ongoing usage mode, not a one-shot bypass: once someone picks
+                // "Continue as Guest" we must not force them back through this screen on every
+                // process restart (TV low-memory kill, reboot, app update, etc).
+                if (guestSession.isGuest()) onAuthenticated()
+            }
         }
         bootstrapping = false
     }
@@ -154,7 +162,12 @@ fun RewriteAuthGate(
                         )
                         AuthActionButton(
                             label = "Continue as Guest",
-                            onClick = onAuthenticated,
+                            onClick = {
+                                scope.launch {
+                                    guestSession.setGuest(true)
+                                    onAuthenticated()
+                                }
+                            },
                             primary = false,
                         )
                     } else {
@@ -172,6 +185,7 @@ fun RewriteAuthGate(
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true,
                             label = { Text("Password") },
+                            visualTransformation = PasswordVisualTransformation(),
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                         )
                         message?.let { error ->
@@ -182,7 +196,7 @@ fun RewriteAuthGate(
                             )
                         }
                         AuthActionButton(
-                            label = if (busy) "Working..." else if (mode == AuthGateMode.SignIn) "Sign In" else "Create Account",
+                            label = if (busy) "Working…" else if (mode == AuthGateMode.SignIn) "Sign In" else "Create Account",
                             onClick = {
                                 if (busy) return@AuthActionButton
                                 scope.launch {
@@ -196,6 +210,7 @@ fun RewriteAuthGate(
                                     busy = false
                                     when (result) {
                                         is SyncResult.Success -> {
+                                            guestSession.setGuest(false)
                                             SupabaseSyncScheduler.requestImmediate(context)
                                             onAuthenticated()
                                         }

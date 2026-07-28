@@ -32,6 +32,7 @@ import com.sluggyard.tv.data.local.WatchProgressSource
 import com.sluggyard.tv.domain.model.DebridSettings
 import com.sluggyard.tv.domain.model.LibrarySourceMode
 import com.sluggyard.tv.domain.model.TmdbSettings
+import com.sluggyard.tv.domain.model.MDBListSettings
 import com.sluggyard.tv.ui.rewrite.debrid.RewriteDebridConnection
 import kotlinx.coroutines.launch
 
@@ -40,11 +41,14 @@ internal fun IntegrationsSettings(
     facade: RewriteSettingsFacade,
     traktAuth: TraktAuthState,
     tmdb: TmdbSettings,
+    mdblist: MDBListSettings,
     debrid: DebridSettings,
     openSubtitlesEnabled: Boolean,
     openSubtitlesKey: String,
+    openSubtitlesAutoDownload: Boolean,
     debridConnection: RewriteDebridConnection,
     onConnect: suspend (DebridService, String) -> Unit,
+    onDisconnect: suspend (DebridService) -> Unit,
     onDebridEnabledChanged: suspend (Boolean) -> Unit,
     onSelect: suspend (DebridService) -> Unit,
 ) {
@@ -55,6 +59,7 @@ internal fun IntegrationsSettings(
     var credentialError by remember { mutableStateOf<String?>(null) }
     var traktCode by remember { mutableStateOf<com.sluggyard.tv.data.remote.dto.trakt.TraktDeviceCodeResponseDto?>(null) }
     var traktMessage by remember { mutableStateOf<String?>(null) }
+    val moreLikeThisSource by facade.traktSettings.moreLikeThisSource.collectAsState(initial = com.sluggyard.tv.data.local.MoreLikeThisSourcePreference.TMDB)
 
     RewriteSettingsGroup("Trakt") {
         RewriteValueRow("Connection", if (traktAuth.isAuthenticated) "Connected${traktAuth.username?.let { " as $it" } ?: ""}" else "Not connected")
@@ -113,10 +118,21 @@ internal fun IntegrationsSettings(
         val librarySource by facade.traktSettings.librarySourceMode.collectAsState(initial = LibrarySourceMode.LOCAL)
         RewriteCycleRow("Continue Watching source", watchSource.name, listOf("TRAKT", "SLUGYARD_SYNC")) { value -> scope.launch { facade.setWatchProgressSource(WatchProgressSource.valueOf(value)) } }
         RewriteCycleRow("Library source", librarySource.name, listOf("LOCAL", "TRAKT")) { value -> scope.launch { facade.setLibrarySourceMode(LibrarySourceMode.valueOf(value)) } }
+        RewriteCycleRow("More Like This source", moreLikeThisSource.name, com.sluggyard.tv.data.local.MoreLikeThisSourcePreference.entries.map { it.name }) { value -> scope.launch { facade.setMoreLikeThisSource(com.sluggyard.tv.data.local.MoreLikeThisSourcePreference.valueOf(value)) } }
     }
     RewriteSettingsGroup("TMDB and ratings") {
         RewriteValueRow("TMDB", if (tmdb.enabled) "Enabled" else "Disabled")
         RewriteValueRow("Ratings", "TMDB setting controls player metadata")
+        RewriteActionRow("MDBList credentials", if (mdblist.apiKey.isBlank()) "Not configured" else "Saved securely") {
+            apiKey = ""
+            credentialError = null
+            credentialTarget = "MDBList"
+        }
+        if (mdblist.apiKey.isNotBlank()) {
+            RewriteActionRow("Clear MDBList credentials", "Delete the saved MDBList key for this profile.") {
+                scope.launch { facade.setMdblistApiKey("") }
+            }
+        }
     }
     RewriteSettingsGroup("Debrid") {
         RewriteToggleRow("Debrid playback", "Use connected debrid services for supported streams.", debrid.enabled) {
@@ -125,18 +141,23 @@ internal fun IntegrationsSettings(
                 onDebridEnabledChanged(it)
             }
         }
-        DebridService.entries.forEach { service ->
-            val connected = debridConnection.isConnected(service)
-            RewriteActionRow(service.label, if (connected) "Connected${if (debridConnection.activeService == service) " and active" else ""}" else "Connect encrypted credentials.") {
+            DebridService.entries.forEach { service ->
+                val connected = debridConnection.isConnected(service)
+                RewriteActionRow(service.label, if (connected) "Connected${if (debridConnection.activeService == service) " and active" else ""}" else "Connect encrypted credentials.") {
                 if (connected) {
                     scope.launch { onSelect(service) }
                 } else {
                     apiKey = ""
                     credentialError = null
-                    selectedService = service
+                        selectedService = service
+                    }
+                }
+                if (connected) {
+                    RewriteActionRow("Remove ${service.label}", "Delete the saved credential for this profile.") {
+                        scope.launch { onDisconnect(service) }
+                    }
                 }
             }
-        }
     }
     RewriteSettingsGroup("OpenSubtitles") {
         RewriteToggleRow("OpenSubtitles", "Enrich subtitle results after playback starts.", openSubtitlesEnabled) { scope.launch { facade.setOpenSubtitlesEnabled(it) } }
@@ -144,6 +165,14 @@ internal fun IntegrationsSettings(
             apiKey = ""
             credentialError = null
             credentialTarget = "OpenSubtitles"
+        }
+        RewriteToggleRow("Automatic subtitle download", "Download matching subtitles when playback starts.", openSubtitlesAutoDownload) {
+            scope.launch { facade.setOpenSubtitlesAutoDownload(it) }
+        }
+        if (openSubtitlesKey.isNotBlank()) {
+            RewriteActionRow("Clear credentials", "Delete the saved OpenSubtitles key for this profile.") {
+                scope.launch { facade.setOpenSubtitlesApiKey("") }
+            }
         }
     }
     selectedService?.let { service ->
@@ -175,8 +204,14 @@ internal fun IntegrationsSettings(
             onApiKeyChanged = { apiKey = it; credentialError = null },
             onConfirm = {
                 val value = credentialSubmissionValue(apiKey) ?: return@RewriteCredentialDialog
+                val target = credentialTarget
                 scope.launch {
-                    runCatching { facade.setOpenSubtitlesApiKey(value) }
+                    runCatching {
+                        when (target) {
+                            "MDBList" -> facade.setMdblistApiKey(value)
+                            else -> facade.setOpenSubtitlesApiKey(value)
+                        }
+                    }
                         .onSuccess {
                             apiKey = ""
                             credentialError = null
@@ -231,6 +266,8 @@ private fun RewriteCredentialDialog(
                     onValueChange = onApiKeyChanged,
                     modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
                     singleLine = true,
+                    // Long provider keys are entered with a TV remote. Keep them visible so users
+                    // can verify characters instead of losing the entire key to one typo.
                     visualTransformation = androidx.compose.ui.text.input.VisualTransformation.None,
                     keyboardOptions = KeyboardOptions(
                         capitalization = KeyboardCapitalization.None,

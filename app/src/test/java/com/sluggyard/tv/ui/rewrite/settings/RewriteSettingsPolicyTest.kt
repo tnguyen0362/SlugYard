@@ -18,7 +18,6 @@ class RewriteSettingsPolicyTest {
                 RewriteSettingsCategory.Display,
                 RewriteSettingsCategory.Subtitles,
                 RewriteSettingsCategory.Audio,
-                RewriteSettingsCategory.Advanced,
                 RewriteSettingsCategory.About,
             ),
             RewriteSettingsPolicy.categories,

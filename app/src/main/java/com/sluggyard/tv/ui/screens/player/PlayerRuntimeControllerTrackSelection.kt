@@ -183,26 +183,35 @@ internal fun PlayerRuntimeController.selectSubtitleTrack(trackIndex: Int) {
     _exoPlayer?.let { player ->
         Log.d(PlayerRuntimeController.TAG, "Selecting INTERNAL subtitle trackIndex=$trackIndex")
         val tracks = player.currentTracks
-        var currentSubIndex = 0
-
-        tracks.groups.forEach { trackGroup ->
-            if (trackGroup.type == C.TRACK_TYPE_TEXT) {
-                for (i in 0 until trackGroup.length) {
-                    val format = trackGroup.getTrackFormat(i)
-                    if (format.id?.contains(PlayerRuntimeController.ADDON_SUBTITLE_TRACK_ID_PREFIX) == true) continue
-                    if (currentSubIndex == trackIndex) {
-                        val override = TrackSelectionOverride(trackGroup.mediaTrackGroup, i)
-                        player.trackSelectionParameters = player.trackSelectionParameters
-                            .buildUpon()
-                            .setOverrideForType(override)
-                            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
-                            .build()
-                        return
-                    }
-                    currentSubIndex++
+        val requestedTrack = _uiState.value.subtitleTracks.getOrNull(trackIndex)
+        val textTracks = tracks.groups.flatMap { trackGroup ->
+            if (trackGroup.type != C.TRACK_TYPE_TEXT) return@flatMap emptyList()
+            (0 until trackGroup.length).mapNotNull { index ->
+                val format = trackGroup.getTrackFormat(index)
+                if (format.id?.contains(PlayerRuntimeController.ADDON_SUBTITLE_TRACK_ID_PREFIX) == true) {
+                    null
+                } else {
+                    Triple(trackGroup, index, format)
                 }
             }
         }
+        val selectedTrack = requestedTrack?.trackId
+            ?.takeIf(String::isNotBlank)
+            ?.let { id -> textTracks.firstOrNull { it.third.id == id } }
+            ?: textTracks.getOrNull(trackIndex)
+        if (selectedTrack != null) {
+            val override = TrackSelectionOverride(selectedTrack.first.mediaTrackGroup, selectedTrack.second)
+            player.trackSelectionParameters = player.trackSelectionParameters
+                .buildUpon()
+                .setOverrideForType(override)
+                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                .build()
+            return@let
+        }
+        Log.w(
+            PlayerRuntimeController.TAG,
+            "Unable to match internal subtitle track index=$trackIndex id=${requestedTrack?.trackId}",
+        )
     }
 }
 

@@ -6,6 +6,7 @@ import androidx.media3.common.C
 import androidx.media3.common.TrackGroup
 import androidx.media3.ui.AspectRatioFrameLayout
 import com.sluggyard.tv.core.streams.StreamBadgePlacement
+import com.sluggyard.tv.core.streamresolution.ResolvedPlaybackSource
 import com.sluggyard.tv.data.local.FrameRateMatchingMode
 import com.sluggyard.tv.data.local.InternalPlayerEngine
 import com.sluggyard.tv.data.local.LibassRenderType
@@ -271,11 +272,16 @@ data class RewritePlayerControlActions(
     val onPlayPause: () -> Unit,
     val onSeekForward: () -> Unit,
     val onSeekBackward: () -> Unit,
+    /** Live preview of a scrub delta (ms); does not commit playback position. */
+    val onSeekPreview: (Long) -> Unit = {},
+    /** Commits the pending scrub preview to the actual playback position. */
+    val onSeekCommit: () -> Unit = {},
     val onSources: () -> Unit,
     val onEpisodes: () -> Unit,
     val onAudio: () -> Unit,
     val onSubtitles: () -> Unit,
     val onSpeed: () -> Unit,
+    val onToggleAspectRatio: () -> Unit = {},
     val onBack: () -> Unit,
 )
 
@@ -345,6 +351,9 @@ data class RewritePlayerTrackActions(
     val onSetSubtitleSize: (Int) -> Unit,
     val onSetSubtitleVerticalOffset: (Int) -> Unit,
     val onSetSubtitleBold: (Boolean) -> Unit,
+    val onSetSubtitleTextColor: (Int) -> Unit = {},
+    val onSetSubtitleOutlineEnabled: (Boolean) -> Unit = {},
+    val onSetSubtitleOutlineColor: (Int) -> Unit = {},
     val onResetSubtitleStyle: () -> Unit,
     val onSetPlaybackSpeed: (Float) -> Unit,
 )
@@ -396,6 +405,7 @@ sealed class PlayerEvent {
     data object OnReloadSourceStreams : PlayerEvent()
     data class OnSourceAddonFilterSelected(val addonName: String?) : PlayerEvent()
     data class OnSourceStreamSelected(val stream: Stream) : PlayerEvent()
+    data class OnRewritePlaybackSourceSelected(val source: ResolvedPlaybackSource) : PlayerEvent()
     data object OnDismissTransientOverlay : PlayerEvent()
     data object OnRetry : PlayerEvent()
     data object OnReportPlaybackIssue : PlayerEvent()

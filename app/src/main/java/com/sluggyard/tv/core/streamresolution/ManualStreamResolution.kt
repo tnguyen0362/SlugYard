@@ -54,7 +54,11 @@ class ManualStreamResolutionCoordinator(
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (failure: Exception) {
-            ManualResolutionResult.Failed("The selected stream could not be resolved", failure)
+            ManualResolutionResult.Failed(
+                failure.message?.takeIf { it.isNotBlank() }
+                    ?: "The selected stream could not be resolved",
+                failure,
+            )
         }
     }
 }

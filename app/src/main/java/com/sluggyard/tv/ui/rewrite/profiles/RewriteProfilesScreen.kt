@@ -3,9 +3,11 @@ package com.sluggyard.tv.ui.rewrite.profiles
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -16,10 +18,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
@@ -37,6 +42,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -45,6 +52,7 @@ import com.sluggyard.tv.ui.design.SlugYardPalette
 import com.sluggyard.tv.ui.design.SlugYardTvMetrics
 import com.sluggyard.tv.ui.rewrite.data.RewriteProfile
 import com.sluggyard.tv.ui.rewrite.data.RewriteProfileState
+import com.sluggyard.tv.ui.rewrite.requestFocusReliably
 
 /** Deterministic colored-tile identity so returning to this screen never reshuffles which
  * profile wears which color -- picked from the same warm/cool family as [SlugYardPalette.Accent]
@@ -70,34 +78,41 @@ fun RewriteProfilesScreen(
     onCreate: (String) -> Unit,
     onRename: (RewriteProfile, String) -> Unit,
     onRemove: (RewriteProfile) -> Unit,
+    contentFocusRequester: FocusRequester? = null,
     modifier: Modifier = Modifier,
 ) {
     var editing by remember { mutableStateOf<RewriteProfile?>(null) }
     var creating by remember { mutableStateOf(false) }
+    val firstProfileFocusRequester = contentFocusRequester ?: remember { FocusRequester() }
+
+    androidx.compose.runtime.LaunchedEffect(firstProfileFocusRequester, state.profiles.firstOrNull()?.id) {
+        firstProfileFocusRequester.requestFocusReliably(retries = 8)
+    }
 
     Column(
         modifier = modifier.fillMaxSize().background(SlugYardPalette.Canvas)
             .padding(horizontal = SlugYardTvMetrics.ScreenHorizontalInset, vertical = 34.dp),
-        verticalArrangement = Arrangement.spacedBy(28.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("Who's watching?", style = MaterialTheme.typography.displaySmall)
-            Text(
-                "Profiles keep your saved titles and progress separate.",
-                style = MaterialTheme.typography.bodyLarge,
-                color = SlugYardPalette.OnCanvasMuted,
-            )
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(28.dp), verticalAlignment = Alignment.Top) {
-            state.profiles.forEach { profile ->
+        Text("Who's watching?", style = MaterialTheme.typography.displaySmall)
+        Spacer(Modifier.height(28.dp))
+        LazyRow(
+            modifier = Modifier.widthIn(max = 1000.dp),
+            contentPadding = PaddingValues(horizontal = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(28.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            items(state.profiles, key = RewriteProfile::id) { profile ->
                 ProfileAvatarTile(
                     profile = profile,
                     selected = profile.id == state.activeProfileId,
                     onSelect = { onSelect(profile) },
                     onEdit = { editing = profile },
+                    focusRequester = if (profile == state.profiles.firstOrNull()) firstProfileFocusRequester else null,
                 )
             }
-            AddProfileTile(onClick = { creating = true })
+            item { AddProfileTile(onClick = { creating = true }) }
         }
     }
 
@@ -107,7 +122,7 @@ fun RewriteProfilesScreen(
             title = "Edit profile",
             initialName = target.name,
             confirmLabel = "Save",
-            showRemove = state.profiles.size > 1,
+            showRemove = state.profiles.size > 1 && target.id !in setOf("default", "1"),
             onConfirm = { name -> onRename(target, name); editing = null },
             onRemove = { onRemove(target); editing = null },
             onDismiss = { editing = null },
@@ -125,10 +140,16 @@ fun RewriteProfilesScreen(
     }
 }
 
-private val AvatarTileSize = 148.dp
+private val AvatarTileSize = 96.dp
 
 @Composable
-private fun ProfileAvatarTile(profile: RewriteProfile, selected: Boolean, onSelect: () -> Unit, onEdit: () -> Unit) {
+private fun ProfileAvatarTile(
+    profile: RewriteProfile,
+    selected: Boolean,
+    onSelect: () -> Unit,
+    onEdit: () -> Unit,
+    focusRequester: FocusRequester? = null,
+) {
     val avatarInteraction = remember { MutableInteractionSource() }
     val avatarFocused by avatarInteraction.collectIsFocusedAsState()
     val avatarScale = if (avatarFocused) 1.08f else 1f
@@ -139,20 +160,30 @@ private fun ProfileAvatarTile(profile: RewriteProfile, selected: Boolean, onSele
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Column(
+        Box(
             modifier = Modifier
                 .size(AvatarTileSize)
                 .graphicsLayer(scaleX = avatarScale, scaleY = avatarScale)
-                .clip(RoundedCornerShape(16.dp))
+                .clip(RoundedCornerShape(50))
                 .background(color)
                 .then(
                     if (selected) {
-                        Modifier.border(3.dp, SlugYardPalette.OnCanvas, RoundedCornerShape(16.dp))
+                        Modifier.border(3.dp, SlugYardPalette.OnCanvas, RoundedCornerShape(50))
                     } else Modifier,
                 )
-                .clickable(interactionSource = avatarInteraction, indication = null, onClick = onSelect),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
+                .then(
+                    if (avatarFocused) {
+                        Modifier.border(3.dp, SlugYardPalette.FocusRing, RoundedCornerShape(50))
+                    } else Modifier,
+                )
+                .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+                .combinedClickable(
+                    interactionSource = avatarInteraction,
+                    indication = null,
+                    onClick = onSelect,
+                    onLongClick = onEdit,
+                ),
+            contentAlignment = Alignment.Center,
         ) {
             Text(
                 text = profile.name.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?",
@@ -162,33 +193,25 @@ private fun ProfileAvatarTile(profile: RewriteProfile, selected: Boolean, onSele
                 modifier = Modifier.fillMaxWidth(),
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
             )
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                profile.name,
-                style = MaterialTheme.typography.titleMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                color = if (selected) SlugYardPalette.OnCanvas else SlugYardPalette.OnCanvasMuted,
-            )
             if (selected) {
-                Text("• Active", style = MaterialTheme.typography.labelMedium, color = SlugYardPalette.Accent)
+                Icon(
+                    Icons.Filled.Check,
+                    contentDescription = "Selected profile",
+                    tint = SlugYardPalette.Canvas,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(8.dp)
+                        .size(20.dp),
+                )
             }
         }
-        val editInteraction = remember { MutableInteractionSource() }
-        val editFocused by editInteraction.collectIsFocusedAsState()
-        Row(
-            modifier = Modifier
-                .clip(RoundedCornerShape(50))
-                .background(if (editFocused) SlugYardPalette.SurfaceElevated else Color.Transparent)
-                .clickable(interactionSource = editInteraction, indication = null, onClick = onEdit)
-                .padding(horizontal = 10.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(Icons.Filled.Edit, contentDescription = null, modifier = Modifier.size(14.dp), tint = SlugYardPalette.OnCanvasMuted)
-            Text("Edit", style = MaterialTheme.typography.labelMedium, color = SlugYardPalette.OnCanvasMuted)
-        }
+        Text(
+            profile.name,
+            style = MaterialTheme.typography.titleMedium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            color = if (selected) SlugYardPalette.OnCanvas else SlugYardPalette.OnCanvasMuted,
+        )
     }
 }
 
@@ -206,8 +229,9 @@ private fun AddProfileTile(onClick: () -> Unit) {
             modifier = Modifier
                 .size(AvatarTileSize)
                 .graphicsLayer(scaleX = scale, scaleY = scale)
-                .clip(RoundedCornerShape(16.dp))
+                .clip(RoundedCornerShape(50))
                 .background(if (focused) SlugYardPalette.SurfaceElevated else SlugYardPalette.Surface)
+                .border(1.dp, SlugYardPalette.OnCanvasMuted.copy(alpha = 0.5f), RoundedCornerShape(50))
                 .clickable(interactionSource = interaction, indication = null, onClick = onClick),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
@@ -230,14 +254,31 @@ private fun ProfileNameDialog(
     onDismiss: () -> Unit,
 ) {
     var name by remember(initialName) { mutableStateOf(initialName) }
+    var confirmRemove by remember(initialName) { mutableStateOf(false) }
+    val validName = name.trim().isNotEmpty()
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
-        text = { OutlinedTextField(value = name, onValueChange = { name = it }, singleLine = true, label = { Text("Name") }) },
-        confirmButton = { Button(onClick = { onConfirm(name) }) { Text(confirmLabel) } },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it; confirmRemove = false },
+                    singleLine = true,
+                    label = { Text("Name") },
+                )
+                if (!validName) Text("Enter a profile name.", color = SlugYardPalette.Danger)
+                if (confirmRemove) Text("Remove this profile and its local settings?", color = SlugYardPalette.Danger)
+            }
+        },
+        confirmButton = { Button(onClick = { onConfirm(name) }, enabled = validName) { Text(confirmLabel) } },
         dismissButton = {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (showRemove) OutlinedButton(onClick = onRemove) { Text("Remove") }
+                if (showRemove) {
+                    OutlinedButton(onClick = { if (confirmRemove) onRemove() else confirmRemove = true }) {
+                        Text(if (confirmRemove) "Confirm remove" else "Remove")
+                    }
+                }
                 OutlinedButton(onClick = onDismiss) { Text("Cancel") }
             }
         },

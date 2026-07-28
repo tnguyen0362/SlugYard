@@ -32,9 +32,16 @@ val OpenSansFamily = FontFamily(
     Font(R.font.opensans_variable, FontWeight.Bold)
 )
 
-// Android's neutral system sans is a better TV-display match for the restrained
-// streaming-app hierarchy than the more geometric legacy type choices.
-val StreamingSansFamily = FontFamily.SansSerif
+/** Quicksand is the rounded typeface used by the Debrid Streams reference app. */
+val QuicksandFamily = FontFamily(
+    Font(R.font.quicksand_variable, FontWeight.Light),
+    Font(R.font.quicksand_variable, FontWeight.Normal),
+    Font(R.font.quicksand_variable, FontWeight.Medium),
+    Font(R.font.quicksand_variable, FontWeight.SemiBold),
+    Font(R.font.quicksand_variable, FontWeight.Bold),
+)
+
+val StreamingSansFamily = QuicksandFamily
 
 fun getFontFamily(appFont: AppFont): FontFamily = when (appFont) {
     AppFont.INTER -> StreamingSansFamily

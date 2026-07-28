@@ -17,8 +17,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.unit.dp
 import com.sluggyard.tv.ui.design.SlugYardPalette
 import com.sluggyard.tv.ui.design.SlugYardTvMetrics
@@ -37,6 +42,11 @@ fun RewritePlayerPostPlayOverlay(
     AnimatedVisibility(visible = mode != null, enter = fadeIn(), exit = fadeOut()) {
         val activeMode = mode ?: return@AnimatedVisibility
         val episode = activeMode.nextEpisode
+        val primaryFocusRequester = remember { FocusRequester() }
+        val secondaryFocusRequester = remember { FocusRequester() }
+        LaunchedEffect(episode.videoId, activeMode is PostPlayMode.StillWatching) {
+            primaryFocusRequester.requestRewritePlayerFocus()
+        }
         Box(modifier = modifier.fillMaxSize()) {
             Column(
                 modifier = Modifier
@@ -49,6 +59,7 @@ fun RewritePlayerPostPlayOverlay(
                 Text(
                     if (activeMode is PostPlayMode.StillWatching) "Still watching?" else "Up next",
                     style = MaterialTheme.typography.titleLarge,
+                    color = SlugYardPalette.OnCanvas,
                 )
                 Text(
                     "S${episode.season} E${episode.episode}  ${episode.title}",
@@ -64,6 +75,9 @@ fun RewritePlayerPostPlayOverlay(
                             if (activeMode is PostPlayMode.StillWatching) actions.onContinueStillWatching()
                             else actions.onPlayNext()
                         },
+                        modifier = Modifier
+                            .focusRequester(primaryFocusRequester)
+                            .focusProperties { right = secondaryFocusRequester },
                         enabled = activeMode is PostPlayMode.StillWatching || episode.hasAired,
                         shape = RoundedCornerShape(4.dp),
                         colors = ButtonDefaults.buttonColors(
@@ -72,7 +86,13 @@ fun RewritePlayerPostPlayOverlay(
                         ),
                     ) { Text(if (activeMode is PostPlayMode.StillWatching) "Continue" else "Play next") }
                     if (activeMode is PostPlayMode.StillWatching) {
-                        OutlinedButton(onClick = actions.onDismissStillWatching, shape = RoundedCornerShape(4.dp)) {
+                        OutlinedButton(
+                            onClick = actions.onDismissStillWatching,
+                            modifier = Modifier
+                                .focusRequester(secondaryFocusRequester)
+                                .focusProperties { left = primaryFocusRequester },
+                            shape = RoundedCornerShape(4.dp),
+                        ) {
                             Text("Not now")
                         }
                     }

@@ -144,14 +144,20 @@ fun PlayerScreen(
     controlsOverlay: @Composable (PlayerUiState, RewritePlayerControlActions, FocusRequester, PlaybackTimelineState) -> Unit,
     secondaryOverlay: @Composable (PlayerUiState, RewritePlayerSecondaryActions) -> Unit,
     trackOverlay: @Composable (PlayerUiState, RewritePlayerTrackActions) -> Unit,
-    skipOverlay: @Composable (PlayerUiState, RewritePlayerSkipActions) -> Unit,
+    skipOverlay: @Composable (PlayerUiState, RewritePlayerSkipActions, FocusRequester) -> Unit,
     postPlayOverlay: @Composable (PlayerUiState, RewritePlayerPostPlayActions) -> Unit,
     diagnosticsOverlay: @Composable (PlayerUiState, RewritePlayerDiagnosticsActions) -> Unit,
     subtitleTimingOverlay: @Composable (PlayerUiState, Long, RewritePlayerSubtitleTimingActions) -> Unit,
     systemOverlay: @Composable (PlayerUiState, RewritePlayerSystemActions) -> Unit,
+    legacyChromeEnabled: Boolean = true,
     playbackPositionMs: Long = 0L,
+    onOpenSourcesPanel: () -> Unit = { viewModel.onEvent(PlayerEvent.OnShowSourcesPanel) },
+    onOpenEpisodesPanel: () -> Unit = { viewModel.onEvent(PlayerEvent.OnShowEpisodesPanel) },
+    externalSecondaryOpen: () -> Boolean = { false },
+    onDismissExternalSecondary: () -> Unit = {},
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val isExternalSecondaryOpen = externalSecondaryOpen()
     val lifecycleOwner = LocalLifecycleOwner.current
     val context = LocalContext.current
     val containerFocusRequester = remember { FocusRequester() }
@@ -253,6 +259,8 @@ fun PlayerScreen(
             viewModel.onEvent(PlayerEvent.OnHideSubtitleDelayOverlay)
         } else if (uiState.showSubtitleStylePanel) {
             viewModel.onEvent(PlayerEvent.OnDismissSubtitleStylePanel)
+        } else if (isExternalSecondaryOpen) {
+            onDismissExternalSecondary()
         } else if (uiState.showSourcesPanel) {
             if (uiState.currentStreamUrl.isNullOrBlank()) {
                 exitPlayer()
@@ -411,10 +419,11 @@ fun PlayerScreen(
         uiState.showAudioOverlay,
         uiState.showSubtitleOverlay,
         uiState.showSpeedDialog,
+        isExternalSecondaryOpen,
         shouldConfirmNextEpisodeOnEnd,
     ) {
         if (shouldConfirmNextEpisodeOnEnd) return@LaunchedEffect
-        if (uiState.showControls && !uiState.showEpisodesPanel && !uiState.showSourcesPanel &&
+        if (uiState.showControls && !isExternalSecondaryOpen && !uiState.showEpisodesPanel && !uiState.showSourcesPanel &&
             !uiState.showAudioOverlay && !uiState.showSubtitleOverlay &&
             !uiState.showSubtitleStylePanel && !uiState.showSubtitleDelayOverlay &&
             !uiState.showSubtitleTimingDialog &&
@@ -569,6 +578,7 @@ fun PlayerScreen(
                         uiState.showSubtitleStylePanel || uiState.showSpeedDialog ||
                         uiState.showSubtitleDelayOverlay || uiState.showSubtitleTimingDialog ||
                         uiState.showMoreDialog ||
+                        isExternalSecondaryOpen ||
                         shouldConfirmNextEpisodeOnEnd ||
                         uiState.postPlayMode is PostPlayMode.StillWatching
                 if (panelOrDialogOpen) return@onKeyEvent false
@@ -690,7 +700,7 @@ fun PlayerScreen(
                     isPlaying = uiState.isPlaying,
                     isBuffering = uiState.isBuffering,
                     aspectMode = uiState.aspectMode,
-                    useLibass = uiState.useLibass,
+                    useLibass = uiState.shouldRenderLibassOverlay(),
                     libassRenderType = uiState.libassRenderType,
                     subtitleStyle = uiState.subtitleStyle,
                     modifier = Modifier.fillMaxSize()
@@ -698,7 +708,7 @@ fun PlayerScreen(
             }
         }
 
-        if (uiState.playbackIssueReportsEnabled &&
+        if (legacyChromeEnabled && uiState.playbackIssueReportsEnabled &&
             uiState.showLoadingOverlay &&
             uiState.error == null &&
             uiState.loadingIssueReportVisible
@@ -726,7 +736,7 @@ fun PlayerScreen(
 
         // Torrent stats overlay (top-right corner)
         TorrentOverlay(
-            visible = uiState.isTorrentStream && uiState.showTorrentStats && !uiState.hideTorrentStats && uiState.error == null,
+            visible = legacyChromeEnabled && uiState.isTorrentStream && uiState.showTorrentStats && !uiState.hideTorrentStats && uiState.error == null,
             downloadSpeed = uiState.torrentDownloadSpeed,
             uploadSpeed = uiState.torrentUploadSpeed,
             peers = uiState.torrentPeers,
@@ -742,7 +752,7 @@ fun PlayerScreen(
         // isBuffering state changes only recompose this small subtree instead
         // of the entire PlayerScreen.
         PlayerBufferingIndicator(
-            isBuffering = uiState.isBuffering,
+            isBuffering = legacyChromeEnabled && uiState.isBuffering,
             showLoadingOverlay = uiState.showLoadingOverlay,
             isTorrentStream = uiState.isTorrentStream,
             torrentBufferingMessage = uiState.torrentBufferingMessage,
@@ -781,6 +791,7 @@ fun PlayerScreen(
                 onDismiss = { viewModel.onEvent(PlayerEvent.OnDismissSkipIntro) },
                 onVisibilityChanged = { skipButtonActuallyVisible = it },
             ),
+            skipIntroFocusRequester,
         )
         val visiblePostPlayMode = uiState.postPlayMode.takeIf {
             uiState.error == null &&
@@ -814,7 +825,7 @@ fun PlayerScreen(
             // top-left edge belongs to the persistent Back control whenever
             // player chrome is visible. Let the overlay's quick-hide branch
             // clear it instead of letting the two occupy the same region.
-            isVisible = uiState.showParentalGuide && !uiState.showControls,
+            isVisible = legacyChromeEnabled && uiState.showParentalGuide && !uiState.showControls,
             onAnimationComplete = {
                 viewModel.onEvent(PlayerEvent.OnParentalGuideHide)
             },
@@ -823,7 +834,7 @@ fun PlayerScreen(
 
         DisplayModeOverlay(
             info = uiState.displayModeInfo,
-            isVisible = uiState.showDisplayModeInfo,
+            isVisible = legacyChromeEnabled && uiState.showDisplayModeInfo,
             onAnimationComplete = {
                 viewModel.onEvent(PlayerEvent.OnHideDisplayModeInfo)
             },
@@ -832,13 +843,14 @@ fun PlayerScreen(
                 .zIndex(2.2f)
         )
 
-        val showClockOverlay = uiState.showControls &&
+        val showClockOverlay = legacyChromeEnabled && uiState.showControls &&
             uiState.osdClockEnabled &&
             uiState.error == null &&
             !uiState.showLoadingOverlay &&
             !uiState.showPauseOverlay &&
             !uiState.showEpisodesPanel &&
             !uiState.showSourcesPanel &&
+            !isExternalSecondaryOpen &&
             !uiState.showAudioOverlay &&
             !uiState.showSubtitleOverlay &&
             !uiState.showSubtitleStylePanel &&
@@ -850,12 +862,15 @@ fun PlayerScreen(
             onPlayPause = { viewModel.onEvent(PlayerEvent.OnPlayPause) },
             onSeekForward = { viewModel.onEvent(PlayerEvent.OnSeekForward) },
             onSeekBackward = { viewModel.onEvent(PlayerEvent.OnSeekBackward) },
-            onSources = { viewModel.onEvent(PlayerEvent.OnShowSourcesPanel) },
-            onEpisodes = { viewModel.onEvent(PlayerEvent.OnShowEpisodesPanel) },
+            onSeekPreview = { deltaMs -> viewModel.onEvent(PlayerEvent.OnPreviewSeekBy(deltaMs)) },
+            onSeekCommit = { viewModel.onEvent(PlayerEvent.OnCommitPreviewSeek) },
+            onSources = onOpenSourcesPanel,
+            onEpisodes = onOpenEpisodesPanel,
             onAudio = { viewModel.onEvent(PlayerEvent.OnShowAudioOverlay) },
             onSubtitles = { viewModel.onEvent(PlayerEvent.OnShowSubtitleOverlay) },
             onSpeed = { viewModel.onEvent(PlayerEvent.OnShowSpeedDialog) },
-            onBack = { exitPlayer() },
+            onToggleAspectRatio = { viewModel.onEvent(PlayerEvent.OnToggleAspectRatio) },
+            onBack = { handleBackPress() },
         )
 
         AnimatedVisibility(
@@ -878,6 +893,7 @@ fun PlayerScreen(
             visible = uiState.showControls && uiState.error == null &&
                 !uiState.showLoadingOverlay && !uiState.showPauseOverlay &&
                 !uiState.showStreamInfoOverlay &&
+                !isExternalSecondaryOpen &&
                 !uiState.showSubtitleStylePanel &&
                 !uiState.showSubtitleDelayOverlay &&
                 !uiState.showEpisodesPanel &&
@@ -900,7 +916,7 @@ fun PlayerScreen(
 
         // Aspect ratio indicator (floating pill)
         AnimatedVisibility(
-            visible = uiState.showAspectRatioIndicator,
+            visible = legacyChromeEnabled && uiState.showAspectRatioIndicator,
             enter = fadeIn(animationSpec = tween(200)),
             exit = fadeOut(animationSpec = tween(200)),
             modifier = Modifier
@@ -911,7 +927,7 @@ fun PlayerScreen(
         }
 
         AnimatedVisibility(
-            visible = uiState.showStreamSourceIndicator,
+            visible = legacyChromeEnabled && uiState.showStreamSourceIndicator,
             enter = fadeIn(animationSpec = tween(SlugYardMotion.tokens.durations.fast)),
             exit = fadeOut(animationSpec = tween(SlugYardMotion.tokens.durations.fast)),
             modifier = Modifier
@@ -922,7 +938,7 @@ fun PlayerScreen(
         }
 
         AnimatedVisibility(
-            visible = uiState.showPlayerEngineSwitchInfo && uiState.error == null,
+            visible = legacyChromeEnabled && uiState.showPlayerEngineSwitchInfo && uiState.error == null,
             enter = fadeIn(animationSpec = tween(SlugYardMotion.tokens.durations.fast)),
             exit = fadeOut(animationSpec = tween(SlugYardMotion.tokens.durations.fast)),
             modifier = Modifier
@@ -937,7 +953,7 @@ fun PlayerScreen(
 
         // Seek-only overlay (progress bar + time) when controls are hidden
         AnimatedVisibility(
-            visible = uiState.showSubtitleDelayOverlay &&
+            visible = legacyChromeEnabled && uiState.showSubtitleDelayOverlay &&
                 !uiState.showControls &&
                 uiState.error == null &&
                 !uiState.showLoadingOverlay &&
@@ -969,7 +985,7 @@ fun PlayerScreen(
         }
 
         AnimatedVisibility(
-            visible = uiState.showSeekOverlay && !uiState.showControls && uiState.error == null &&
+            visible = legacyChromeEnabled && uiState.showSeekOverlay && !uiState.showControls && uiState.error == null &&
                 !uiState.showLoadingOverlay && !uiState.showPauseOverlay &&
                 !uiState.showSubtitleDelayOverlay && !uiState.showSubtitleTimingDialog &&
                 !uiState.showMoreDialog,
@@ -1011,6 +1027,9 @@ fun PlayerScreen(
                 onSetSubtitleSize = { viewModel.onEvent(PlayerEvent.OnSetSubtitleSize(it)) },
                 onSetSubtitleVerticalOffset = { viewModel.onEvent(PlayerEvent.OnSetSubtitleVerticalOffset(it)) },
                 onSetSubtitleBold = { viewModel.onEvent(PlayerEvent.OnSetSubtitleBold(it)) },
+                onSetSubtitleTextColor = { viewModel.onEvent(PlayerEvent.OnSetSubtitleTextColor(it)) },
+                onSetSubtitleOutlineEnabled = { viewModel.onEvent(PlayerEvent.OnSetSubtitleOutlineEnabled(it)) },
+                onSetSubtitleOutlineColor = { viewModel.onEvent(PlayerEvent.OnSetSubtitleOutlineColor(it)) },
                 onResetSubtitleStyle = { viewModel.onEvent(PlayerEvent.OnResetSubtitleDefaults) },
                 onSetPlaybackSpeed = { viewModel.onEvent(PlayerEvent.OnSetPlaybackSpeed(it)) },
             ),
@@ -1300,6 +1319,15 @@ private fun PlayerView.syncLibassOverlay(
 
 private fun LibassRenderType.usesOverlaySubtitleView(): Boolean {
     return this == LibassRenderType.OVERLAY_CANVAS || this == LibassRenderType.OVERLAY_OPEN_GL
+}
+
+private fun PlayerUiState.shouldRenderLibassOverlay(): Boolean {
+    if (!useLibass || selectedAddonSubtitle != null) return false
+    val selected = subtitleTracks.getOrNull(selectedSubtitleTrackIndex)
+        ?: subtitleTracks.firstOrNull { it.isSelected }
+    // Keep the overlay mounted while tracks are still being discovered. Once a concrete track is
+    // known, only ASS/SSA tracks may use libass; SRT/VTT addon tracks must use Media3 alone.
+    return selected?.codec?.contains("ass", ignoreCase = true) != false
 }
 
 private fun android.widget.FrameLayout.hasAssOverlayChild(): Boolean {

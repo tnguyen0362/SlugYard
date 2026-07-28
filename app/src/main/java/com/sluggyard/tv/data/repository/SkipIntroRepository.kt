@@ -147,8 +147,8 @@ class SkipIntroRepository @Inject constructor(
                     data.outro.toSkipInterval("outro")
                 )
             }
-        } catch (_: Exception) {
-            Log.d("SkipIntro", "IntroDB: no data for $imdbId S${season}E${episode}")
+        } catch (error: Exception) {
+            Log.w("SkipIntro", "IntroDB request failed for $imdbId S${season}E${episode}", error)
             emptyList()
         }
     }
@@ -178,8 +178,8 @@ class SkipIntroRepository @Inject constructor(
                     )
                 } ?: emptyList()
             }
-        } catch (_: Exception) {
-            Log.d("SkipIntro", "AniSkip: no data for MAL $malId ep $episode")
+        } catch (error: Exception) {
+            Log.w("SkipIntro", "AniSkip request failed for MAL $malId ep $episode", error)
             emptyList()
         }
     }
@@ -188,7 +188,8 @@ class SkipIntroRepository @Inject constructor(
         armEntriesCache[imdbId]?.let { return it }
         val entries = try {
             armApi.resolveImdbToAll(imdbId).takeIf { it.isSuccessful }?.body() ?: emptyList()
-        } catch (_: Exception) {
+        } catch (error: Exception) {
+            Log.w("SkipIntro", "ARM identifier lookup failed for IMDb $imdbId", error)
             emptyList()
         }
         armEntriesCache[imdbId] = entries

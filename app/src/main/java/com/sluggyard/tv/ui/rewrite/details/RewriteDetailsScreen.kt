@@ -1,9 +1,12 @@
 package com.sluggyard.tv.ui.rewrite.details
 
 import com.sluggyard.tv.ui.rewrite.requestFocusReliably
+import com.sluggyard.tv.ui.rewrite.seasonDisplayLabel
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,10 +17,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
@@ -32,13 +36,19 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -46,14 +56,21 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.sluggyard.tv.ui.design.SlugYardPalette
 import com.sluggyard.tv.ui.design.SlugYardTvMetrics
+import kotlinx.coroutines.launch
 
 data class RewriteDetailsEpisode(
     val id: String,
+    // The addon-reported episode number. This is what season/episode source lookups must use --
+    // addons index streams by their own numbering, which is occasionally absolute/global rather
+    // than reset per season (e.g. "episode 36" for what a viewer would call S02E01).
     val number: Int,
     val title: String,
     val releaseLabel: String?,
     val thumbnailUrl: String?,
     val watched: Boolean,
+    // 1-based position within this episode's season, used for the on-screen "N. Title" label so
+    // a season's first episode always reads "1." regardless of what the addon's raw number is.
+    val displayNumber: Int = number,
 )
 
 data class RewriteDetailsSeason(
@@ -82,68 +99,92 @@ data class RewriteDetailsState(
 fun RewriteDetailsScreen(
     state: RewriteDetailsState,
     onPlay: () -> Unit,
-    onChooseStream: () -> Unit,
     onLibraryChanged: (Boolean) -> Unit,
     onSeasonSelected: (Int) -> Unit,
     onMarkSeasonWatched: (Int) -> Unit,
-    onEpisodeSelected: (RewriteDetailsEpisode) -> Unit,
+    onEpisodeSelected: (Int, RewriteDetailsEpisode) -> Unit,
     onEpisodeWatchedChanged: (RewriteDetailsEpisode, Boolean) -> Unit,
+    contentFocusRequester: FocusRequester? = null,
     modifier: Modifier = Modifier,
 ) {
     val selectedSeason = state.seasons.firstOrNull { it.number == state.selectedSeason }
         ?: state.seasons.firstOrNull()
-    // One FocusRequester per episode so DPAD up/down between rows is an explicit, single-step
-    // hop instead of relying on Compose's geometric focus search -- the prior implementation
-    // nested a separately-focusable "Mark watched" OutlinedButton inside a clickable Row, which
-    // created TWO focus stops per episode and made up/down navigation feel like it randomly got
-    // "stuck" skipping between them.
+    val detailsListState = rememberLazyListState()
+    val selectedSeasonFocusRequester = remember(selectedSeason?.number) { FocusRequester() }
+    var lastFocusedSeason by remember(state.id) { mutableStateOf(selectedSeason?.number) }
     val episodeFocusRequesters = remember(selectedSeason?.number, selectedSeason?.episodes?.size) {
         List(selectedSeason?.episodes?.size ?: 0) { FocusRequester() }
     }
+    LaunchedEffect(selectedSeason?.number) {
+        if (selectedSeason != null && selectedSeason.number != lastFocusedSeason) {
+            detailsListState.scrollToItem(1)
+            selectedSeasonFocusRequester.requestFocusReliably(retries = 8)
+        }
+        lastFocusedSeason = selectedSeason?.number
+    }
     LazyColumn(
-        modifier = modifier.fillMaxSize().background(SlugYardPalette.Canvas),
+        state = detailsListState,
+        modifier = modifier
+            .fillMaxSize()
+            .background(SlugYardPalette.Canvas),
         verticalArrangement = Arrangement.spacedBy(24.dp),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 56.dp),
     ) {
-        item(key = "header:${state.id}") {
+        item(key = "details_header") {
             DetailsHeader(
                 state = state,
                 onPlay = onPlay,
-                onChooseStream = onChooseStream,
                 onLibraryChanged = onLibraryChanged,
+                contentFocusRequester = contentFocusRequester,
             )
         }
         if (state.isSeries && selectedSeason != null) {
-            item(key = "season-selector:${state.id}") {
+            item(key = "season_selector") {
                 SeasonSelector(
                     seasons = state.seasons,
                     selectedSeason = selectedSeason.number,
+                    selectedFocusRequester = selectedSeasonFocusRequester,
                     onSeasonSelected = onSeasonSelected,
                 )
             }
-            item(key = "season-action:${selectedSeason.number}") {
+            item(key = "season_${selectedSeason.number}_heading") {
                 Row(
                     modifier = Modifier.padding(horizontal = SlugYardTvMetrics.ScreenHorizontalInset),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("Season ${selectedSeason.number}", style = MaterialTheme.typography.headlineLarge)
+                    Text(seasonDisplayLabel(selectedSeason.number), style = MaterialTheme.typography.headlineLarge)
                     Spacer(Modifier.weight(1f))
-                    OutlinedButton(onClick = { onMarkSeasonWatched(selectedSeason.number) }) {
+                    OutlinedButton(
+                        onClick = { onMarkSeasonWatched(selectedSeason.number) },
+                        enabled = !selectedSeason.fullyWatched,
+                    ) {
                         Text(if (selectedSeason.fullyWatched) "Watched" else "Mark season watched")
                     }
                 }
             }
-            itemsIndexed(selectedSeason.episodes, key = { _, ep -> ep.id }) { index, episode ->
+            itemsIndexed(
+                items = selectedSeason.episodes,
+                key = { index, episode -> "$index:${episode.id}" },
+            ) { index, episode ->
                 EpisodeRow(
                     episode = episode,
-                    focusRequester = episodeFocusRequesters[index],
-                    upNeighbor = episodeFocusRequesters.getOrNull(index - 1),
-                    downNeighbor = episodeFocusRequesters.getOrNull(index + 1),
-                    onOpen = { onEpisodeSelected(episode) },
+                    onOpen = { onEpisodeSelected(selectedSeason.number, episode) },
                     onWatchedChanged = { watched -> onEpisodeWatchedChanged(episode, watched) },
+                    focusRequester = episodeFocusRequesters[index],
+                    upFocusRequester = episodeFocusRequesters.getOrNull(index - 1),
+                    downFocusRequester = episodeFocusRequesters.getOrNull(index + 1),
+                )
+            }
+        } else if (state.isSeries) {
+            item(key = "no_episodes") {
+                Text(
+                    "No episodes are available for this title.",
+                    modifier = Modifier.padding(horizontal = SlugYardTvMetrics.ScreenHorizontalInset),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = SlugYardPalette.OnCanvasMuted,
                 )
             }
         }
+        item(key = "details_footer") { Spacer(Modifier.height(56.dp)) }
     }
 }
 
@@ -151,79 +192,89 @@ fun RewriteDetailsScreen(
 private fun DetailsHeader(
     state: RewriteDetailsState,
     onPlay: () -> Unit,
-    onChooseStream: () -> Unit,
     onLibraryChanged: (Boolean) -> Unit,
+    contentFocusRequester: FocusRequester? = null,
 ) {
     val playFocusRequester = remember(state.id) { FocusRequester() }
-    LaunchedEffect(state.id) { playFocusRequester.requestFocusReliably() }
-    Box(modifier = Modifier.fillMaxWidth().height(470.dp).background(SlugYardPalette.Surface)) {
+    LaunchedEffect(state.id) {
+        playFocusRequester.requestFocusReliably(retries = 10)
+    }
+    Box(modifier = Modifier.fillMaxWidth().height(410.dp).background(SlugYardPalette.Surface)) {
         AsyncImage(
-            model = state.backdropUrl,
+            model = state.backdropUrl ?: state.posterUrl,
             contentDescription = null,
             modifier = Modifier.fillMaxSize(),
             contentScale = ContentScale.Crop,
-            alpha = 0.48f,
+            alpha = if (state.backdropUrl != null) 0.48f else 0.20f,
         )
-        Column(
-            modifier = Modifier.align(Alignment.BottomStart).padding(
-                start = SlugYardTvMetrics.ScreenHorizontalInset,
-                end = SlugYardTvMetrics.ScreenHorizontalInset,
-                bottom = 38.dp,
-            ).fillMaxWidth(0.58f),
+        Box(
+            modifier = Modifier.fillMaxSize().background(
+                Brush.horizontalGradient(
+                    colorStops = arrayOf(
+                        0.10f to SlugYardPalette.Canvas.copy(alpha = 0.10f),
+                        0.62f to SlugYardPalette.Canvas.copy(alpha = 0.84f),
+                        1.0f to SlugYardPalette.Canvas,
+                    ),
+                ),
+            ),
+        )
+        Row(
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .fillMaxWidth()
+                .padding(horizontal = SlugYardTvMetrics.ScreenHorizontalInset),
+            horizontalArrangement = Arrangement.spacedBy(28.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(state.title, style = MaterialTheme.typography.displayLarge)
-            Spacer(Modifier.height(8.dp))
-            Text(state.metadata, style = MaterialTheme.typography.labelLarge, color = SlugYardPalette.OnCanvasMuted)
-            Spacer(Modifier.height(12.dp))
-            Text(state.description, style = MaterialTheme.typography.bodyLarge, maxLines = 4)
-            if (state.genres.isNotEmpty()) {
-                Spacer(Modifier.height(12.dp))
-                Text(state.genres.joinToString("  •  "), style = MaterialTheme.typography.labelMedium)
-            }
-            if (state.cast.isNotEmpty()) {
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "Cast: ${state.cast.take(4).joinToString(", ")}",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = SlugYardPalette.OnCanvasMuted,
-                    maxLines = 1,
+            state.posterUrl?.let { posterUrl ->
+                AsyncImage(
+                    model = posterUrl,
+                    contentDescription = "${state.title} poster",
+                    modifier = Modifier
+                        .width(176.dp)
+                        .height(264.dp)
+                        .clip(RoundedCornerShape(6.dp)),
+                    contentScale = ContentScale.Crop,
                 )
             }
-            Spacer(Modifier.height(20.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Button(
-                    onClick = onPlay,
-                    modifier = Modifier.focusRequester(playFocusRequester),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = SlugYardPalette.OnCanvas,
-                        contentColor = SlugYardPalette.Canvas,
-                    ),
-                ) {
-                    androidx.compose.material3.Icon(Icons.Default.PlayArrow, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Play")
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(state.title, style = MaterialTheme.typography.displayMedium, maxLines = 2)
+                Text(state.metadata, style = MaterialTheme.typography.bodyMedium, color = SlugYardPalette.OnCanvasMuted)
+                if (state.genres.isNotEmpty()) {
+                    Text(state.genres.joinToString("  •  "), style = MaterialTheme.typography.bodyMedium)
                 }
-                OutlinedButton(onClick = onChooseStream) { Text("Choose stream") }
-                OutlinedButton(onClick = { onLibraryChanged(!state.inLibrary) }) {
-                    Text(if (state.inLibrary) "In My List" else "Add to My List")
+                Text(state.description, style = MaterialTheme.typography.bodyLarge, maxLines = 3)
+                if (state.cast.isNotEmpty()) {
+                    Text(
+                        "Cast: ${state.cast.take(4).joinToString(", ")}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = SlugYardPalette.OnCanvasMuted,
+                        maxLines = 1,
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Button(
+                        onClick = onPlay,
+                        modifier = Modifier
+                            .focusRequester(playFocusRequester)
+                            .then(if (contentFocusRequester != null) Modifier.focusRequester(contentFocusRequester) else Modifier),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = SlugYardPalette.OnCanvas,
+                            contentColor = SlugYardPalette.Canvas,
+                        ),
+                    ) {
+                        androidx.compose.material3.Icon(Icons.Default.PlayArrow, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Play")
+                    }
+                    OutlinedButton(onClick = { onLibraryChanged(!state.inLibrary) }) {
+                        Text(if (state.inLibrary) "In My List" else "Add to My List")
+                    }
                 }
             }
-        }
-        state.posterUrl?.let { posterUrl ->
-            AsyncImage(
-                model = posterUrl,
-                contentDescription = "${state.title} poster",
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(
-                        end = SlugYardTvMetrics.ScreenHorizontalInset,
-                        bottom = 34.dp,
-                    )
-                    .width(180.dp)
-                    .height(270.dp)
-                    .clip(RoundedCornerShape(8.dp)),
-                contentScale = ContentScale.Crop,
-            )
         }
     }
 }
@@ -232,6 +283,7 @@ private fun DetailsHeader(
 private fun SeasonSelector(
     seasons: List<RewriteDetailsSeason>,
     selectedSeason: Int,
+    selectedFocusRequester: FocusRequester,
     onSeasonSelected: (Int) -> Unit,
 ) {
     LazyRow(
@@ -240,9 +292,10 @@ private fun SeasonSelector(
     ) {
         items(seasons, key = RewriteDetailsSeason::number) { season ->
             FilterChip(
+                modifier = if (season.number == selectedSeason) Modifier.focusRequester(selectedFocusRequester) else Modifier,
                 selected = season.number == selectedSeason,
                 onClick = { onSeasonSelected(season.number) },
-                label = { Text("Season ${season.number}") },
+                label = { Text(seasonDisplayLabel(season.number)) },
             )
         }
     }
@@ -252,15 +305,14 @@ private fun SeasonSelector(
 @Composable
 private fun EpisodeRow(
     episode: RewriteDetailsEpisode,
-    focusRequester: FocusRequester,
-    upNeighbor: FocusRequester?,
-    downNeighbor: FocusRequester?,
     onOpen: () -> Unit,
     onWatchedChanged: (Boolean) -> Unit,
+    focusRequester: FocusRequester,
+    upFocusRequester: FocusRequester?,
+    downFocusRequester: FocusRequester?,
 ) {
-    // Single focus stop per row: primary click opens the episode, a long-press (hold OK/Center)
-    // toggles watched. Previously an inner OutlinedButton was its own separate focus target,
-    // which is what made DPAD up/down feel like it "got stuck" mid-list.
+    val bringIntoViewRequester = remember { BringIntoViewRequester() }
+    val scope = rememberCoroutineScope()
     Row(
         modifier = Modifier
             .padding(horizontal = SlugYardTvMetrics.ScreenHorizontalInset)
@@ -268,10 +320,15 @@ private fun EpisodeRow(
             .clip(RoundedCornerShape(8.dp))
             .focusRequester(focusRequester)
             .focusProperties {
-                upNeighbor?.let { up = it }
-                downNeighbor?.let { down = it }
+                upFocusRequester?.let { up = it }
+                downFocusRequester?.let { down = it }
+            }
+            .bringIntoViewRequester(bringIntoViewRequester)
+            .onFocusChanged { focusState ->
+                if (focusState.isFocused) scope.launch { bringIntoViewRequester.bringIntoView() }
             }
             .combinedClickable(onClick = onOpen, onLongClick = { onWatchedChanged(!episode.watched) })
+            .background(SlugYardPalette.Surface)
             .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -283,7 +340,7 @@ private fun EpisodeRow(
         )
         Spacer(Modifier.width(16.dp))
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("${episode.number}. ${episode.title}", style = MaterialTheme.typography.titleMedium)
+            Text("${episode.displayNumber}. ${episode.title}", style = MaterialTheme.typography.titleMedium, color = SlugYardPalette.OnCanvas)
             episode.releaseLabel?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = SlugYardPalette.OnCanvasMuted) }
         }
         Icon(

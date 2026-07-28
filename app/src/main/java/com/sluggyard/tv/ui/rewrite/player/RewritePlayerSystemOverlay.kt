@@ -59,7 +59,7 @@ private fun PlayerPreparing(state: PlayerUiState, modifier: Modifier) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text(state.contentName ?: state.title ?: "SlugYard", style = MaterialTheme.typography.headlineLarge)
+            Text(state.contentName ?: state.title ?: "SlugYard", style = MaterialTheme.typography.headlineLarge, color = SlugYardPalette.OnCanvas)
             Text(
                 state.loadingMessage?.cleanPlayerStatus() ?: "Preparing stream",
                 style = MaterialTheme.typography.bodyLarge,
@@ -88,7 +88,7 @@ private fun PlayerFailure(message: String, onBack: () -> Unit, modifier: Modifie
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            Text("This stream could not play", style = MaterialTheme.typography.headlineLarge)
+            Text("This stream could not play", style = MaterialTheme.typography.headlineLarge, color = SlugYardPalette.OnCanvas)
             Text(
                 message.cleanPlayerStatus(),
                 color = SlugYardPalette.OnCanvasMuted,

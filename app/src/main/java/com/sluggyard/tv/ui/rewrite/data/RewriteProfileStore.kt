@@ -58,6 +58,20 @@ class RewriteProfileStore(private val dataStore: DataStore<Preferences>) : Rewri
         return profile
     }
 
+    suspend fun addExternalProfile(id: String, name: String): RewriteProfile {
+        val profile = RewriteProfile(id, normalizedName(name))
+        mutate { current ->
+            if (current.profiles.any { it.id == id }) {
+                current.copy(profiles = current.profiles.map { existing ->
+                    if (existing.id == id) profile else existing
+                })
+            } else {
+                current.copy(profiles = current.profiles + profile)
+            }
+        }
+        return profile
+    }
+
     override suspend fun rename(profileId: String, name: String) = mutate { current ->
         current.copy(profiles = current.profiles.map { profile ->
             if (profile.id == profileId) profile.copy(name = normalizedName(name)) else profile

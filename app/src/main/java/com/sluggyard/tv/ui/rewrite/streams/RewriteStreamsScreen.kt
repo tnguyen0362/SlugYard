@@ -1,6 +1,7 @@
 package com.sluggyard.tv.ui.rewrite.streams
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
@@ -12,16 +13,21 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -29,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import com.sluggyard.tv.core.streamresolution.StreamCacheState
 import com.sluggyard.tv.ui.design.SlugYardPalette
 import com.sluggyard.tv.ui.design.SlugYardTvMetrics
+import com.sluggyard.tv.ui.rewrite.requestFocusReliably
 
 data class RewriteStreamCandidate(
     val id: String,
@@ -39,6 +46,9 @@ data class RewriteStreamCandidate(
     val directUrl: String? = null,
     val infoHash: String? = null,
     val fileIndex: Int? = null,
+    val metadataText: String? = null,
+    val videoSizeBytes: Long? = null,
+    val seeders: Int? = null,
 )
 
 sealed interface RewriteStreamGroupState {
@@ -54,47 +64,114 @@ data class RewriteStreamGroup(
     val state: RewriteStreamGroupState,
 )
 
+private sealed interface StreamListItem {
+    val key: String
+
+    data class Header(val title: String) : StreamListItem {
+        override val key: String = "header:$title"
+    }
+
+    data class Status(val message: String, val color: Color) : StreamListItem {
+        override val key: String = "status:$message"
+    }
+
+    data class Candidate(val stream: RewriteStreamCandidate) : StreamListItem {
+        override val key: String = "candidate:${stream.id}"
+    }
+}
+
 @Composable
 fun RewriteStreamsScreen(
     title: String,
     groups: List<RewriteStreamGroup>,
     onStreamSelected: (RewriteStreamCandidate) -> Unit,
+    onBack: () -> Unit,
+    contentFocusRequester: FocusRequester? = null,
     modifier: Modifier = Modifier,
 ) {
-    LazyColumn(
-        modifier = modifier.fillMaxSize().background(SlugYardPalette.Canvas),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(
-            horizontal = SlugYardTvMetrics.ScreenHorizontalInset,
-            vertical = SlugYardTvMetrics.ScreenVerticalInset,
-        ),
-        verticalArrangement = Arrangement.spacedBy(20.dp),
-    ) {
-        item("title") {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Choose a stream", style = MaterialTheme.typography.headlineLarge)
-                Text(title, style = MaterialTheme.typography.bodyLarge, color = SlugYardPalette.OnCanvasMuted)
+    val listItems = buildList<StreamListItem> {
+        add(StreamListItem.Header(title))
+        groups.forEach { group ->
+            add(StreamListItem.Header(group.addonName))
+            when (val state = group.state) {
+                RewriteStreamGroupState.Loading -> add(StreamListItem.Status("Searching this source...", SlugYardPalette.OnCanvasMuted))
+                RewriteStreamGroupState.Empty -> add(StreamListItem.Status("No streams returned", SlugYardPalette.OnCanvasMuted))
+                is RewriteStreamGroupState.Error -> add(StreamListItem.Status(state.message, SlugYardPalette.Danger))
+                is RewriteStreamGroupState.Content -> state.streams.forEach { stream ->
+                    add(StreamListItem.Candidate(stream))
+                }
             }
         }
-        items(groups, key = RewriteStreamGroup::addonId) { group ->
-            StreamGroup(group, onStreamSelected)
+    }
+    val firstStreamId = firstStreamId(groups)
+    val candidateIds = listItems.filterIsInstance<StreamListItem.Candidate>().map { it.stream.id }
+    val candidateFocusRequesters = remember(candidateIds, contentFocusRequester) {
+        candidateIds.mapIndexed { index, _ ->
+            if (index == 0) contentFocusRequester ?: FocusRequester() else FocusRequester()
+        }
+    }
+    if (contentFocusRequester != null) {
+        LaunchedEffect(contentFocusRequester, firstStreamId) {
+            contentFocusRequester.requestFocusReliably(retries = 8)
+        }
+    }
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .background(SlugYardPalette.Canvas)
+            .verticalScroll(rememberScrollState())
+            .padding(
+                horizontal = SlugYardTvMetrics.ScreenHorizontalInset,
+                vertical = SlugYardTvMetrics.ScreenVerticalInset,
+            ),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        var candidateIndex = 0
+        listItems.forEach { item ->
+            when (item) {
+                is StreamListItem.Header -> {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = if (item.key == "header:$title") "Choose a stream" else item.title,
+                            style = if (item.key == "header:$title") MaterialTheme.typography.headlineLarge else MaterialTheme.typography.titleLarge,
+                            modifier = Modifier.weight(1f).padding(top = if (item.key == "header:$title") 8.dp else 22.dp),
+                        )
+                        if (item.key == "header:$title" && firstStreamId == null) {
+                            androidx.compose.material3.OutlinedButton(
+                                onClick = onBack,
+                                modifier = contentFocusRequester?.let { Modifier.focusRequester(it) } ?: Modifier,
+                            ) {
+                                Text("Back")
+                            }
+                        }
+                    }
+                    if (item.key == "header:$title") {
+                        Text(title, style = MaterialTheme.typography.bodyLarge, color = SlugYardPalette.OnCanvasMuted)
+                    }
+                }
+                is StreamListItem.Status -> StreamStatusCard(item.message, item.color)
+                is StreamListItem.Candidate -> StreamCandidateRow(
+                    stream = item.stream,
+                    onClick = { onStreamSelected(item.stream) },
+                    focusRequester = candidateFocusRequesters[candidateIndex],
+                    upFocusRequester = candidateFocusRequesters.getOrNull(candidateIndex - 1),
+                    downFocusRequester = candidateFocusRequesters.getOrNull(candidateIndex + 1),
+                )
+            }
+            if (item is StreamListItem.Candidate) candidateIndex++
         }
     }
 }
 
-@Composable
-private fun StreamGroup(group: RewriteStreamGroup, onStreamSelected: (RewriteStreamCandidate) -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text(group.addonName, style = MaterialTheme.typography.titleLarge)
-        when (val state = group.state) {
-            RewriteStreamGroupState.Loading -> StreamStatusCard("Searching this source...", SlugYardPalette.OnCanvasMuted)
-            RewriteStreamGroupState.Empty -> StreamStatusCard("No streams returned", SlugYardPalette.OnCanvasMuted)
-            is RewriteStreamGroupState.Error -> StreamStatusCard(state.message, SlugYardPalette.Danger)
-            is RewriteStreamGroupState.Content -> state.streams.forEach { stream ->
-                StreamCandidateRow(stream, onClick = { onStreamSelected(stream) })
-            }
-        }
-    }
-}
+private fun firstStreamId(groups: List<RewriteStreamGroup>): String? = groups
+    .asSequence()
+    .mapNotNull { it.state as? RewriteStreamGroupState.Content }
+    .flatMap { it.streams.asSequence() }
+    .firstOrNull()
+    ?.id
 
 @Composable
 private fun StreamStatusCard(message: String, color: Color) {
@@ -111,18 +188,30 @@ private fun StreamStatusCard(message: String, color: Color) {
 }
 
 @Composable
-private fun StreamCandidateRow(stream: RewriteStreamCandidate, onClick: () -> Unit) {
+private fun StreamCandidateRow(
+    stream: RewriteStreamCandidate,
+    onClick: () -> Unit,
+    focusRequester: FocusRequester? = null,
+    upFocusRequester: FocusRequester? = null,
+    downFocusRequester: FocusRequester? = null,
+) {
     val focusState = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
+            .then(focusRequester?.let { Modifier.focusRequester(it) } ?: Modifier)
+            .focusProperties {
+                upFocusRequester?.let { up = it }
+                downFocusRequester?.let { down = it }
+            }
             .onFocusChanged { focusState.value = it.isFocused }
             .scale(if (focusState.value) SlugYardTvMetrics.FocusScale else 1f)
             .background(if (focusState.value) SlugYardPalette.SurfaceElevated else SlugYardPalette.Surface)
+            .then(if (focusState.value) Modifier.border(2.dp, SlugYardPalette.FocusRing, RoundedCornerShape(8.dp)) else Modifier)
             .clickable(onClick = onClick)
             .focusable()
-            .padding(horizontal = 18.dp, vertical = 14.dp),
+            .padding(horizontal = 18.dp, vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -154,7 +243,7 @@ private fun CacheBadge(state: StreamCacheState) {
                 .background(color.copy(alpha = 0.16f))
                 .padding(horizontal = 8.dp, vertical = 5.dp),
             style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.Bold,
+            fontWeight = FontWeight.Medium,
             color = color,
         )
     }

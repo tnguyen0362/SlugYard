@@ -72,6 +72,8 @@ interface RewriteSettingsFacade {
     suspend fun setSubtitleSize(size: Int)
     suspend fun setSubtitleVerticalOffset(offset: Int)
     suspend fun setSubtitleBold(enabled: Boolean)
+    suspend fun setSubtitleOutlineEnabled(enabled: Boolean)
+    suspend fun setSubtitleOutlineWidth(width: Int)
     suspend fun setPreferredAudioLanguage(language: String)
     suspend fun setSecondaryPreferredAudioLanguage(language: String?)
     suspend fun setDownmixEnabled(enabled: Boolean)
@@ -195,6 +197,14 @@ class DefaultRewriteSettingsFacade @Inject constructor(
 
     override suspend fun setSubtitleBold(enabled: Boolean) {
         playerStore.setSubtitleBold(enabled)
+    }
+
+    override suspend fun setSubtitleOutlineEnabled(enabled: Boolean) {
+        playerStore.setSubtitleOutlineEnabled(enabled)
+    }
+
+    override suspend fun setSubtitleOutlineWidth(width: Int) {
+        playerStore.setSubtitleOutlineWidth(width)
     }
 
     override suspend fun setPreferredAudioLanguage(language: String) {

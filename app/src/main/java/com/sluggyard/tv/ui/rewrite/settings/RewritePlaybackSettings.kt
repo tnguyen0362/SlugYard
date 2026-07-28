@@ -41,7 +41,8 @@ internal fun SubtitleSettings(facade: RewriteSettingsFacade, player: PlayerSetti
         RewriteCycleRow("Size", "${style.size}%", listOf(80, 100, 120, 140, 160, 180).map { "$it%" }) { value -> scope.launch { facade.setSubtitleSize(value.removeSuffix("%").toInt()) } }
         RewriteCycleRow("Position", "${style.verticalOffset}%", listOf(-10, 0, 5, 15, 25, 40).map { "$it%" }) { value -> scope.launch { facade.setSubtitleVerticalOffset(value.removeSuffix("%").toInt()) } }
         RewriteToggleRow("Bold text", "Increase subtitle weight for distance viewing.", style.bold) { scope.launch { facade.setSubtitleBold(it) } }
-        RewriteValueRow("Outline", if (style.outlineEnabled) "Enabled" else "Disabled")
+        RewriteToggleRow("Outline", "Draw a readable edge around subtitle glyphs.", style.outlineEnabled) { scope.launch { facade.setSubtitleOutlineEnabled(it) } }
+        RewriteCycleRow("Outline width", "${style.outlineWidth}px", (1..5).map { "${it}px" }) { value -> scope.launch { facade.setSubtitleOutlineWidth(value.removeSuffix("px").toInt()) } }
     }
 }
 
@@ -76,6 +77,7 @@ internal fun AdvancedSettings(player: PlayerSettings) {
 internal fun AboutSettings() {
     RewriteSettingsGroup("About SlugYard") {
         RewriteValueRow("Application", "SlugYard TV")
+        RewriteValueRow("Version", com.sluggyard.tv.BuildConfig.VERSION_NAME)
         RewriteValueRow("Settings model", "Locked-down SlugYard TV")
         RewriteValueRow("Playback", "Automatic dual-player fallback")
         RewriteValueRow("Privacy", "Credentials remain on this device profile")

@@ -18,17 +18,21 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.unit.dp
 import com.sluggyard.tv.ui.design.SlugYardPalette
 import com.sluggyard.tv.ui.design.SlugYardTvMetrics
 import com.sluggyard.tv.ui.screens.player.PlayerUiState
 import com.sluggyard.tv.ui.screens.player.RewritePlayerSkipActions
+import com.sluggyard.tv.ui.rewrite.requestFocusReliably
 
 /** Rewrite-owned, TV-focusable skip prompt. The retained controller supplies only state and intents. */
 @Composable
 fun RewritePlayerSkipOverlay(
     state: PlayerUiState,
     actions: RewritePlayerSkipActions,
+    focusRequester: FocusRequester,
     modifier: Modifier = Modifier,
 ) {
     val interval = state.activeSkipInterval
@@ -38,7 +42,10 @@ fun RewritePlayerSkipOverlay(
         !state.showPauseOverlay &&
         !state.showLoadingOverlay &&
         state.postPlayMode == null
-    LaunchedEffect(visible) { actions.onVisibilityChanged(visible) }
+    LaunchedEffect(visible) {
+        actions.onVisibilityChanged(visible)
+        if (visible) focusRequester.requestFocusReliably(retries = 8)
+    }
     AnimatedVisibility(visible = visible, enter = fadeIn(), exit = fadeOut()) {
         Box(modifier = modifier.fillMaxSize()) {
             Row(
@@ -51,6 +58,7 @@ fun RewritePlayerSkipOverlay(
             ) {
                 Button(
                     onClick = actions.onSkip,
+                    modifier = Modifier.focusRequester(focusRequester),
                     shape = RoundedCornerShape(4.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = SlugYardPalette.Accent,

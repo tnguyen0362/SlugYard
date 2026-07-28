@@ -58,10 +58,16 @@ class SupabaseHttpTransport(
                     }
                     header(name, value)
                 }
-                body?.let { payload ->
+                val requestBody = body?.toRequestBody(JSON_MEDIA_TYPE)
+                    ?: if (method.uppercase(Locale.ROOT) in BODY_REQUIRED_METHODS) {
+                        "".toRequestBody(JSON_MEDIA_TYPE)
+                    } else {
+                        null
+                    }
+                requestBody?.let {
                     header("Content-Type", "application/json")
-                    method(method, payload.toRequestBody(JSON_MEDIA_TYPE))
-                } ?: method(method, null)
+                }
+                method(method, requestBody)
             }
             .build()
 
@@ -85,6 +91,7 @@ class SupabaseHttpTransport(
 
     private companion object {
         const val MAX_RESPONSE_BYTES = 8L * 1024 * 1024
+        val BODY_REQUIRED_METHODS = setOf("POST", "PUT", "PATCH")
         val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
 
         fun readBody(body: okhttp3.ResponseBody?): String? {

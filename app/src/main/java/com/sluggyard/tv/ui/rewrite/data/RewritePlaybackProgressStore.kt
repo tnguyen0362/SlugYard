@@ -4,6 +4,8 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
+import com.sluggyard.tv.core.sync.RewriteProgressSyncBridge
+import com.sluggyard.tv.core.sync.model.CloudWatchProgress
 import com.sluggyard.tv.core.watchstate.WatchStatePolicy
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
@@ -25,6 +27,8 @@ data class RewritePlaybackCheckpoint(
     val positionMs: Long,
     val durationMs: Long,
     val updatedAtEpochMs: Long,
+    val season: Int? = null,
+    val episode: Int? = null,
 ) {
     val progressFraction: Double?
         get() = durationMs.takeIf { it > 0 }?.let { positionMs.toDouble() / it }
@@ -33,7 +37,7 @@ data class RewritePlaybackCheckpoint(
 interface RewritePlaybackProgressRepository {
     val checkpoints: Flow<List<RewritePlaybackCheckpoint>>
     suspend fun save(checkpoint: RewritePlaybackCheckpoint)
-    suspend fun remove(contentId: String)
+    suspend fun remove(contentId: String, season: Int? = null, episode: Int? = null)
 }
 
 private fun rewritePlaybackProgressKey(profileId: String) = stringPreferencesKey("rewrite_playback_progress_v2_$profileId")
@@ -42,6 +46,7 @@ private const val MAX_STORED_CHECKPOINTS = 100
 class RewritePlaybackProgressStore(
     private val dataStore: DataStore<Preferences>,
     private val profiles: RewriteProfileRepository = DefaultRewritePlaybackProfileRepository,
+    private val syncBridge: RewriteProgressSyncBridge? = null,
 ) : RewritePlaybackProgressRepository {
     override val checkpoints: Flow<List<RewritePlaybackCheckpoint>> = combine(dataStore.data, profiles.state) { preferences, profileState ->
         preferences[rewritePlaybackProgressKey(profileState.activeProfile.id)]
@@ -61,12 +66,17 @@ class RewritePlaybackProgressStore(
             val existing = preferences[key]
                 ?.let(RewritePlaybackProgressCodec::decode)
                 .orEmpty()
-                .associateBy(RewritePlaybackCheckpoint::contentId)
+                .associateBy { rewriteProgressKey(it.contentId, it.season, it.episode) }
                 .toMutableMap()
+            val checkpointKey = rewriteProgressKey(checkpoint.contentId, checkpoint.season, checkpoint.episode)
             if (WatchStatePolicy.isCompleted(checkpoint.progressFraction)) {
-                existing.remove(checkpoint.contentId)
+                existing.remove(checkpointKey)
+            } else if (checkpoint.positionMs <= 0L) {
+                // Rewinding to the beginning means there is no resumable state. Leaving the old
+                // entry in the map would make Continue Watching reopen at a stale position.
+                existing.remove(checkpointKey)
             } else {
-                existing[checkpoint.contentId] = checkpoint
+                existing[checkpointKey] = checkpoint
             }
             val retained = existing.values
                 .asSequence()
@@ -76,18 +86,37 @@ class RewritePlaybackProgressStore(
                 .toList()
             preferences[key] = RewritePlaybackProgressCodec.encode(retained)
         }
+        val numericProfileId = profileId.toIntOrNull() ?: return
+        if (WatchStatePolicy.isCompleted(checkpoint.progressFraction) || checkpoint.positionMs <= 0L) {
+            syncBridge?.remove(
+                profileId = numericProfileId,
+                progressKey = rewriteProgressKey(checkpoint.contentId, checkpoint.season, checkpoint.episode),
+                changedAtEpochMs = checkpoint.updatedAtEpochMs,
+            )
+        } else {
+            syncBridge?.record(checkpoint.toCloudProgress(numericProfileId))
+        }
     }
 
-    override suspend fun remove(contentId: String) {
+    override suspend fun remove(contentId: String, season: Int?, episode: Int?) {
         val profileId = profiles.state.first().activeProfile.id
         dataStore.edit { preferences ->
             val key = rewritePlaybackProgressKey(profileId)
             val remaining = preferences[key]
                 ?.let(RewritePlaybackProgressCodec::decode)
                 .orEmpty()
-                .filterNot { it.contentId == contentId }
+                .filterNot {
+                    it.contentId == contentId &&
+                        (season == null || it.season == season) &&
+                        (episode == null || it.episode == episode)
+                }
             preferences[key] = RewritePlaybackProgressCodec.encode(remaining)
         }
+        syncBridge?.remove(
+            profileId = profileId.toIntOrNull() ?: return,
+            progressKey = rewriteProgressKey(contentId, season, episode),
+            changedAtEpochMs = System.currentTimeMillis(),
+        )
     }
 }
 
@@ -127,6 +156,20 @@ private fun RewritePlaybackCheckpoint.isPersistable(): Boolean =
         durationMs > 0L &&
         updatedAtEpochMs >= 0L
 
+private fun RewritePlaybackCheckpoint.toCloudProgress(profileId: Int) = CloudWatchProgress(
+    profileId = profileId,
+    progressKey = rewriteProgressKey(contentId, season, episode),
+    contentId = contentId,
+    contentType = contentType,
+    videoId = contentId,
+    season = season,
+    episode = episode,
+    position = positionMs,
+    duration = durationMs,
+    lastWatched = updatedAtEpochMs,
+    changedAt = updatedAtEpochMs,
+)
+
 @Serializable
 private data class StoredPlaybackCheckpoints(val items: List<StoredPlaybackCheckpoint> = emptyList())
 
@@ -139,9 +182,11 @@ private data class StoredPlaybackCheckpoint(
     val positionMs: Long,
     val durationMs: Long,
     val updatedAtEpochMs: Long,
+    val season: Int? = null,
+    val episode: Int? = null,
 ) {
     fun toModel() = RewritePlaybackCheckpoint(
-        contentId, contentType, title, posterUrl, positionMs, durationMs, updatedAtEpochMs,
+        contentId, contentType, title, posterUrl, positionMs, durationMs, updatedAtEpochMs, season, episode,
     )
 
     companion object {
@@ -153,6 +198,8 @@ private data class StoredPlaybackCheckpoint(
             model.positionMs,
             model.durationMs,
             model.updatedAtEpochMs,
+            model.season,
+            model.episode,
         )
     }
 }

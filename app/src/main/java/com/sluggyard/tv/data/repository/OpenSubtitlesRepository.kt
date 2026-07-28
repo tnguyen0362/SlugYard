@@ -118,7 +118,8 @@ class OpenSubtitlesRepository @Inject constructor(
             url = "",
             lang = attributes.language,
             addonName = "OpenSubtitles",
-            addonLogo = null
+            addonLogo = null,
+            format = file.fileName.substringAfterLast('.', "").takeIf { it.isNotBlank() },
         )
     }
 

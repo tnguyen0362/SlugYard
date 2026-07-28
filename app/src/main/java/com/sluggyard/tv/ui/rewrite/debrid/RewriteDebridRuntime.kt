@@ -68,6 +68,8 @@ class RewriteDebridRuntime(
 
     suspend fun select(service: DebridService) = credentials.selectForActiveProfile(service)
 
+    suspend fun disconnect(service: DebridService) = credentials.removeForActiveProfile(service)
+
     suspend fun configuredAddonUrls(): RewriteConfiguredAddonUrls? {
         val service = credentials.stateValue().activeService ?: return null
         val key = credentials.keyForActiveProfile(service).takeIf(String::isNotBlank) ?: return null

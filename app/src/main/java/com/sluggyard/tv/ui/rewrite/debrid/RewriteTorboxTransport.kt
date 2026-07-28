@@ -83,7 +83,9 @@ class RewriteTorboxTransport(
 
     private suspend fun request(request: Request): RewriteTorboxResult<JsonObject> = withContext(Dispatchers.IO) {
         try {
+            android.util.Log.d("SlugYardTorbox", "request ${request.method} ${request.url.encodedPath}")
             client.newCall(request).execute().use { response ->
+                android.util.Log.d("SlugYardTorbox", "response ${request.url.encodedPath} code=${response.code}")
                 if (!response.isSuccessful) return@withContext RewriteTorboxResult.HttpFailure(response.code)
                 val text = response.body?.string() ?: return@withContext RewriteTorboxResult.InvalidResponse
                 val payload = runCatching { json.parseToJsonElement(text).jsonObject }.getOrNull()
@@ -93,6 +95,7 @@ class RewriteTorboxTransport(
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (failure: Exception) {
+            android.util.Log.e("SlugYardTorbox", "request failed ${request.url.encodedPath}", failure)
             RewriteTorboxResult.NetworkFailure(failure)
         }
     }

@@ -15,11 +15,20 @@ import kotlinx.serialization.json.Json
 data class RewriteLibraryWatchState(
     val libraryIds: Set<String> = emptySet(),
     val watchedIds: Set<String> = emptySet(),
+    val libraryEntries: List<RewriteLibraryEntry> = emptyList(),
+)
+
+data class RewriteLibraryEntry(
+    val id: String,
+    val title: String,
+    val imageUrl: String? = null,
+    val contentType: String? = null,
+    val addonId: String? = null,
 )
 
 interface RewriteLibraryWatchRepository {
     val state: Flow<RewriteLibraryWatchState>
-    suspend fun setInLibrary(id: String, inLibrary: Boolean)
+    suspend fun setInLibrary(id: String, inLibrary: Boolean, entry: RewriteLibraryEntry? = null)
     suspend fun setWatched(id: String, watched: Boolean)
 }
 
@@ -34,8 +43,14 @@ class RewriteLibraryWatchStore(
         preferences[rewriteLibraryWatchKey(profileState.activeProfile.id)]?.let(RewriteLibraryWatchCodec::decode) ?: RewriteLibraryWatchState()
     }
 
-    override suspend fun setInLibrary(id: String, inLibrary: Boolean) = mutate { current ->
-        current.copy(libraryIds = current.libraryIds.withMembership(id, inLibrary))
+    override suspend fun setInLibrary(id: String, inLibrary: Boolean, entry: RewriteLibraryEntry?) = mutate { current ->
+        val entries = current.libraryEntries.filterNot { it.id == id }.toMutableList()
+        if (inLibrary) entries += entry ?: current.libraryEntries.firstOrNull { it.id == id }
+            ?: RewriteLibraryEntry(id = id, title = id)
+        current.copy(
+            libraryIds = current.libraryIds.withMembership(id, inLibrary),
+            libraryEntries = entries.filterNotNull(),
+        )
     }
 
     override suspend fun setWatched(id: String, watched: Boolean) = mutate { current ->
@@ -69,12 +84,21 @@ object RewriteLibraryWatchCodec {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
     fun encode(state: RewriteLibraryWatchState): String = json.encodeToString(
-        StoredLibraryWatch(state.libraryIds.sorted(), state.watchedIds.sorted()),
+        StoredLibraryWatch(
+            libraryIds = state.libraryIds.sorted(),
+            watchedIds = state.watchedIds.sorted(),
+            libraryEntries = state.libraryEntries.map(StoredLibraryEntry::from),
+        ),
     )
 
     fun decode(raw: String): RewriteLibraryWatchState = runCatching {
         json.decodeFromString<StoredLibraryWatch>(raw).let { stored ->
-            RewriteLibraryWatchState(stored.libraryIds.toSet(), stored.watchedIds.toSet())
+            val entries = stored.libraryEntries.map(StoredLibraryEntry::toModel)
+            RewriteLibraryWatchState(
+                libraryIds = (stored.libraryIds + entries.map(RewriteLibraryEntry::id)).toSet(),
+                watchedIds = stored.watchedIds.toSet(),
+                libraryEntries = entries,
+            )
         }
     }.getOrDefault(RewriteLibraryWatchState())
 }
@@ -83,4 +107,26 @@ object RewriteLibraryWatchCodec {
 private data class StoredLibraryWatch(
     val libraryIds: List<String> = emptyList(),
     val watchedIds: List<String> = emptyList(),
+    val libraryEntries: List<StoredLibraryEntry> = emptyList(),
 )
+
+@Serializable
+private data class StoredLibraryEntry(
+    val id: String,
+    val title: String,
+    val imageUrl: String? = null,
+    val contentType: String? = null,
+    val addonId: String? = null,
+) {
+    fun toModel() = RewriteLibraryEntry(id, title, imageUrl, contentType, addonId)
+
+    companion object {
+        fun from(entry: RewriteLibraryEntry) = StoredLibraryEntry(
+            entry.id,
+            entry.title,
+            entry.imageUrl,
+            entry.contentType,
+            entry.addonId,
+        )
+    }
+}

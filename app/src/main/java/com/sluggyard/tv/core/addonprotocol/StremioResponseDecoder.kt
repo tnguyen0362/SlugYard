@@ -6,6 +6,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.longOrNull
 
 data class AddonCatalogItem(
     val id: String,
@@ -24,6 +25,10 @@ data class AddonStreamItem(
     val directUrl: String?,
     val infoHash: String?,
     val fileIndex: Int?,
+    val description: String? = null,
+    val filename: String? = null,
+    val videoSizeBytes: Long? = null,
+    val seeders: Int? = null,
 )
 
 data class AddonSubtitleTrack(
@@ -77,6 +82,12 @@ object StremioResponseDecoder {
             directUrl = directUrl,
             infoHash = infoHash,
             fileIndex = (objectValue["fileIdx"] as? JsonPrimitive)?.intOrNull,
+            description = objectValue.string("description"),
+            filename = objectValue.objectValue("behaviorHints")?.string("filename"),
+            videoSizeBytes = objectValue.objectValue("behaviorHints")?.long("videoSize"),
+            seeders = objectValue.int("seeders")
+                ?: objectValue.int("seedCount")
+                ?: objectValue.int("peers"),
         )
     }
 
@@ -92,4 +103,7 @@ object StremioResponseDecoder {
 
     private fun JsonObject.array(name: String): JsonArray? = this[name] as? JsonArray
     private fun JsonObject.string(name: String): String? = (this[name] as? JsonPrimitive)?.contentOrNull
+    private fun JsonObject.objectValue(name: String): JsonObject? = this[name] as? JsonObject
+    private fun JsonObject.int(name: String): Int? = (this[name] as? JsonPrimitive)?.intOrNull
+    private fun JsonObject.long(name: String): Long? = (this[name] as? JsonPrimitive)?.longOrNull
 }

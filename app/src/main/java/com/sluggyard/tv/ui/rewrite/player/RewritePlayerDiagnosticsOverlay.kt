@@ -60,7 +60,7 @@ fun RewritePlayerDiagnosticsOverlay(
                     .padding(SlugYardTvMetrics.ScreenHorizontalInset),
                 verticalArrangement = Arrangement.spacedBy(18.dp),
             ) {
-                Text("Playback information", style = MaterialTheme.typography.headlineSmall)
+                Text("Playback information", style = MaterialTheme.typography.headlineSmall, color = SlugYardPalette.OnCanvas)
                 val data = state.streamInfoData
                 if (data == null) {
                     Text("Details will appear once the stream is ready.", color = SlugYardPalette.OnCanvasMuted)
@@ -120,7 +120,7 @@ private fun DiagnosticsFact(label: String, value: String?) {
     value?.takeIf(String::isNotBlank)?.let {
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             Text(label, modifier = Modifier.widthIn(min = 124.dp), color = SlugYardPalette.OnCanvasMuted)
-            Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis, color = SlugYardPalette.OnCanvas)
         }
     }
 }

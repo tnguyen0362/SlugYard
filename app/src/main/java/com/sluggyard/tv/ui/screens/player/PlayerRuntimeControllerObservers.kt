@@ -614,17 +614,22 @@ private fun PlayerRuntimeController.applyResumeToActivePlayer() {
 internal fun PlayerRuntimeController.fetchSkipIntervals(id: String?, season: Int?, episode: Int?) {
     if (!skipIntroEnabled) return
     val effectiveId = (id?.takeIf { it.isNotBlank() } ?: currentVideoId ?: contentId) ?: return
-    val cacheKey = "$effectiveId:${season ?: 0}:${episode ?: 0}"
+    val lookupId = normalizeSkipLookupId(effectiveId)
+    val cacheKey = "$lookupId:${season ?: 0}:${episode ?: 0}"
     if (skipIntroFetchedKey == cacheKey) return
     skipIntroFetchedKey = cacheKey
 
-    val matched = when {
-        tryFetchMalSkipIntervals(effectiveId, episode) -> return
-        tryFetchKitsuSkipIntervals(effectiveId, episode) -> return
-        tryFetchImdbSkipIntervals(effectiveId, season, episode) -> return
+    when {
+        tryFetchMalSkipIntervals(lookupId, episode) -> return
+        tryFetchKitsuSkipIntervals(lookupId, episode) -> return
+        tryFetchImdbSkipIntervals(lookupId, season, episode) -> return
         else -> return
     }
 }
+
+/** Stremio episode IDs may append :season:episode to an otherwise valid IMDb series ID. */
+internal fun normalizeSkipLookupId(id: String): String =
+    if (id.startsWith("tt", ignoreCase = true)) id.substringBefore(':') else id
 
 private fun PlayerRuntimeController.tryFetchMalSkipIntervals(
     effectiveId: String,

@@ -16,9 +16,14 @@ import com.sluggyard.tv.core.streamresolution.DebridProactiveCacheChecker
 import com.sluggyard.tv.core.streamresolution.resolveProactiveCacheStates
 import com.sluggyard.tv.core.streamresolution.selectProactiveCacheChecker
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.joinAll
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /** A progressive, per-addon stream result list for the rewritten Streams surface. */
 class RewriteStreamsDataSource(
@@ -31,12 +36,14 @@ class RewriteStreamsDataSource(
         id: String,
         configuredDebrid: DebridService?,
         maxConcurrent: Int = DEFAULT_ADDON_CONCURRENCY,
-    ): Flow<List<RewriteStreamGroup>> = flow {
+    ): Flow<List<RewriteStreamGroup>> = channelFlow {
         val addons = registrySnapshot().enabledAddons.filter { AddonResource.STREAM in it.manifest.resources }
         val groups = addons.map { addon ->
             RewriteStreamGroup(addon.manifest.id, addon.manifest.name, RewriteStreamGroupState.Loading)
         }.toMutableList()
-        emit(groups.toList())
+        send(groups.toList())
+        val groupsMutex = Mutex()
+        val cacheJobs = mutableListOf<Job>()
         val byTask = LinkedHashMap<String, ManagedAddon>()
         val tasks = addons.map { addon ->
             val taskKey = addon.manifest.id
@@ -71,6 +78,14 @@ class RewriteStreamsDataSource(
                             directUrl = stream.directUrl,
                             infoHash = stream.infoHash,
                             fileIndex = stream.fileIndex,
+                            metadataText = listOfNotNull(
+                                stream.title,
+                                stream.sourceName,
+                                stream.description,
+                                stream.filename,
+                            ).joinToString(" "),
+                            videoSizeBytes = stream.videoSizeBytes,
+                            seeders = stream.seeders,
                         )
                     }
                     if (streams.isEmpty()) RewriteStreamGroupState.Empty else RewriteStreamGroupState.Content(streams)
@@ -80,27 +95,37 @@ class RewriteStreamsDataSource(
                         ?: "This source could not load streams",
                 )
             }
-            groups[index] = groups[index].copy(state = state)
-            emit(groups.toList())
+            groupsMutex.withLock {
+                groups[index] = groups[index].copy(state = state)
+                send(groups.toList())
+            }
             val checker = selectProactiveCacheChecker(configuredDebrid, proactiveCacheCheckers)
             val content = state as? RewriteStreamGroupState.Content ?: return@collect
             val hashes = content.streams.mapNotNull { it.infoHash }.toSet()
             if (checker != null && hashes.isNotEmpty()) {
-                val states = try {
-                    resolveProactiveCacheStates(checker.service, hashes, checker.check(hashes))
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (_: Exception) {
-                    resolveProactiveCacheStates(checker.service, hashes, emptyMap())
+                // Cache probes are independent of addon fetches. Keep source discovery
+                // progressive instead of blocking the collector on one provider timeout.
+                cacheJobs += launch {
+                    val states = try {
+                        resolveProactiveCacheStates(checker.service, hashes, checker.check(hashes))
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        resolveProactiveCacheStates(checker.service, hashes, emptyMap())
+                    }
+                    groupsMutex.withLock {
+                        val current = groups[index].state as? RewriteStreamGroupState.Content ?: return@withLock
+                        groups[index] = groups[index].copy(
+                            state = RewriteStreamGroupState.Content(current.streams.map { candidate ->
+                                candidate.infoHash?.let { hash -> candidate.copy(cacheState = states[hash] ?: candidate.cacheState) } ?: candidate
+                            }),
+                        )
+                        send(groups.toList())
+                    }
                 }
-                groups[index] = groups[index].copy(
-                    state = RewriteStreamGroupState.Content(content.streams.map { candidate ->
-                        candidate.infoHash?.let { hash -> candidate.copy(cacheState = states[hash] ?: candidate.cacheState) } ?: candidate
-                    }),
-                )
-                emit(groups.toList())
             }
         }
+        cacheJobs.joinAll()
     }
 }
 

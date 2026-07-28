@@ -12,7 +12,7 @@ class RewritePlaybackTargetTest {
             RewriteDetailsEpisode("show:1:2", 2, "Two", null, null, watched = false),
         )
 
-        assertEquals(RewritePlaybackTarget("series", "show:1:2"), state.playbackTarget("series", "show"))
+        assertEquals(RewritePlaybackTarget("series", "show:1:2", 1, 2), state.playbackTarget("series", "show"))
     }
 
     @Test
@@ -22,7 +22,7 @@ class RewritePlaybackTargetTest {
             RewriteDetailsEpisode("show:1:2", 2, "Two", null, null, watched = true),
         )
 
-        assertEquals(RewritePlaybackTarget("series", "show:1:1"), state.playbackTarget("series", "show"))
+        assertEquals(RewritePlaybackTarget("series", "show:1:1", 1, 1), state.playbackTarget("series", "show"))
     }
 
     @Test
@@ -40,6 +40,36 @@ class RewritePlaybackTargetTest {
         )
 
         assertEquals(RewritePlaybackTarget("movie", "movie"), movie.playbackTarget("movie", "movie"))
+    }
+
+    @Test
+    fun `series play skips specials when a regular season exists`() {
+        val special = RewriteDetailsEpisode("show:0:1", 1, "Special", null, null, watched = false)
+        val regular = RewriteDetailsEpisode("show:1:1", 1, "Pilot", null, null, watched = false)
+        val state = seriesState(regular).copy(
+            seasons = listOf(
+                RewriteDetailsSeason(0, listOf(special), fullyWatched = false),
+                RewriteDetailsSeason(1, listOf(regular), fullyWatched = false),
+            ),
+            selectedSeason = 0,
+        )
+
+        assertEquals(RewritePlaybackTarget("series", "show:1:1", 1, 1), state.playbackTarget("series", "show"))
+    }
+
+    @Test
+    fun `series play uses the selected regular season`() {
+        val seasonOne = RewriteDetailsEpisode("show:1:1", 1, "Pilot", null, null, watched = false)
+        val seasonTwo = RewriteDetailsEpisode("show:2:1", 1, "Return", null, null, watched = false)
+        val state = seriesState(seasonOne).copy(
+            seasons = listOf(
+                RewriteDetailsSeason(1, listOf(seasonOne), fullyWatched = false),
+                RewriteDetailsSeason(2, listOf(seasonTwo), fullyWatched = false),
+            ),
+            selectedSeason = 2,
+        )
+
+        assertEquals(RewritePlaybackTarget("series", "show:2:1", 2, 1), state.playbackTarget("series", "show"))
     }
 
     private fun seriesState(vararg episodes: RewriteDetailsEpisode) = RewriteDetailsState(

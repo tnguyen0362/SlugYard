@@ -10,6 +10,7 @@ data class Subtitle(
     val lang: String,
     val addonName: String,
     val addonLogo: String?,
+    val format: String? = null,
 ) {
     fun getDisplayLanguage(): String = languageCodeToName(lang)
 

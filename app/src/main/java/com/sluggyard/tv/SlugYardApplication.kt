@@ -17,6 +17,7 @@ import com.sluggyard.tv.core.sync.SupabaseSyncScheduler
 
 import okio.Path.Companion.toOkioPath
 import dagger.hilt.android.HiltAndroidApp
+import io.sentry.android.core.SentryAndroid
 import okhttp3.Cookie
 import okhttp3.CookieJar
 import okhttp3.HttpUrl
@@ -28,7 +29,31 @@ class SlugYardApplication : Application(), SingletonImageLoader.Factory {
 
     override fun onCreate() {
         super.onCreate()
+        initSentry()
         SupabaseSyncScheduler.schedulePeriodic(this)
+    }
+
+    /**
+     * Crash/ANR reporting. The Sentry SDK, gradle plugin, and proguard-mapping upload were fully
+     * retained through the rewrite (see build.gradle.kts) but nothing ever called
+     * SentryAndroid.init() -- `io.sentry.auto-init` is explicitly disabled in the manifest, so
+     * without this call crash reporting was silently a no-op the whole time. Scrubs request/user
+     * PII before send, matching the safe-context guarantee described in strings.xml's Sentry copy.
+     */
+    private fun initSentry() {
+        val dsn = BuildConfig.SENTRY_DSN.takeIf { it.isNotBlank() } ?: return
+        SentryAndroid.init(this) { options ->
+            options.dsn = dsn
+            options.environment = BuildConfig.SENTRY_ENVIRONMENT
+            options.release = "${BuildConfig.APPLICATION_ID}@${BuildConfig.VERSION_NAME}+${BuildConfig.VERSION_CODE}"
+            options.isAttachScreenshot = false
+            options.isAttachViewHierarchy = false
+            options.beforeSend = io.sentry.SentryOptions.BeforeSendCallback { event, _ ->
+                event.request = null
+                event.setUser(null)
+                event
+            }
+        }
     }
 
     companion object {
@@ -37,16 +62,21 @@ class SlugYardApplication : Application(), SingletonImageLoader.Factory {
             private val store = ConcurrentHashMap<String, MutableList<Cookie>>()
 
             override fun loadForRequest(url: HttpUrl): List<Cookie> {
-                return store[url.host]?.filter { cookie ->
-                    cookie.expiresAt > System.currentTimeMillis()
-                } ?: emptyList()
+                val hostCookies = store[url.host] ?: return emptyList()
+                synchronized(hostCookies) {
+                    return hostCookies.filter { cookie ->
+                        cookie.expiresAt > System.currentTimeMillis()
+                    }
+                }
             }
 
             override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
                 val hostCookies = store.getOrPut(url.host) { mutableListOf() }
-                cookies.forEach { newCookie ->
-                    hostCookies.removeAll { it.name == newCookie.name }
-                    hostCookies.add(newCookie)
+                synchronized(hostCookies) {
+                    cookies.forEach { newCookie ->
+                        hostCookies.removeAll { it.name == newCookie.name }
+                        hostCookies.add(newCookie)
+                    }
                 }
             }
         }

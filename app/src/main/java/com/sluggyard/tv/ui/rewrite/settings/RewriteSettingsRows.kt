@@ -1,6 +1,7 @@
 package com.sluggyard.tv.ui.rewrite.settings
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
@@ -17,6 +18,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -24,6 +26,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -38,8 +41,7 @@ internal fun RewriteSettingsGroup(title: String, content: @Composable () -> Unit
     }
 }
 
-/** Flat hairline-divider row shell shared by every settings row -- accent bar on the
- * leading edge when focused instead of a filled card, matching the reference's flat list. */
+/** Flat row shell shared by settings controls. Focus uses surface contrast, not a decorative bar. */
 @Composable
 private fun RewriteSettingsRowShell(
     onClick: (() -> Unit)?,
@@ -53,6 +55,7 @@ private fun RewriteSettingsRowShell(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(if (focused) SlugYardPalette.Surface else Color.Transparent)
+                .then(if (focused) Modifier.border(2.dp, SlugYardPalette.FocusRing, RoundedCornerShape(8.dp)) else Modifier)
                 .then(
                     if (onClick != null) {
                         Modifier.clickable(interactionSource = interaction, indication = null, onClick = onClick)
@@ -60,13 +63,6 @@ private fun RewriteSettingsRowShell(
                 )
                 .padding(horizontal = 4.dp, vertical = 18.dp),
         ) {
-            Box(
-                modifier = Modifier
-                    .width(3.dp)
-                    .height(28.dp)
-                    .background(if (focused) SlugYardPalette.Accent else Color.Transparent),
-            )
-            Spacer(Modifier.width(16.dp))
             content()
         }
         Box(
@@ -99,7 +95,11 @@ internal fun RewriteToggleRow(
             )
         }
         Spacer(Modifier.width(16.dp))
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            modifier = Modifier.focusProperties { canFocus = false },
+        )
     }
 }
 
@@ -127,7 +127,12 @@ internal fun RewriteValueRow(title: String, value: String) {
 }
 
 @Composable
-internal fun RewriteActionRow(title: String, description: String, onClick: () -> Unit) {
+internal fun RewriteActionRow(
+    title: String,
+    description: String,
+    actionLabel: String = "Open",
+    onClick: () -> Unit,
+) {
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
     RewriteSettingsRowShell(onClick = onClick, focused = focused, interaction = interaction) {
@@ -142,7 +147,7 @@ internal fun RewriteActionRow(title: String, description: String, onClick: () ->
             )
         }
         Spacer(Modifier.width(16.dp))
-        Text("Open", style = MaterialTheme.typography.labelLarge, color = SlugYardPalette.OnCanvasMuted)
+        Text(actionLabel, style = MaterialTheme.typography.labelLarge, color = SlugYardPalette.OnCanvasMuted)
     }
 }
 

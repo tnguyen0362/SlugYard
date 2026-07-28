@@ -2,8 +2,6 @@ package com.sluggyard.tv.ui.rewrite.settings
 
 import com.sluggyard.tv.ui.rewrite.data.RewriteProfileState
 
-fun shouldShowPosterLabel(showLabels: Boolean, focused: Boolean): Boolean = showLabels || focused
-
 internal fun effectiveProfileId(
     activeProfileId: String,
     rememberLastProfile: Boolean,

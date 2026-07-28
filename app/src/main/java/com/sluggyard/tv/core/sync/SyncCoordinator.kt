@@ -78,6 +78,20 @@ interface LocalSyncStore {
     suspend fun acknowledge(mutationId: String)
 }
 
+/**
+ * Adapter for Rewrite-owned progress storage. The main sync snapshot remains the durable outbox
+ * source, while this bridge keeps the Rewrite presentation state in step with merged records.
+ */
+interface RewriteProgressSyncBridge {
+    suspend fun snapshot(): List<CloudWatchProgress>
+
+    suspend fun apply(progress: List<CloudWatchProgress>)
+
+    suspend fun record(progress: CloudWatchProgress)
+
+    suspend fun remove(profileId: Int, progressKey: String, changedAtEpochMs: Long)
+}
+
 interface RetryAwareLocalSyncStore {
     suspend fun recordAttempt(mutationId: String, attempt: Int, nextAttemptAtEpochMs: Long)
 }
@@ -93,6 +107,7 @@ class SyncCoordinator(
     private val nowEpochMs: () -> Long = { System.currentTimeMillis() },
     private val wait: suspend (Long) -> Unit = { delay(it) },
     private val maxAttempts: Int = 3,
+    private val rewriteProgress: RewriteProgressSyncBridge? = null,
 ) {
     private val synchronizeMutex = Mutex()
 
@@ -110,9 +125,20 @@ class SyncCoordinator(
             is SyncResult.Failure -> return result
             SyncResult.SessionExpired -> return SyncResult.SessionExpired
         }
-        val localSnapshot = local.snapshot()
+        val localSnapshot = local.snapshot().let { snapshot ->
+            rewriteProgress?.let { bridge ->
+                snapshot.copy(
+                    progress = SupabaseMergePolicy.mergeProgress(
+                        snapshot.progress,
+                        bridge.snapshot(),
+                    ),
+                )
+            } ?: snapshot
+        }
         val merged = merge(localSnapshot, remoteSnapshot)
+            .withoutPendingDeletes(local.pending())
         local.apply(merged.toRemoteSnapshot())
+        rewriteProgress?.apply(merged.progress)
 
         var pushed = 0
         val pending = local.pending()
@@ -191,6 +217,31 @@ private fun merge(local: LocalSnapshot, remote: RemoteSnapshot): LocalSnapshot =
     ),
 )
 
+/** Prevents a stale remote row from resurrecting a local delete before its outbox is pushed. */
+private fun LocalSnapshot.withoutPendingDeletes(pending: List<SyncMutation>): LocalSnapshot =
+    pending.filterIsInstance<SyncMutation.Delete>().fold(this) { snapshot, mutation ->
+        val delete = mutation.value
+        fun matches(profileId: Int, recordKey: String): Boolean =
+            (delete.profileId == null || delete.profileId == profileId) && delete.recordKey == recordKey
+
+        when (delete.domain) {
+            SyncDomain.PROFILES -> copy(profiles = profiles.filterNot { it.profileId.toString() == delete.recordKey })
+            SyncDomain.ADDONS -> copy(addons = addons.filterNot { matches(it.profileId, it.url) })
+            SyncDomain.PLUGINS -> copy(plugins = plugins.filterNot { matches(it.profileId, it.url) })
+            SyncDomain.LIBRARY -> copy(library = library.filterNot { matches(it.profileId, it.contentId) })
+            SyncDomain.WATCH_PROGRESS -> copy(progress = progress.filterNot { matches(it.profileId, it.progressKey) })
+            SyncDomain.WATCHED_ITEMS -> copy(watchedItems = watchedItems.filterNot { matches(it.profileId, it.contentId) })
+            SyncDomain.COLLECTIONS -> copy(collections = collections.filterNot { it.profileId.toString() == delete.recordKey })
+            SyncDomain.PROFILE_SETTINGS -> copy(profileSettings = profileSettings.filterNot { it.profileId.toString() == delete.recordKey })
+            SyncDomain.HOME_CATALOG_SETTINGS -> copy(homeCatalogSettings = homeCatalogSettings.filterNot { it.profileId.toString() == delete.recordKey })
+            SyncDomain.PROVIDER_CREDENTIALS -> copy(
+                providerCredentials = providerCredentials.filterNot {
+                    (delete.profileId == null || delete.profileId == it.profileId) && delete.recordKey == it.providerId
+                },
+            )
+        }
+    }
+
 private fun LocalSnapshot.toRemoteSnapshot() = RemoteSnapshot(
     profiles,
     library,
@@ -259,14 +310,11 @@ class DataStoreLocalSyncStore(
     override suspend fun record(mutation: SyncMutation) = mutex.withLock {
         updateState { state ->
             val updatedSnapshot = state.snapshot.withLocalMutation(mutation)
-            if (state.outbox.any { it.id == mutation.stableId() }) {
-                state.copy(snapshot = updatedSnapshot)
-            } else {
-                state.copy(
-                    snapshot = updatedSnapshot,
-                    outbox = state.outbox + PendingEntry(mutation.stableId(), mutation, 0, 0L),
-                )
-            }
+            val retainedOutbox = state.outbox.filterNot { it.mutation.hasSameRecord(mutation) }
+            state.copy(
+                snapshot = updatedSnapshot,
+                outbox = retainedOutbox + PendingEntry(mutation.stableId(), mutation, 0, 0L),
+            )
         }
     }
 
@@ -347,6 +395,23 @@ private data class PendingEntry(
     val attempts: Int,
     val nextAttemptAtEpochMs: Long,
 )
+
+private fun SyncMutation.hasSameRecord(other: SyncMutation): Boolean =
+    logicalSyncIdentity() != null && logicalSyncIdentity() == other.logicalSyncIdentity()
+
+private fun SyncMutation.logicalSyncIdentity(): Triple<SyncDomain, Int?, String>? = when (this) {
+    is SyncMutation.Profile -> Triple(SyncDomain.PROFILES, value.profileId, value.profileId.toString())
+    is SyncMutation.Addon -> Triple(SyncDomain.ADDONS, value.profileId, value.url)
+    is SyncMutation.Plugin -> Triple(SyncDomain.PLUGINS, value.profileId, value.url)
+    is SyncMutation.LibraryItem -> Triple(SyncDomain.LIBRARY, value.profileId, value.contentId)
+    is SyncMutation.Progress -> Triple(SyncDomain.WATCH_PROGRESS, value.profileId, value.progressKey)
+    is SyncMutation.WatchedItem -> Triple(SyncDomain.WATCHED_ITEMS, value.profileId, value.contentId)
+    is SyncMutation.Collection -> Triple(SyncDomain.COLLECTIONS, value.profileId, value.profileId.toString())
+    is SyncMutation.ProfileSettings -> Triple(SyncDomain.PROFILE_SETTINGS, value.profileId, value.profileId.toString())
+    is SyncMutation.HomeCatalogSettings -> Triple(SyncDomain.HOME_CATALOG_SETTINGS, value.profileId, value.profileId.toString())
+    is SyncMutation.ProviderCredential -> Triple(SyncDomain.PROVIDER_CREDENTIALS, value.profileId, value.providerId)
+    is SyncMutation.Delete -> Triple(value.domain, value.profileId, value.recordKey)
+}
 
 private data class StoredState(
     val snapshot: LocalSnapshot,

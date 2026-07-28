@@ -1,9 +1,11 @@
 package com.sluggyard.tv.ui.rewrite.home
 
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.BringIntoViewSpec
 import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
@@ -16,15 +18,18 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.runtime.MutableState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
@@ -53,6 +58,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -62,16 +68,15 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import coil3.compose.AsyncImage
 import com.sluggyard.tv.ui.design.SlugYardPalette
 import com.sluggyard.tv.ui.design.SlugYardTvMetrics
 import com.sluggyard.tv.ui.rewrite.requestFocusReliably
-import com.sluggyard.tv.ui.rewrite.settings.shouldShowPosterLabel
-import com.sluggyard.tv.ui.util.LocalFastHorizontalNavigationEnabled
-import com.sluggyard.tv.ui.util.dpadRepeatThrottle
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 data class RewriteHomePoster(
@@ -81,6 +86,10 @@ data class RewriteHomePoster(
     val progressFraction: Float? = null,
     val addonId: String? = null,
     val contentType: String? = null,
+    // Present only for Continue Watching tiles resumed from a saved episode checkpoint; carried
+    // through to Streams(...) so resuming an episode doesn't lose season/episode identity.
+    val season: Int? = null,
+    val episode: Int? = null,
 )
 
 data class RewriteHomeRow(
@@ -106,16 +115,21 @@ data class RewriteHero(
 
 data class RewriteHomeState(
     val hero: RewriteHero? = null,
+    val heroCandidates: List<RewriteHero> = emptyList(),
     val rows: List<RewriteHomeRow> = emptyList(),
+    val isLoading: Boolean = false,
+    val statusMessage: String? = null,
 )
 
 @OptIn(ExperimentalFoundationApi::class)
 private val RewriteHomeBringIntoViewSpec = object : BringIntoViewSpec {
+    override val scrollAnimationSpec: AnimationSpec<Float> = tween(durationMillis = 140)
+
     override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
         val trailingEdge = offset + size
         return when {
-            trailingEdge <= 0f -> offset
-            offset >= containerSize -> trailingEdge - containerSize
+            offset < 40f -> offset - 40f
+            trailingEdge > containerSize - 40f -> trailingEdge - containerSize + 40f
             else -> 0f
         }
     }
@@ -135,74 +149,143 @@ fun RewriteHomeScreen(
     onPlay: (RewriteHero) -> Unit,
     onDetails: (RewriteHero) -> Unit,
     onPosterSelected: (RewriteHomePoster) -> Unit,
-    showPosterLabels: Boolean = true,
+    onRetry: () -> Unit,
     smoothFocusMovement: Boolean = true,
-    fastHorizontalNavigation: Boolean = false,
     // Lets the root nav header's DPAD_DOWN focus search land directly on the hero's Play button
     // instead of going nowhere. See RewriteAppShell's homeContentFocusRequester for why this
     // exists.
     contentFocusRequester: FocusRequester? = null,
+    headerFocusRequester: FocusRequester? = null,
     modifier: Modifier = Modifier,
+    // Persisted by the caller (outside this composable's own lifecycle) so returning from
+    // Details/Streams doesn't reset which hero was showing or scroll every row back to the
+    // start -- this composable is fully disposed and recomposed fresh on Home<->Details nav
+    // since RewriteAppShell's `when(destination)` only calls it while destination == Home.
+    rowScrollStates: MutableMap<String, ScrollState> = remember { mutableMapOf() },
+    heroIndexState: MutableState<Int> = remember { mutableStateOf(0) },
+    lastHeroKeyState: MutableState<String?> = remember { mutableStateOf(null) },
 ) {
-    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
-    // One FocusRequester per row, attached to that row's first (leftmost) poster card, so DPAD
-    // up/down between rows is an explicit hop instead of relying on Compose's geometric focus
-    // search. That search only considers currently-composed nodes, and LazyColumn decomposes
-    // rows once they scroll far enough out of the viewport -- so after scrolling down to row 2+,
-    // pressing UP had nothing to land on in row 1 (it was no longer composed) and Compose's
-    // search kept walking up the tree until it found the hero's Play button, skipping every row
-    // in between. Explicit neighbors fix this the same way the header-to-hero DOWN bug was fixed.
-    val rowEntryFocusRequesters = remember(state.rows.map { it.id }) {
+    val rowFocusRequesters = remember(state.rows.map { it.id }) {
         List(state.rows.size) { FocusRequester() }
     }
-    // Shared with dpadRepeatThrottle() below: whichever hero/row item currently has focus
-    // registers its up/down FocusRequester here (see DpadVerticalNeighbors' class doc for why
-    // Compose's default focus search can't be trusted to route between rows on its own).
-    val dpadVerticalNeighbors = remember { com.sluggyard.tv.ui.util.DpadVerticalNeighbors() }
-    CompositionLocalProvider(
-        LocalFastHorizontalNavigationEnabled provides fastHorizontalNavigation,
-        com.sluggyard.tv.ui.util.LocalDpadVerticalNeighbors provides dpadVerticalNeighbors,
-        // NOTE: the custom RewriteHomeBringIntoViewSpec is intentionally NOT provided here at the
-        // top level anymore. It only suppresses re-scrolling for the hero's internal Play/More
-        // info focus changes (scoped locally inside RewriteHeroPanel below) -- applying it to the
-        // whole LazyColumn also broke vertical scrolling for the poster rows, since its
-        // calculateScrollDistance only scrolls when a focused item is *fully* outside the
-        // viewport, ignoring rows that are only partially clipped at the screen edge. That left
-        // the last/second-to-last row stuck: pressing DOWN further did nothing because Compose
-        // considered it "already in view." The rest of this LazyColumn now uses Compose's default
-        // BringIntoViewSpec, which always fully reveals the focused item on a single press.
-    ) {
-        LazyColumn(
-            state = listState,
+    val scrollState = rememberScrollState()
+    val scrollScope = rememberCoroutineScope()
+    val heroKey = state.heroCandidates.joinToString(separator = "|") { it.id }
+    var heroIndex by heroIndexState
+    LaunchedEffect(heroKey) {
+        // Only reset to the first hero when the candidate set actually changed identity (a
+        // fresh catalog load) -- not merely because this composable remounted after returning
+        // from Details, which would otherwise always snap back to index 0.
+        if (lastHeroKeyState.value != heroKey) {
+            heroIndex = 0
+            lastHeroKeyState.value = heroKey
+        }
+        if (state.heroCandidates.size > 1) {
+            while (true) {
+                delay(11_000)
+                heroIndex = (heroIndex + 1) % state.heroCandidates.size
+            }
+        }
+    }
+    LaunchedEffect(contentFocusRequester, state.hero != null) {
+        if (state.hero != null) scrollState.scrollTo(0)
+        contentFocusRequester?.requestFocusReliably(retries = 8)
+    }
+    if (state.hero == null && contentFocusRequester != null) {
+        LaunchedEffect(contentFocusRequester, state.rows.map { it.id }, state.statusMessage) {
+            contentFocusRequester.requestFocusReliably(retries = 8)
+        }
+    }
+    val visibleHero = state.heroCandidates.getOrNull(heroIndex) ?: state.hero
+    CompositionLocalProvider(LocalBringIntoViewSpec provides RewriteHomeBringIntoViewSpec) {
+        Column(
             modifier = modifier
                 .fillMaxSize()
                 .background(SlugYardPalette.Canvas)
-                .dpadRepeatThrottle(),
-            contentPadding = PaddingValues(bottom = 56.dp),
-            verticalArrangement = Arrangement.spacedBy(48.dp),
+                .verticalScroll(scrollState),
+            verticalArrangement = Arrangement.spacedBy(40.dp),
         ) {
-            state.hero?.let { hero ->
-                item(key = "hero:${hero.id}") {
-                    RewriteHeroPanel(
-                        hero = hero,
-                        listState = listState,
-                        onPlay = { onPlay(hero) },
-                        onDetails = { onDetails(hero) },
-                        contentFocusRequester = contentFocusRequester,
-                        downNeighbor = rowEntryFocusRequesters.getOrNull(0),
-                    )
-                }
+            if (visibleHero == null && state.rows.isEmpty()) {
+                RewriteHomeStatusPanel(
+                    isLoading = state.isLoading,
+                    message = state.statusMessage,
+                    onRetry = onRetry,
+                    focusRequester = contentFocusRequester,
+                )
             }
-            itemsIndexed(state.rows, key = { _, row -> row.id }) { index, row ->
+            visibleHero?.let { hero ->
+                RewriteHeroPanel(
+                    hero = hero,
+                    onPlay = { onPlay(hero) },
+                    onDetails = { onDetails(hero) },
+                    contentFocusRequester = contentFocusRequester,
+                    headerFocusRequester = headerFocusRequester,
+                    downFocusRequester = rowFocusRequesters.firstOrNull(),
+                    onHeroFocused = {
+                        scrollScope.launch { scrollState.scrollTo(0) }
+                    },
+                )
+            }
+            state.rows.forEachIndexed { index, row ->
                 RewritePosterRow(
                     row = row,
-                    showPosterLabels = showPosterLabels,
+                    scrollState = rowScrollStates.getOrPut(row.id) { ScrollState(0) },
                     smoothFocusMovement = smoothFocusMovement,
                     onPosterSelected = onPosterSelected,
-                    entryFocusRequester = rowEntryFocusRequesters[index],
-                    upNeighbor = if (index == 0) contentFocusRequester else rowEntryFocusRequesters[index - 1],
-                    downNeighbor = rowEntryFocusRequesters.getOrNull(index + 1),
+                    entryFocusRequester = when {
+                        index == 0 && visibleHero == null -> contentFocusRequester ?: rowFocusRequesters[index]
+                        else -> rowFocusRequesters[index]
+                    },
+                    upFocusRequester = if (index == 0) {
+                        if (visibleHero == null) null else contentFocusRequester
+                    } else {
+                        rowFocusRequesters[index - 1]
+                    },
+                    downFocusRequester = rowFocusRequesters.getOrNull(index + 1),
                 )
+            }
+            Spacer(Modifier.height(56.dp))
+        }
+    }
+}
+
+@Composable
+private fun RewriteHomeStatusPanel(
+    isLoading: Boolean,
+    message: String?,
+    onRetry: () -> Unit,
+    focusRequester: FocusRequester?,
+) {
+    val panelModifier = Modifier
+        .fillMaxWidth()
+        .height(220.dp)
+        .padding(horizontal = SlugYardTvMetrics.ScreenHorizontalInset)
+    if (isLoading) {
+        Box(
+            modifier = panelModifier
+                .let { base -> if (focusRequester != null) base.focusRequester(focusRequester) else base }
+                .focusable()
+                .background(SlugYardPalette.Surface),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("Loading home catalogs…", style = MaterialTheme.typography.bodyLarge, color = SlugYardPalette.OnCanvasMuted)
+        }
+    } else {
+        Column(
+            modifier = panelModifier.background(SlugYardPalette.Surface).padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+            horizontalAlignment = Alignment.Start,
+        ) {
+            Text(
+                message ?: "No home content is available yet.",
+                style = MaterialTheme.typography.bodyLarge,
+                color = SlugYardPalette.OnCanvasMuted,
+            )
+            Button(
+                onClick = onRetry,
+                modifier = if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier,
+            ) {
+                Text("Retry")
             }
         }
     }
@@ -212,38 +295,15 @@ fun RewriteHomeScreen(
 @Composable
 private fun RewriteHeroPanel(
     hero: RewriteHero,
-    listState: androidx.compose.foundation.lazy.LazyListState,
     onPlay: () -> Unit,
     onDetails: () -> Unit,
     contentFocusRequester: FocusRequester? = null,
-    downNeighbor: FocusRequester? = null,
+    headerFocusRequester: FocusRequester? = null,
+    downFocusRequester: FocusRequester? = null,
+    onHeroFocused: () -> Unit = {},
 ) {
-    val dpadVerticalNeighbors = com.sluggyard.tv.ui.util.LocalDpadVerticalNeighbors.current
-    val playFocusRequester = remember(hero.id) { FocusRequester() }
-    var isPlayFocused by remember { mutableStateOf(false) }
-    // Reactive on (isPlayFocused, downNeighbor) rather than a one-shot onFocusChanged write:
-    // downNeighbor starts null (catalog rows haven't loaded yet when the hero first gains
-    // focus) and only becomes non-null once RewriteHomeState.rows arrives asynchronously. A
-    // plain onFocusChanged edge-trigger would capture that initial null in its closure and
-    // never update once rows populate, since the Play button doesn't lose/regain focus in
-    // between -- leaving DOWN from the hero with a stale null neighbor and falling back to
-    // Compose's unreliable default focus search.
-    LaunchedEffect(isPlayFocused, downNeighbor) {
-        if (isPlayFocused) {
-            dpadVerticalNeighbors.up = null
-            dpadVerticalNeighbors.down = downNeighbor
-        }
-    }
-    LaunchedEffect(hero.id) {
-        listState.scrollToItem(0)
-        playFocusRequester.requestFocusReliably()
-        // requestFocus() triggers Compose's automatic scroll-focused-element-into-view behavior,
-        // which animates over several frames and otherwise wins the race against the line above,
-        // leaving the list scrolled down enough to push the hero title under the floating header.
-        // Re-assert top-of-list once that animation has had time to run its course.
-        delay(300)
-        listState.scrollToItem(0)
-    }
+    val playFocusRequester = remember { FocusRequester() }
+    val initialFocusRequester = contentFocusRequester ?: playFocusRequester
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -252,22 +312,59 @@ private fun RewriteHeroPanel(
             // Alignment.BottomStart child to its parent's bounds by default, so an undersized box
             // here renders the title off the top of the screen) while still leaving the Play
             // button on-screen without needing a scroll on initial load.
-            .height(520.dp)
+            .height(420.dp)
             .background(SlugYardPalette.Surface),
     ) {
-        AsyncImage(
-            model = hero.backdropUrl,
-            contentDescription = null,
-            modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.Crop,
-            alpha = 0.64f,
-        )
+        hero.backdropUrl?.takeIf(String::isNotBlank)?.let { backdropUrl ->
+            AsyncImage(
+                model = backdropUrl,
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+                alpha = 0.54f,
+            )
+        } ?: hero.posterUrl?.let { posterUrl ->
+            AsyncImage(
+                model = posterUrl,
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+                alpha = 0.20f,
+            )
+            AsyncImage(
+                model = posterUrl,
+                contentDescription = null,
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .fillMaxHeight()
+                    .width(420.dp),
+                contentScale = ContentScale.Fit,
+                alpha = 0.30f,
+            )
+        }
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(
                     androidx.compose.ui.graphics.Brush.horizontalGradient(
                         listOf(SlugYardPalette.Canvas, Color.Transparent, Color.Transparent),
+                    ),
+                ),
+        )
+        // A separate bottom scrim keeps the title and actions readable across bright artwork.
+        // This borrows the legibility principle from the old hero without copying its layout or
+        // gradient stops into the rewrite.
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    androidx.compose.ui.graphics.Brush.verticalGradient(
+                        colorStops = arrayOf(
+                            0.40f to Color.Transparent,
+                            0.62f to SlugYardPalette.Canvas.copy(alpha = 0.18f),
+                            0.84f to SlugYardPalette.Canvas.copy(alpha = 0.72f),
+                            1.0f to SlugYardPalette.Canvas,
+                        ),
                     ),
                 ),
         )
@@ -283,8 +380,8 @@ private fun RewriteHeroPanel(
         ) {
             Text(
                 hero.title,
-                style = MaterialTheme.typography.displayLarge,
-                maxLines = 2,
+                style = MaterialTheme.typography.displayMedium,
+                maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Spacer(Modifier.height(10.dp))
@@ -294,18 +391,17 @@ private fun RewriteHeroPanel(
                     Text(it, style = MaterialTheme.typography.titleMedium, color = SlugYardPalette.OnCanvasMuted)
                 }
             }
-            Spacer(Modifier.height(12.dp))
-            Text(
-                hero.summary,
-                style = MaterialTheme.typography.bodyLarge,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
+            if (hero.summary.isNotBlank()) {
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    hero.summary,
+                    style = MaterialTheme.typography.bodyLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
             Spacer(Modifier.height(22.dp))
-            // Scoped locally: only the hero's Play/More info buttons should suppress the
-            // list's bring-into-view scroll when focus moves between them (they're already
-            // fully visible). See the comment on RewriteHomeScreen's CompositionLocalProvider
-            // for why this can no longer be provided for the whole LazyColumn.
+            // Keep button-to-button movement inside the hero from moving the catalog viewport.
             CompositionLocalProvider(LocalBringIntoViewSpec provides RewriteHomeBringIntoViewSpec) {
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     HeroActionButton(
@@ -314,11 +410,24 @@ private fun RewriteHeroPanel(
                         onPlay,
                         primary = true,
                         modifier = Modifier
-                            .focusRequester(playFocusRequester)
-                            .let { if (contentFocusRequester != null) it.focusRequester(contentFocusRequester) else it }
-                            .onFocusChanged { state -> isPlayFocused = state.isFocused },
+                        .focusRequester(initialFocusRequester)
+                        .then(
+                            headerFocusRequester?.let { requester ->
+                                Modifier.focusProperties { up = requester }
+                            } ?: Modifier,
+                        )
+                            .onFocusChanged { if (it.isFocused) onHeroFocused() }
+                            .focusProperties { downFocusRequester?.let { down = it } },
                     )
-                    HeroActionButton("More info", Icons.Default.Info, onDetails, primary = false)
+                    HeroActionButton(
+                        "View Details",
+                        Icons.Default.Info,
+                        onDetails,
+                        primary = false,
+                        modifier = Modifier
+                            .onFocusChanged { if (it.isFocused) onHeroFocused() }
+                            .focusProperties { downFocusRequester?.let { down = it } },
+                    )
                 }
             }
         }
@@ -337,7 +446,7 @@ private fun HeroBadge(label: String) {
             label.uppercase(),
             style = MaterialTheme.typography.labelMedium,
             color = Color(0xFF181818),
-            fontWeight = FontWeight.Bold,
+            fontWeight = FontWeight.Medium,
             letterSpacing = 0.6.sp,
         )
     }
@@ -377,12 +486,12 @@ private fun HeroActionButton(
 @Composable
 private fun RewritePosterRow(
     row: RewriteHomeRow,
-    showPosterLabels: Boolean,
     smoothFocusMovement: Boolean,
     onPosterSelected: (RewriteHomePoster) -> Unit,
     entryFocusRequester: FocusRequester? = null,
-    upNeighbor: FocusRequester? = null,
-    downNeighbor: FocusRequester? = null,
+    upFocusRequester: FocusRequester? = null,
+    downFocusRequester: FocusRequester? = null,
+    scrollState: ScrollState = rememberScrollState(),
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
         Text(
@@ -390,21 +499,22 @@ private fun RewritePosterRow(
             modifier = Modifier.padding(horizontal = SlugYardTvMetrics.ScreenHorizontalInset),
             style = MaterialTheme.typography.titleLarge,
         )
-        LazyRow(
-            contentPadding = PaddingValues(horizontal = SlugYardTvMetrics.ScreenHorizontalInset),
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(scrollState)
+                .padding(horizontal = SlugYardTvMetrics.ScreenHorizontalInset),
             horizontalArrangement = Arrangement.spacedBy(SlugYardTvMetrics.RowGap),
         ) {
-            itemsIndexed(row.posters, key = { _, poster -> poster.id }) { index, poster ->
+            row.posters.forEachIndexed { index, poster ->
                 RewritePosterCard(
                     poster = poster,
-                    showLabel = showPosterLabels,
                     smoothFocusMovement = smoothFocusMovement,
                     onClick = { onPosterSelected(poster) },
-                    // Only the row's leftmost card is a cross-row DPAD up/down anchor -- that's
-                    // the card that ends up focused after horizontal scroll resets on row entry.
+                    // Each row's first card is the stable vertical focus anchor.
                     focusRequester = if (index == 0) entryFocusRequester else null,
-                    upNeighbor = if (index == 0) upNeighbor else null,
-                    downNeighbor = if (index == 0) downNeighbor else null,
+                    upFocusRequester = if (index == 0) upFocusRequester else null,
+                    downFocusRequester = if (index == 0) downFocusRequester else null,
                 )
             }
         }
@@ -414,18 +524,19 @@ private fun RewritePosterRow(
 @Composable
 internal fun RewritePosterCard(
     poster: RewriteHomePoster,
-    showLabel: Boolean,
     smoothFocusMovement: Boolean,
     onClick: () -> Unit,
     focusRequester: FocusRequester? = null,
-    upNeighbor: FocusRequester? = null,
-    downNeighbor: FocusRequester? = null,
+    upFocusRequester: FocusRequester? = null,
+    downFocusRequester: FocusRequester? = null,
+    cardWidth: Dp = 176.dp,
+    cardHeight: Dp = 264.dp,
 ) {
     val interactions = remember { MutableInteractionSource() }
     val focused by interactions.collectIsFocusedAsState()
     val bringIntoViewRequester = remember { BringIntoViewRequester() }
     val scope = rememberCoroutineScope()
-    val dpadVerticalNeighbors = com.sluggyard.tv.ui.util.LocalDpadVerticalNeighbors.current
+    var bringIntoViewJob by remember { mutableStateOf<Job?>(null) }
     val scale by animateFloatAsState(
         targetValue = if (focused) SlugYardTvMetrics.RowFocusScale else 1f,
         animationSpec = tween(220),
@@ -436,39 +547,35 @@ internal fun RewritePosterCard(
         Modifier
             .bringIntoViewRequester(bringIntoViewRequester)
             .onFocusChanged { state ->
-                if (state.isFocused) scope.launch { bringIntoViewRequester.bringIntoView() }
+                bringIntoViewJob?.cancel()
+                if (state.isFocused) {
+                    bringIntoViewJob = scope.launch {
+                        delay(140)
+                        bringIntoViewRequester.bringIntoView()
+                    }
+                }
             }
-    } else {
-        Modifier
-    }
-
-    // Row-to-row DPAD up/down is routed centrally by dpadRepeatThrottle() (see
-    // DpadThrottleModifier.kt) via LocalDpadVerticalNeighbors, not by intercepting key events
-    // on this card directly. A per-card onPreviewKeyEvent was tried first and proved
-    // unreliable: dpadRepeatThrottle sits on an ancestor LazyColumn and its own
-    // onPreviewKeyEvent fires first (preview events travel root -> leaf), so it was winning
-    // the race and jumping straight to the hero via Compose's default 2D focus search before
-    // this card's handler ever ran. Registering this card's neighbors here instead lets the
-    // ancestor prefer them. Keyed on (focused, upNeighbor, downNeighbor) rather than a
-    // one-shot onFocusChanged write, since neighbor identity can change (e.g. rows list
-    // mutating) while this card stays focused across a recomposition.
-    LaunchedEffect(focused, upNeighbor, downNeighbor) {
-        if (focused) {
-            dpadVerticalNeighbors.up = upNeighbor
-            dpadVerticalNeighbors.down = downNeighbor
-        }
-    }
+    } else Modifier
 
     Box(
         modifier = focusMovementModifier
             .let { if (focusRequester != null) it.focusRequester(focusRequester) else it }
-            .size(width = 176.dp, height = 264.dp)
+            .focusProperties {
+                upFocusRequester?.let { up = it }
+                downFocusRequester?.let { down = it }
+            }
+            .size(width = cardWidth, height = cardHeight)
             .zIndex(if (focused) 1f else 0f)
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
                 shadowElevation = if (focused) 18f else 0f
             }
+            .then(
+                if (focused) {
+                    Modifier.border(3.dp, SlugYardPalette.FocusRing, RoundedCornerShape(SlugYardTvMetrics.CardCornerRadius))
+                } else Modifier,
+            )
             .clip(RoundedCornerShape(SlugYardTvMetrics.CardCornerRadius))
             .background(SlugYardPalette.SurfaceElevated)
             .semantics {
@@ -508,18 +615,6 @@ internal fun RewritePosterCard(
                     .fillMaxWidth(progress.coerceIn(0f, 1f))
                     .height(4.dp)
                     .background(SlugYardPalette.Accent),
-            )
-        }
-        if (shouldShowPosterLabel(showLabel, focused)) {
-            Text(
-                poster.title,
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .fillMaxWidth()
-                    .background(Color(0xCC000000))
-                    .padding(10.dp),
-                style = MaterialTheme.typography.labelLarge,
-                maxLines = 1,
             )
         }
     }

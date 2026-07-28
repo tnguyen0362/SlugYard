@@ -51,7 +51,6 @@ class LayoutPreferenceDataStore @Inject constructor(
     private val modernSidebarBlurEnabledKey = booleanPreferencesKey("modern_sidebar_blur_enabled")
     private val modernLandscapePostersEnabledKey = booleanPreferencesKey("modern_landscape_posters_enabled")
     private val heroSectionEnabledKey = booleanPreferencesKey("hero_section_enabled")
-    private val posterLabelsEnabledKey = booleanPreferencesKey("poster_labels_enabled")
     private val catalogAddonNameEnabledKey = booleanPreferencesKey("catalog_addon_name_enabled")
     private val catalogTypeSuffixEnabledKey = booleanPreferencesKey("catalog_type_suffix_enabled")
     private val classicFocusGradientEnabledKey = booleanPreferencesKey("classic_focus_gradient_enabled")
@@ -163,8 +162,6 @@ class LayoutPreferenceDataStore @Inject constructor(
         val source = stored ?: fallback ?: DiscoverLocation.IN_SEARCH.name
         runCatching { DiscoverLocation.valueOf(source) }.getOrDefault(DiscoverLocation.IN_SEARCH)
     }
-
-    val posterLabelsEnabled: Flow<Boolean> = profileFlow { prefs -> prefs[posterLabelsEnabledKey] ?: true }
 
     val catalogAddonNameEnabled: Flow<Boolean> = profileFlow { prefs -> prefs[catalogAddonNameEnabledKey] ?: false }
 
@@ -344,10 +341,6 @@ class LayoutPreferenceDataStore @Inject constructor(
             }
             prefs.remove(legacySearchDiscoverEnabledKey)
         }
-    }
-
-    suspend fun setPosterLabelsEnabled(enabled: Boolean) {
-        store().edit { prefs -> prefs[posterLabelsEnabledKey] = enabled }
     }
 
     suspend fun setCatalogAddonNameEnabled(enabled: Boolean) {

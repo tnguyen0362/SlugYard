@@ -66,3 +66,20 @@ fun RewriteHomeState.withHeroEnrichment(enrichment: RewriteHeroEnrichment?): Rew
         ),
     )
 }
+
+fun RewriteHomeState.withHeroEnrichments(
+    enrichments: Map<String, RewriteHeroEnrichment>,
+): RewriteHomeState {
+    fun RewriteHero.applyEnrichment(): RewriteHero {
+        val upgrade = enrichments[id] ?: return this
+        return copy(
+            backdropUrl = upgrade.backdropUrl ?: backdropUrl,
+            summary = upgrade.summary ?: summary,
+            descriptorTag = upgrade.descriptorTag ?: descriptorTag,
+        )
+    }
+    return copy(
+        hero = hero?.applyEnrichment(),
+        heroCandidates = heroCandidates.map(RewriteHero::applyEnrichment),
+    )
+}

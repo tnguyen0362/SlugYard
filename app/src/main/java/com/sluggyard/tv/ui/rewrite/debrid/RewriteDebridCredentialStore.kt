@@ -25,14 +25,17 @@ class RewriteDebridCredentialStore(
 ) {
     val state: Flow<RewriteDebridCredentialState> = combine(dataStore.data, profiles.state) { preferences, profileState ->
         val profileId = profileState.activeProfile.id
+        val configuredServices = DebridService.entries.filterTo(linkedSetOf()) { service ->
+            val blob = preferences[credentialKey(profileId, service)].orEmpty()
+            blob.startsWith(ENCRYPTED_CREDENTIAL_PREFIX) &&
+                RewriteCredentialCipher.decrypt(blob)?.isNotBlank() == true
+        }
         RewriteDebridCredentialState(
             activeProfileId = profileId,
-            configuredServices = DebridService.entries.filterTo(linkedSetOf()) { service ->
-                preferences[credentialKey(profileId, service)].orEmpty().startsWith(ENCRYPTED_CREDENTIAL_PREFIX)
-            },
+            configuredServices = configuredServices,
             activeService = preferences[activeServiceKey(profileId)]?.let { saved ->
                 DebridService.entries.firstOrNull { it.name == saved }
-            }?.takeIf { service -> preferences[credentialKey(profileId, service)].orEmpty().startsWith(ENCRYPTED_CREDENTIAL_PREFIX) },
+            }?.takeIf(configuredServices::contains),
         )
     }
 
@@ -58,6 +61,16 @@ class RewriteDebridCredentialStore(
         dataStore.edit { preferences ->
             require(preferences[credentialKey(profileId, service)].orEmpty().startsWith(ENCRYPTED_CREDENTIAL_PREFIX)) { "Connect ${service.displayName} first" }
             preferences[activeServiceKey(profileId)] = service.name
+        }
+    }
+
+    suspend fun removeForActiveProfile(service: DebridService) {
+        val profileId = profiles.state.first().activeProfile.id
+        dataStore.edit { preferences ->
+            preferences.remove(credentialKey(profileId, service))
+            if (preferences[activeServiceKey(profileId)] == service.name) {
+                preferences.remove(activeServiceKey(profileId))
+            }
         }
     }
 

@@ -7,6 +7,7 @@ import com.sluggyard.tv.core.debrid.DirectDebridPlayableResult
 import com.sluggyard.tv.core.network.NetworkResult
 import com.sluggyard.tv.core.player.StreamAutoPlaySelector
 import com.sluggyard.tv.core.player.StreamScoringEngine
+import com.sluggyard.tv.core.streamresolution.ResolvedPlaybackSource
 import com.sluggyard.tv.data.local.PlayerSettings
 import com.sluggyard.tv.data.local.StreamAutoPlayMode
 import com.sluggyard.tv.data.local.StreamAutoPlaySource
@@ -17,6 +18,7 @@ import com.sluggyard.tv.domain.model.Video
 import com.sluggyard.tv.domain.model.enabledAddons
 import com.sluggyard.tv.ui.components.SourceChipItem
 import com.sluggyard.tv.ui.components.SourceChipStatus
+import com.sluggyard.tv.ui.rewrite.regularSeasonsThenSpecials
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -110,6 +112,7 @@ internal fun PlayerRuntimeController.showEpisodesPanel() {
     _uiState.update {
         it.copy(
             showEpisodesPanel = true,
+            showSourcesPanel = false,
             showControls = true,
             showAudioOverlay = false,
             showSubtitleOverlay = false,
@@ -159,7 +162,15 @@ internal fun PlayerRuntimeController.buildSourceRequestKey(
 ): String = "$type|$videoId|${season ?: -1}|${episode ?: -1}"
 
 internal fun PlayerRuntimeController.loadSourceStreams(forceRefresh: Boolean) {
-    val (type, vid, seasonArg, episodeArg) = resolveSourceRequestArgs() ?: return
+    val (type, vid, seasonArg, episodeArg) = resolveSourceRequestArgs() ?: run {
+        _uiState.update {
+            it.copy(
+                isLoadingSourceStreams = false,
+                sourceStreamsError = "Unable to identify the current title or episode",
+            )
+        }
+        return
+    }
 
     val requestKey = buildSourceRequestKey(type = type, videoId = vid, season = seasonArg, episode = episodeArg)
     val state = _uiState.value
@@ -646,6 +657,28 @@ internal fun PlayerRuntimeController.switchToSourceStream(stream: Stream) {
     loadSavedProgressFor(currentSeason, currentEpisode)
 }
 
+/**
+ * Narrow bridge for the Rewrite source sheet. Rewrite performs discovery, ranking, and debrid
+ * resolution itself; the retained player only receives the already-resolved URL at this boundary.
+ */
+internal fun PlayerRuntimeController.switchToRewritePlaybackSource(source: ResolvedPlaybackSource) {
+    switchToSourceStream(
+        Stream(
+            name = source.sourceId,
+            title = source.sourceId,
+            description = null,
+            url = source.url,
+            ytId = null,
+            infoHash = null,
+            fileIdx = null,
+            externalUrl = null,
+            behaviorHints = null,
+            addonName = "Rewrite",
+            addonLogo = null,
+        ),
+    )
+}
+
 /** Resolves a torrent/direct-debrid source stream, then either re-enters the HTTP path or the torrent path. */
 private fun PlayerRuntimeController.resolveDebridThenSwitchSource(stream: Stream, season: Int?, episode: Int?) {
     debridResolveJob?.cancel()
@@ -841,8 +874,14 @@ private fun PlayerRuntimeController.switchToTorrentEpisodeStream(
 internal fun PlayerRuntimeController.loadEpisodesIfNeeded() {
     val type = contentType
     val id = contentId
-    if (type.isNullOrBlank() || id.isNullOrBlank()) return
-    if (type !in listOf("series", "tv")) return
+    if (type.isNullOrBlank() || id.isNullOrBlank()) {
+        _uiState.update { it.copy(isLoadingEpisodes = false, episodesError = "Unable to identify this series") }
+        return
+    }
+    if (type !in listOf("series", "tv")) {
+        _uiState.update { it.copy(isLoadingEpisodes = false, episodesError = "Episodes are unavailable for this title") }
+        return
+    }
     if (_uiState.value.episodesAll.isNotEmpty() || _uiState.value.isLoadingEpisodes) return
 
     scope.launch {
@@ -858,7 +897,8 @@ internal fun PlayerRuntimeController.loadEpisodesIfNeeded() {
                 )
                 applyMetaDetails(result.data)
 
-                val seasons = allEpisodes.mapNotNull { it.season }.distinct().sorted()
+                val seasons = allEpisodes.mapNotNull { it.season }.distinct()
+                    .regularSeasonsThenSpecials { it }
                 val preferredSeason = when {
                     currentSeason != null && seasons.contains(currentSeason) -> currentSeason
                     initialSeason != null && seasons.contains(initialSeason) -> initialSeason

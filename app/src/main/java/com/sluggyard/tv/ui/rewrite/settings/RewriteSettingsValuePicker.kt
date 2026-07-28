@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -96,10 +98,13 @@ fun RewriteSettingsValuePicker(
 
 @Composable
 private fun ValuePickerRow(value: String, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val interaction = remember { MutableInteractionSource() }
+    val focused = interaction.collectIsFocusedAsState().value
     Row(
         modifier = modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
-            .background(if (selected) SlugYardPalette.SurfaceElevated else SlugYardPalette.Surface)
-            .clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 14.dp),
+            .background(if (focused || selected) SlugYardPalette.SurfaceElevated else SlugYardPalette.Surface)
+            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(value, modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)

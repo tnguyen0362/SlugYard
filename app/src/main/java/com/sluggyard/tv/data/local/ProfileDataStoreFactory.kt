@@ -136,6 +136,16 @@ class ProfileDataStoreFactory @Inject constructor(
         } else {
             emptyList()
         }
+        // DataStore 1.1.x (okio-based) can throw FileNotFoundException/ENOENT when reading a
+        // profile-scoped file that doesn't exist yet -- the corruption handler below only
+        // catches CorruptionException, not IOException. Pre-create the datastore directory and
+        // an empty preferences file so the first read never race against file creation.
+        runCatching {
+            val dataStoreDir = File(context.filesDir, "datastore")
+            if (!dataStoreDir.exists()) dataStoreDir.mkdirs()
+            val file = context.preferencesDataStoreFile(fileName)
+            if (!file.exists()) file.createNewFile()
+        }
         val store = PreferenceDataStoreFactory.create(
             corruptionHandler = androidx.datastore.core.handlers.ReplaceFileCorruptionHandler { ex ->
                 Log.e("ProfileDataStoreFactory", "DataStore corrupted ($fileName): ${ex.message} — resetting to empty preferences")

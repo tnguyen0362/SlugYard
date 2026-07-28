@@ -1,18 +1,25 @@
 package com.sluggyard.tv.ui.rewrite.player
 
+import android.view.KeyEvent as AndroidKeyEvent
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -20,6 +27,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
+import androidx.compose.material.icons.filled.AspectRatio
 import androidx.compose.material.icons.filled.Audiotrack
 import androidx.compose.material.icons.filled.Forward10
 import androidx.compose.material.icons.filled.Layers
@@ -33,17 +41,22 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
@@ -68,21 +81,24 @@ fun RewritePlayerControls(
     bufferedPositionMs: Long = 0L,
 ) {
     val backFocusRequester = remember { FocusRequester() }
+    val scrubberFocusRequester = remember { FocusRequester() }
     val rewindFocusRequester = remember { FocusRequester() }
     val forwardFocusRequester = remember { FocusRequester() }
     val sourcesFocusRequester = remember { FocusRequester() }
     val audioFocusRequester = remember { FocusRequester() }
     val subtitlesFocusRequester = remember { FocusRequester() }
     val speedFocusRequester = remember { FocusRequester() }
+    val aspectRatioFocusRequester = remember { FocusRequester() }
     val episodesFocusRequester = remember { FocusRequester() }
-    val hasEpisodes = state.contentType == "series"
+    val hasEpisodes = state.contentType?.lowercase() in setOf("series", "tv")
     val streamLabel = state.currentStreamName?.cleanPlayerStreamLabel()
     Column(
         modifier = modifier
             .fillMaxSize()
             .background(
                 Brush.verticalGradient(
-                    0f to Color.Transparent,
+                    0f to SlugYardPalette.Canvas.copy(alpha = .78f),
+                    0.22f to Color.Transparent,
                     0.55f to Color.Transparent,
                     1f to SlugYardPalette.Canvas.copy(alpha = .92f),
                 ),
@@ -101,12 +117,14 @@ fun RewritePlayerControls(
                 onClick = actions.onBack,
                 emphasis = ButtonEmphasis.SECONDARY,
                 focusRequester = backFocusRequester,
-                downFocusRequester = playPauseFocusRequester,
+                downFocusRequester = scrubberFocusRequester,
             )
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
                     text = state.contentName ?: state.title,
-                    style = MaterialTheme.typography.headlineLarge,
+                    style = MaterialTheme.typography.displaySmall,
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                    color = SlugYardPalette.OnCanvas,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -122,143 +140,231 @@ fun RewritePlayerControls(
             }
         }
 
-        // Bottom chrome: scrubber, then primary transport, then subordinate actions.
-        Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
+        // Bottom chrome: scrubber and one compact, explicitly traversable control rail.
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             PlayerScrubber(
                 currentPositionMs = currentPositionMs,
                 durationMs = durationMs,
                 bufferedPositionMs = bufferedPositionMs,
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(20.dp), verticalAlignment = Alignment.CenterVertically) {
-                    PlayerIconButton(
-                        icon = Icons.Filled.Replay10,
-                        contentDescription = "Rewind 10 seconds",
-                        onClick = actions.onSeekBackward,
-                        emphasis = ButtonEmphasis.SECONDARY,
-                        focusRequester = rewindFocusRequester,
-                        upFocusRequester = backFocusRequester,
-                        downFocusRequester = sourcesFocusRequester,
-                        rightFocusRequester = playPauseFocusRequester,
-                    )
-                    PlayerIconButton(
-                        icon = if (state.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                        contentDescription = if (state.isPlaying) "Pause" else "Play",
-                        onClick = actions.onPlayPause,
-                        emphasis = ButtonEmphasis.PRIMARY,
-                        focusRequester = playPauseFocusRequester,
-                        upFocusRequester = backFocusRequester,
-                        downFocusRequester = subtitlesFocusRequester,
-                        leftFocusRequester = rewindFocusRequester,
-                        rightFocusRequester = forwardFocusRequester,
-                    )
-                    PlayerIconButton(
-                        icon = Icons.Filled.Forward10,
-                        contentDescription = "Forward 10 seconds",
-                        onClick = actions.onSeekForward,
-                        emphasis = ButtonEmphasis.SECONDARY,
-                        focusRequester = forwardFocusRequester,
-                        upFocusRequester = backFocusRequester,
-                        downFocusRequester = speedFocusRequester,
-                        leftFocusRequester = playPauseFocusRequester,
-                    )
-                }
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(28.dp, alignment = Alignment.CenterHorizontally),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                PlayerLabeledIconButton(
-                    icon = Icons.Filled.Layers,
-                    label = "Sources",
-                    onClick = actions.onSources,
-                    focusRequester = sourcesFocusRequester,
-                    upFocusRequester = rewindFocusRequester,
-                    rightFocusRequester = audioFocusRequester,
-                )
-                PlayerLabeledIconButton(
+                previewPositionMs = state.pendingPreviewSeekPosition,
+                onSeekPreview = actions.onSeekPreview,
+                onSeekCommit = actions.onSeekCommit,
+                focusRequester = scrubberFocusRequester,
+                upFocusRequester = backFocusRequester,
+                 downFocusRequester = rewindFocusRequester,
+             )
+             Row(
+                 modifier = Modifier.fillMaxWidth(),
+                 horizontalArrangement = Arrangement.spacedBy(10.dp, alignment = Alignment.CenterHorizontally),
+                 verticalAlignment = Alignment.CenterVertically,
+             ) {
+                 PlayerLabeledIconButton(
+                     icon = Icons.Filled.Replay10,
+                     label = "Rewind 10 seconds",
+                     onClick = actions.onSeekBackward,
+                     focusRequester = rewindFocusRequester,
+                     upFocusRequester = scrubberFocusRequester,
+                     rightFocusRequester = playPauseFocusRequester,
+                 )
+                 PlayerIconButton(
+                     icon = if (state.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                     contentDescription = if (state.isPlaying) "Pause" else "Play",
+                     onClick = actions.onPlayPause,
+                     emphasis = ButtonEmphasis.PRIMARY,
+                     focusRequester = playPauseFocusRequester,
+                     upFocusRequester = scrubberFocusRequester,
+                     leftFocusRequester = rewindFocusRequester,
+                     rightFocusRequester = forwardFocusRequester,
+                 )
+                 PlayerLabeledIconButton(
+                     icon = Icons.Filled.Forward10,
+                     label = "Forward 10 seconds",
+                     onClick = actions.onSeekForward,
+                     focusRequester = forwardFocusRequester,
+                     upFocusRequester = scrubberFocusRequester,
+                     leftFocusRequester = playPauseFocusRequester,
+                     rightFocusRequester = sourcesFocusRequester,
+                 )
+                 PlayerLabeledIconButton(
+                     icon = Icons.Filled.Layers,
+                     label = "Sources",
+                     onClick = actions.onSources,
+                     focusRequester = sourcesFocusRequester,
+                     upFocusRequester = scrubberFocusRequester,
+                     leftFocusRequester = forwardFocusRequester,
+                     rightFocusRequester = audioFocusRequester,
+                 )
+                 PlayerLabeledIconButton(
                     icon = Icons.Filled.Audiotrack,
-                    label = "Audio",
-                    onClick = actions.onAudio,
-                    focusRequester = audioFocusRequester,
-                    upFocusRequester = playPauseFocusRequester,
-                    leftFocusRequester = sourcesFocusRequester,
-                    rightFocusRequester = subtitlesFocusRequester,
+                     label = "Audio",
+                     onClick = actions.onAudio,
+                     focusRequester = audioFocusRequester,
+                     upFocusRequester = scrubberFocusRequester,
+                     leftFocusRequester = sourcesFocusRequester,
+                     rightFocusRequester = subtitlesFocusRequester,
                 )
                 PlayerLabeledIconButton(
                     icon = Icons.Filled.Subtitles,
-                    label = "Subtitles",
-                    onClick = actions.onSubtitles,
-                    focusRequester = subtitlesFocusRequester,
-                    upFocusRequester = playPauseFocusRequester,
-                    leftFocusRequester = audioFocusRequester,
-                    rightFocusRequester = speedFocusRequester,
+                     label = "Subtitles",
+                     onClick = actions.onSubtitles,
+                     focusRequester = subtitlesFocusRequester,
+                     upFocusRequester = scrubberFocusRequester,
+                     leftFocusRequester = audioFocusRequester,
+                     rightFocusRequester = speedFocusRequester,
                 )
                 PlayerLabeledIconButton(
                     icon = Icons.Filled.Speed,
-                    label = "Speed",
-                    onClick = actions.onSpeed,
-                    focusRequester = speedFocusRequester,
-                    upFocusRequester = forwardFocusRequester,
-                    leftFocusRequester = subtitlesFocusRequester,
-                    rightFocusRequester = if (hasEpisodes) episodesFocusRequester else null,
+                     label = "Speed",
+                     onClick = actions.onSpeed,
+                     focusRequester = speedFocusRequester,
+                     upFocusRequester = scrubberFocusRequester,
+                     leftFocusRequester = subtitlesFocusRequester,
+                     rightFocusRequester = aspectRatioFocusRequester,
+                )
+                PlayerLabeledIconButton(
+                    icon = Icons.Filled.AspectRatio,
+                     label = stringResource(state.aspectMode.labelResId),
+                     onClick = actions.onToggleAspectRatio,
+                     focusRequester = aspectRatioFocusRequester,
+                     upFocusRequester = scrubberFocusRequester,
+                     leftFocusRequester = speedFocusRequester,
+                     rightFocusRequester = if (hasEpisodes) episodesFocusRequester else null,
                 )
                 if (hasEpisodes) {
                     PlayerLabeledIconButton(
                         icon = Icons.AutoMirrored.Filled.PlaylistPlay,
-                        label = "Episodes",
-                        onClick = actions.onEpisodes,
-                        focusRequester = episodesFocusRequester,
-                        upFocusRequester = forwardFocusRequester,
-                        leftFocusRequester = speedFocusRequester,
-                    )
-                }
-            }
-        }
+                         label = "Episodes",
+                         onClick = actions.onEpisodes,
+                         focusRequester = episodesFocusRequester,
+                         upFocusRequester = scrubberFocusRequester,
+                         leftFocusRequester = aspectRatioFocusRequester,
+                     )
+                 }
+             }
+         }
     }
 }
 
+/**
+ * Focusable, D-pad-scrubbable transport bar. LEFT/RIGHT while focused preview-seeks in
+ * accelerating steps (repeat-aware); releasing the key commits the seek. This is the primary
+ * fine-grained seek entry point for the rewrite controls -- the Rewind10/Forward10 buttons only
+ * cover fixed 10s jumps.
+ */
 @Composable
 private fun PlayerScrubber(
     currentPositionMs: Long,
     durationMs: Long,
     bufferedPositionMs: Long,
+    previewPositionMs: Long?,
+    onSeekPreview: (Long) -> Unit,
+    onSeekCommit: () -> Unit,
+    focusRequester: FocusRequester,
+    upFocusRequester: FocusRequester? = null,
+    downFocusRequester: FocusRequester? = null,
 ) {
-    val progress = if (durationMs > 0) (currentPositionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f) else 0f
+    var isFocused by remember { mutableStateOf(false) }
+    val displayPositionMs = previewPositionMs ?: currentPositionMs
+    val progress = if (durationMs > 0) (displayPositionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f) else 0f
     val bufferedProgress = if (durationMs > 0) {
         (bufferedPositionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
     } else 0f
-    val animatedProgress by animateFloatAsState(progress, animationSpec = tween(150), label = "scrubber progress")
+    val isScrubbing = previewPositionMs != null
+    val animatedProgress by animateFloatAsState(
+        progress,
+        animationSpec = if (isScrubbing) tween(0) else tween(150),
+        label = "scrubber progress",
+    )
+    val trackHeight = if (isFocused) 8.dp else 4.dp
 
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Box(modifier = Modifier.fillMaxWidth().height(4.dp)) {
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(16.dp)
+                .focusRequester(focusRequester)
+                .then(
+                    if (upFocusRequester != null || downFocusRequester != null) {
+                        Modifier.focusProperties {
+                            upFocusRequester?.let { up = it }
+                            downFocusRequester?.let { down = it }
+                        }
+                    } else Modifier
+                )
+                .onFocusChanged { isFocused = it.isFocused }
+                .focusable()
+                .onPreviewKeyEvent { keyEvent ->
+                    val native = keyEvent.nativeKeyEvent
+                    if (native.action == AndroidKeyEvent.ACTION_UP) {
+                        when (native.keyCode) {
+                            AndroidKeyEvent.KEYCODE_DPAD_LEFT, AndroidKeyEvent.KEYCODE_DPAD_RIGHT -> {
+                                if (isScrubbing) onSeekCommit()
+                                true
+                            }
+                            else -> false
+                        }
+                    } else if (native.action == AndroidKeyEvent.ACTION_DOWN) {
+                        when (native.keyCode) {
+                            AndroidKeyEvent.KEYCODE_DPAD_LEFT, AndroidKeyEvent.KEYCODE_DPAD_RIGHT -> {
+                                val repeatCount = native.repeatCount
+                                val stepMs = when {
+                                    repeatCount >= 8 -> 30_000L
+                                    repeatCount >= 3 -> 20_000L
+                                    else -> 10_000L
+                                }
+                                val isLeft = native.keyCode == AndroidKeyEvent.KEYCODE_DPAD_LEFT
+                                onSeekPreview(if (isLeft) -stepMs else stepMs)
+                                true
+                            }
+                            else -> false
+                        }
+                    } else {
+                        false
+                    }
+                },
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            val trackWidth = maxWidth
             Box(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .background(SlugYardPalette.OnCanvasMuted.copy(alpha = .28f), RoundedCornerShape(2.dp)),
-            )
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(bufferedProgress)
-                    .height(4.dp)
-                    .background(SlugYardPalette.OnCanvasMuted.copy(alpha = .5f), RoundedCornerShape(2.dp)),
-            )
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(animatedProgress)
-                    .height(4.dp)
-                    .background(SlugYardPalette.Accent, RoundedCornerShape(2.dp)),
-            )
+                    .align(Alignment.CenterStart)
+                    .fillMaxWidth()
+                    .height(trackHeight)
+                    .clip(RoundedCornerShape(50)),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(SlugYardPalette.OnCanvasMuted.copy(alpha = .28f)),
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(bufferedProgress)
+                        .fillMaxHeight()
+                        .background(SlugYardPalette.OnCanvasMuted.copy(alpha = .5f)),
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(animatedProgress)
+                        .fillMaxHeight()
+                        .background(if (isScrubbing) SlugYardPalette.OnCanvas else SlugYardPalette.Accent),
+                )
+            }
+            if (isFocused) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.CenterStart)
+                        .offset(x = trackWidth * animatedProgress - 7.dp)
+                        .size(14.dp)
+                        .clip(CircleShape)
+                        .background(if (isScrubbing) SlugYardPalette.OnCanvas else SlugYardPalette.Accent),
+                )
+            }
         }
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(
-                text = formatPlayerTime(currentPositionMs),
-                color = SlugYardPalette.OnCanvasMuted,
+                text = formatPlayerTime(displayPositionMs),
+                color = if (isScrubbing) SlugYardPalette.OnCanvas else SlugYardPalette.OnCanvasMuted,
                 style = MaterialTheme.typography.labelMedium,
             )
             Text(
@@ -307,14 +413,10 @@ private fun PlayerIconButton(
 ) {
     val interactions = remember { MutableInteractionSource() }
     val focused by interactions.collectIsFocusedAsState()
-    val scale by animateFloatAsState(if (focused) 1.12f else 1f, animationSpec = tween(180), label = "$contentDescription focus scale")
-    val diameter = if (emphasis == ButtonEmphasis.PRIMARY) 64.dp else 48.dp
-    val background = when {
-        emphasis == ButtonEmphasis.PRIMARY -> SlugYardPalette.Accent
-        focused -> SlugYardPalette.SurfaceElevated
-        else -> SlugYardPalette.Surface.copy(alpha = .55f)
-    }
-    val tint = if (emphasis == ButtonEmphasis.PRIMARY) SlugYardPalette.Canvas else SlugYardPalette.OnCanvas
+    val scale by animateFloatAsState(if (focused) 1.04f else 1f, animationSpec = tween(180), label = "$contentDescription focus scale")
+    val diameter = 32.dp
+    val background = if (focused) SlugYardPalette.SurfaceElevated else SlugYardPalette.Surface.copy(alpha = .55f)
+    val tint = SlugYardPalette.OnCanvas
 
     Box(
         modifier = Modifier
@@ -333,6 +435,7 @@ private fun PlayerIconButton(
             .graphicsLayer { scaleX = scale; scaleY = scale }
             .clip(CircleShape)
             .background(background, CircleShape)
+            .border(2.dp, if (focused) SlugYardPalette.Accent else Color.Transparent, CircleShape)
             .clickable(
                 interactionSource = interactions,
                 indication = null,
@@ -345,7 +448,7 @@ private fun PlayerIconButton(
             imageVector = icon,
             contentDescription = null,
             tint = tint,
-            modifier = Modifier.size(if (emphasis == ButtonEmphasis.PRIMARY) 32.dp else 22.dp),
+            modifier = Modifier.size(16.dp),
         )
     }
 }
@@ -363,11 +466,9 @@ private fun PlayerLabeledIconButton(
 ) {
     val interactions = remember { MutableInteractionSource() }
     val focused by interactions.collectIsFocusedAsState()
-    val scale by animateFloatAsState(if (focused) 1.06f else 1f, animationSpec = tween(180), label = "$label focus scale")
+    val scale by animateFloatAsState(if (focused) 1.03f else 1f, animationSpec = tween(180), label = "$label focus scale")
 
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    Box(
         modifier = Modifier
             .then(focusRequester?.let { Modifier.focusRequester(it) } ?: Modifier)
             .then(
@@ -381,28 +482,27 @@ private fun PlayerLabeledIconButton(
                 } else Modifier
             )
             .graphicsLayer { scaleX = scale; scaleY = scale }
-            .clip(RoundedCornerShape(20.dp))
-            .background(if (focused) SlugYardPalette.SurfaceElevated else Color.Transparent, RoundedCornerShape(20.dp))
+            .size(32.dp)
+            .clip(CircleShape)
+            .background(if (focused) SlugYardPalette.SurfaceElevated else SlugYardPalette.Surface.copy(alpha = .55f), CircleShape)
+            .border(2.dp, if (focused) SlugYardPalette.Accent else Color.Transparent, CircleShape)
             .clickable(
                 interactionSource = interactions,
                 indication = null,
                 onClick = onClick,
             )
-            .padding(horizontal = 14.dp, vertical = 10.dp)
+            // Icon-only by design: with six actions on this row (Sources/Audio/Subtitles/
+            // Speed/Aspect ratio/Episodes), visible captions made the row read as cluttered
+            // and pushed its total width unpredictably close to the screen edge. The label is
+            // kept as the accessibility contentDescription only.
             .semantics { contentDescription = label; role = Role.Button },
+        contentAlignment = Alignment.Center,
     ) {
         Icon(
             imageVector = icon,
             contentDescription = null,
             tint = if (focused) SlugYardPalette.OnCanvas else SlugYardPalette.OnCanvasMuted,
-            modifier = Modifier.size(20.dp),
-        )
-        Text(
-            text = label,
-            color = if (focused) SlugYardPalette.OnCanvas else SlugYardPalette.OnCanvasMuted,
-            style = MaterialTheme.typography.labelMedium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.size(16.dp),
         )
     }
 }

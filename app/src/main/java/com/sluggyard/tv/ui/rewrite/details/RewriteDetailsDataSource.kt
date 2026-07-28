@@ -6,6 +6,7 @@ import com.sluggyard.tv.core.addonprotocol.AddonTransportResult
 import com.sluggyard.tv.core.addonprotocol.StremioAddonGateway
 import com.sluggyard.tv.core.addonprotocol.StremioMetadataDecoder
 import com.sluggyard.tv.ui.rewrite.data.RewriteLibraryWatchState
+import com.sluggyard.tv.ui.rewrite.regularSeasonsThenSpecials
 import com.sluggyard.tv.ui.util.formatEpisodeReleaseLabel
 import com.sluggyard.tv.ui.util.unescapeHtmlEntities
 
@@ -42,10 +43,11 @@ class RewriteDetailsDataSource(
             .map { (season, episodes) ->
                 RewriteDetailsSeason(
                     number = season,
-                    episodes = episodes.sortedBy { it.episode }.map { episode ->
+                    episodes = episodes.sortedBy { it.episode }.mapIndexed { index, episode ->
                         RewriteDetailsEpisode(
                             id = episode.id,
                             number = episode.episode!!,
+                            displayNumber = index + 1,
                             title = episode.title.unescapeHtmlEntities(),
                             releaseLabel = formatEpisodeReleaseLabel(episode.released) ?: episode.released,
                             thumbnailUrl = episode.thumbnailUrl,
@@ -55,6 +57,7 @@ class RewriteDetailsDataSource(
                     fullyWatched = episodes.all { it.id in localState.watchedIds },
                 )
             }
+            .regularSeasonsThenSpecials(RewriteDetailsSeason::number)
         return RewriteDetailsLoadResult.Ready(
             RewriteDetailsState(
                 id = metadata.id,
@@ -68,7 +71,8 @@ class RewriteDetailsDataSource(
                 inLibrary = metadata.id in localState.libraryIds,
                 isSeries = metadata.type == "series",
                 seasons = seasons,
-                selectedSeason = seasons.firstOrNull()?.number,
+                selectedSeason = seasons.firstOrNull { it.number > 0 }?.number
+                    ?: seasons.firstOrNull()?.number,
             ),
         )
     }

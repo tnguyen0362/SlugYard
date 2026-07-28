@@ -683,15 +683,19 @@ private fun PlayerRuntimeController.buildLoadControl(
     } else if (playerSettings.bufferEngineEnabled) {
         buildBitrateAwareLoadControl(playerSettings, url, libdoviConversionActive)
     } else {
-        // Stock LoadControl: DefaultLoadControl's back buffer is 0 by default.
-        effectiveBackBufferDurationMs = 0
+        // Stock LoadControl configured with a 1.5s back buffer so a small rewind (e.g. the
+        // scrubber's D-pad seek) replays already-decoded data instead of forcing a full
+        // rebuffer stall. DefaultLoadControl's back buffer is 0 by default.
+        effectiveBackBufferDurationMs = 1_500
         currentBitrateAwareLoadControl = null
         Log.i(
             PlayerRuntimeController.TAG,
             "BUFFER_GATE: engine=exo-stock master=off; DefaultLoadControl " +
-                "(no back buffer, no VOD cache) host=${url.safeHost()}"
+                "(1.5s back buffer, no VOD cache) host=${url.safeHost()}"
         )
-        DefaultLoadControl.Builder().build()
+        DefaultLoadControl.Builder()
+            .setBackBuffer(effectiveBackBufferDurationMs, true)
+            .build()
     }
 }
 

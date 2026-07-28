@@ -3,6 +3,8 @@ package com.sluggyard.tv
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.remember
@@ -13,11 +15,14 @@ import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.sluggyard.tv.ui.design.SlugYardTvTheme
 import com.sluggyard.tv.core.sync.auth.SupabaseAuthGateway
 import com.sluggyard.tv.core.sync.auth.SupabaseSessionStore
+import com.sluggyard.tv.core.sync.RewriteProgressSyncBridge
+import com.sluggyard.tv.core.profile.ProfileManager
 import com.sluggyard.tv.ui.rewrite.RewriteAppGraph
 import com.sluggyard.tv.ui.rewrite.RewriteAppShell
 import com.sluggyard.tv.ui.rewrite.settings.RewriteSettingsFacade
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
+import javax.inject.Named
 
 // Compatibility-only symbols for compiled, unreachable legacy screens. They are not provided by
 // the rewrite activity and will disappear with those screens during the final provenance sweep.
@@ -57,6 +62,16 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var settingsFacade: RewriteSettingsFacade
 
+    @Inject
+    lateinit var profileManager: ProfileManager
+
+    @Inject
+    @Named("rewrite")
+    lateinit var rewriteDataStore: DataStore<Preferences>
+
+    @Inject
+    lateinit var rewriteProgressSyncBridge: RewriteProgressSyncBridge
+
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
@@ -69,7 +84,12 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val graph = remember {
-                RewriteAppGraph(context = applicationContext)
+                RewriteAppGraph(
+                    context = applicationContext,
+                    profileManager = profileManager,
+                    rewriteDataStore = rewriteDataStore,
+                    progressSyncBridge = rewriteProgressSyncBridge,
+                )
             }
             SlugYardTvTheme {
                 RewriteAppShell(
