@@ -14,6 +14,7 @@ import com.sluggyard.tv.core.sync.SyncMutationRecorder
 import com.sluggyard.tv.core.sync.SyncSchemaValidator
 import com.sluggyard.tv.core.sync.DefaultSupabaseSchemaProbe
 import com.sluggyard.tv.core.sync.RewriteProgressSyncBridge
+import com.sluggyard.tv.core.sync.RewriteLibraryWatchSyncBridge
 import com.sluggyard.tv.core.sync.auth.DataStoreSupabaseSessionStore
 import com.sluggyard.tv.core.sync.auth.DefaultSupabaseAuthGateway
 import com.sluggyard.tv.core.sync.auth.SupabaseAuthGateway
@@ -24,6 +25,9 @@ import com.sluggyard.tv.core.sync.remote.SupabaseCredentialVaultGateway
 import com.sluggyard.tv.core.sync.remote.SupabaseDataGateway
 import com.sluggyard.tv.core.sync.remote.SupabaseHttpTransport
 import com.sluggyard.tv.ui.rewrite.data.DataStoreRewritePlaybackProgressSyncBridge
+import com.sluggyard.tv.ui.rewrite.data.RewriteLibraryWatchStore
+import com.sluggyard.tv.ui.rewrite.data.RewriteProfileStore
+import com.sluggyard.tv.ui.rewrite.data.RewriteLibraryWatchRepository
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -107,7 +111,14 @@ object SyncModule {
         remote: SupabaseDataGateway,
         local: LocalSyncStore,
         rewriteProgress: RewriteProgressSyncBridge,
-    ): SyncCoordinator = SyncCoordinator(sessions, remote, local, rewriteProgress = rewriteProgress)
+        rewriteLibraryWatch: RewriteLibraryWatchSyncBridge,
+    ): SyncCoordinator = SyncCoordinator(
+        sessions,
+        remote,
+        local,
+        rewriteProgress = rewriteProgress,
+        rewriteLibraryWatch = rewriteLibraryWatch,
+    )
 
     @Provides
     @Singleton
@@ -132,6 +143,29 @@ object SyncModule {
         @Named("rewrite") dataStore: DataStore<Preferences>,
         mutationRecorder: SyncMutationRecorder,
     ): RewriteProgressSyncBridge = DataStoreRewritePlaybackProgressSyncBridge(dataStore, mutationRecorder)
+
+    @Provides
+    @Singleton
+    fun provideRewriteLibraryWatchStore(
+        @Named("rewrite") dataStore: DataStore<Preferences>,
+        mutationRecorder: SyncMutationRecorder,
+    ): RewriteLibraryWatchStore = RewriteLibraryWatchStore(
+        dataStore = dataStore,
+        profiles = RewriteProfileStore(dataStore),
+        mutationRecorder = mutationRecorder,
+    )
+
+    @Provides
+    @Singleton
+    fun provideRewriteLibraryWatchRepository(
+        store: RewriteLibraryWatchStore,
+    ): RewriteLibraryWatchRepository = store
+
+    @Provides
+    @Singleton
+    fun provideRewriteLibraryWatchSyncBridge(
+        store: RewriteLibraryWatchStore,
+    ): RewriteLibraryWatchSyncBridge = store
 
     @Provides
     @Singleton

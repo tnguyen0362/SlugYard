@@ -46,6 +46,10 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sluggyard.tv.ui.design.SlugYardPalette
@@ -78,6 +82,7 @@ fun RewriteProfilesScreen(
     onCreate: (String) -> Unit,
     onRename: (RewriteProfile, String) -> Unit,
     onRemove: (RewriteProfile) -> Unit,
+    onBack: () -> Unit,
     contentFocusRequester: FocusRequester? = null,
     modifier: Modifier = Modifier,
 ) {
@@ -95,6 +100,9 @@ fun RewriteProfilesScreen(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
+            OutlinedButton(onClick = onBack) { Text("Back") }
+        }
         Text("Who's watching?", style = MaterialTheme.typography.displaySmall)
         Spacer(Modifier.height(28.dp))
         LazyRow(
@@ -114,6 +122,11 @@ fun RewriteProfilesScreen(
             }
             item { AddProfileTile(onClick = { creating = true }) }
         }
+        Text(
+            "Hold OK on a profile to rename or remove it.",
+            style = MaterialTheme.typography.bodySmall,
+            color = SlugYardPalette.OnCanvasMuted,
+        )
     }
 
     val target = editing
@@ -177,6 +190,10 @@ private fun ProfileAvatarTile(
                     } else Modifier,
                 )
                 .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+                .semantics {
+                    contentDescription = "Profile ${profile.name}${if (selected) ", selected" else ""}. Hold OK to edit."
+                    role = Role.Button
+                }
                 .combinedClickable(
                     interactionSource = avatarInteraction,
                     indication = null,
@@ -232,6 +249,7 @@ private fun AddProfileTile(onClick: () -> Unit) {
                 .clip(RoundedCornerShape(50))
                 .background(if (focused) SlugYardPalette.SurfaceElevated else SlugYardPalette.Surface)
                 .border(1.dp, SlugYardPalette.OnCanvasMuted.copy(alpha = 0.5f), RoundedCornerShape(50))
+                .semantics { contentDescription = "Add profile"; role = Role.Button }
                 .clickable(interactionSource = interaction, indication = null, onClick = onClick),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,

@@ -39,6 +39,14 @@ class RewritePlaybackProgressStoreTest {
         assertEquals(listOf(episodeTwo), store.checkpoints.first())
     }
 
+    @Test
+    fun `sub two percent progress is not persisted`() = runBlocking {
+        val store = RewritePlaybackProgressStore(createDataStore(), FakeProfiles())
+        store.save(checkpoint(season = 1, episode = 1, updatedAt = 1L).copy(positionMs = 10L))
+
+        assertEquals(emptyList<RewritePlaybackCheckpoint>(), store.checkpoints.first())
+    }
+
     private fun checkpoint(season: Int, episode: Int, updatedAt: Long) = RewritePlaybackCheckpoint(
         contentId = "show-1",
         contentType = "series",

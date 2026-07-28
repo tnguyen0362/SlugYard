@@ -90,6 +90,21 @@ interface RewriteProgressSyncBridge {
     suspend fun record(progress: CloudWatchProgress)
 
     suspend fun remove(profileId: Int, progressKey: String, changedAtEpochMs: Long)
+
+    /** Promotes locally captured guest progress into the account-bound outbox after login. */
+    suspend fun flushPending() = Unit
+}
+
+data class RewriteLibraryWatchSyncSnapshot(
+    val library: List<CloudLibraryItem> = emptyList(),
+    val watchedItems: List<CloudWatchedItem> = emptyList(),
+)
+
+/** Adapter for Rewrite-owned library and watched state. */
+interface RewriteLibraryWatchSyncBridge {
+    suspend fun snapshot(): RewriteLibraryWatchSyncSnapshot
+
+    suspend fun apply(snapshot: RewriteLibraryWatchSyncSnapshot)
 }
 
 interface RetryAwareLocalSyncStore {
@@ -108,6 +123,7 @@ class SyncCoordinator(
     private val wait: suspend (Long) -> Unit = { delay(it) },
     private val maxAttempts: Int = 3,
     private val rewriteProgress: RewriteProgressSyncBridge? = null,
+    private val rewriteLibraryWatch: RewriteLibraryWatchSyncBridge? = null,
 ) {
     private val synchronizeMutex = Mutex()
 
@@ -119,28 +135,46 @@ class SyncCoordinator(
         val session = (sessions.read() as? SupabaseSessionState.Active)?.session
             ?: return SyncResult.Success(SyncSummary(0, 0, local.pending().size))
         (local as? AccountBoundLocalSyncStore)?.bindOwner(session.userId)
+        rewriteProgress?.flushPending()
 
         val remoteSnapshot = when (val result = remote.pull(session.userId)) {
             is SyncResult.Success -> result.value
             is SyncResult.Failure -> return result
             SyncResult.SessionExpired -> return SyncResult.SessionExpired
         }
+        val rewriteLocalProgress = rewriteProgress?.snapshot().orEmpty()
+        val rewriteLocalLibraryWatch = rewriteLibraryWatch?.snapshot()
         val localSnapshot = local.snapshot().let { snapshot ->
-            rewriteProgress?.let { bridge ->
-                snapshot.copy(
-                    progress = SupabaseMergePolicy.mergeProgress(
-                        snapshot.progress,
-                        bridge.snapshot(),
-                    ),
-                )
-            } ?: snapshot
+            snapshot.copy(
+                progress = rewriteProgress?.let {
+                    SupabaseMergePolicy.mergeProgress(snapshot.progress, rewriteLocalProgress)
+                } ?: snapshot.progress,
+                library = rewriteLibraryWatch?.let {
+                    SupabaseMergePolicy.mergeLibrary(snapshot.library, rewriteLocalLibraryWatch?.library.orEmpty())
+                } ?: snapshot.library,
+                watchedItems = rewriteLibraryWatch?.let {
+                    SupabaseMergePolicy.mergeWatchedItems(
+                        snapshot.watchedItems,
+                        rewriteLocalLibraryWatch?.watchedItems.orEmpty(),
+                    )
+                } ?: snapshot.watchedItems,
+            )
         }
+        val pendingBeforeMerge = local.pending()
         val merged = merge(localSnapshot, remoteSnapshot)
-            .withoutPendingDeletes(local.pending())
+            .withoutPendingDeletes(pendingBeforeMerge)
+            .withoutStaleRewriteProgress(rewriteLocalProgress, remoteSnapshot.progress, pendingBeforeMerge)
         local.apply(merged.toRemoteSnapshot())
         rewriteProgress?.apply(merged.progress)
+        rewriteLibraryWatch?.apply(
+            RewriteLibraryWatchSyncSnapshot(
+                library = merged.library,
+                watchedItems = merged.watchedItems,
+            ),
+        )
 
         var pushed = 0
+        var firstFailure: SyncResult<Unit>? = null
         val pending = local.pending()
         for (mutation in pending) {
             val mutationId = mutation.stableId()
@@ -170,12 +204,14 @@ class SyncCoordinator(
                 }
             }
             if (lastFailure != null) {
-                val failure = lastFailure
-                return when (failure) {
-                    is SyncResult.Failure -> SyncResult.Failure(failure.kind)
-                    SyncResult.SessionExpired -> SyncResult.SessionExpired
-                    is SyncResult.Success -> error("Successful mutation cannot remain pending")
-                }
+                firstFailure = firstFailure ?: lastFailure
+            }
+        }
+        firstFailure?.let { failure ->
+            return when (failure) {
+                is SyncResult.Failure -> SyncResult.Failure(failure.kind)
+                SyncResult.SessionExpired -> SyncResult.SessionExpired
+                is SyncResult.Success -> error("Successful mutation cannot remain pending")
             }
         }
         return SyncResult.Success(
@@ -241,6 +277,24 @@ private fun LocalSnapshot.withoutPendingDeletes(pending: List<SyncMutation>): Lo
             )
         }
     }
+
+/** Treats an authenticated remote snapshot as authoritative for Rewrite rows already promoted. */
+private fun LocalSnapshot.withoutStaleRewriteProgress(
+    rewriteLocal: List<CloudWatchProgress>,
+    remote: List<CloudWatchProgress>,
+    pending: List<SyncMutation>,
+): LocalSnapshot {
+    if (rewriteLocal.isEmpty()) return this
+    val remoteKeys = remote.mapTo(mutableSetOf()) { it.profileId to it.progressKey }
+    val pendingKeys = pending.filterIsInstance<SyncMutation.Progress>()
+        .mapTo(mutableSetOf()) { it.value.profileId to it.value.progressKey }
+    val staleKeys = rewriteLocal
+        .map { it.profileId to it.progressKey }
+        .filterNot { it in remoteKeys || it in pendingKeys }
+        .toSet()
+    if (staleKeys.isEmpty()) return this
+    return copy(progress = progress.filterNot { (it.profileId to it.progressKey) in staleKeys })
+}
 
 private fun LocalSnapshot.toRemoteSnapshot() = RemoteSnapshot(
     profiles,

@@ -24,6 +24,9 @@ data class RewritePlaybackCheckpoint(
     val contentType: String,
     val title: String,
     val posterUrl: String? = null,
+    val addonId: String? = null,
+    val parentId: String? = null,
+    val parentType: String? = null,
     val positionMs: Long,
     val durationMs: Long,
     val updatedAtEpochMs: Long,
@@ -69,11 +72,7 @@ class RewritePlaybackProgressStore(
                 .associateBy { rewriteProgressKey(it.contentId, it.season, it.episode) }
                 .toMutableMap()
             val checkpointKey = rewriteProgressKey(checkpoint.contentId, checkpoint.season, checkpoint.episode)
-            if (WatchStatePolicy.isCompleted(checkpoint.progressFraction)) {
-                existing.remove(checkpointKey)
-            } else if (checkpoint.positionMs <= 0L) {
-                // Rewinding to the beginning means there is no resumable state. Leaving the old
-                // entry in the map would make Continue Watching reopen at a stale position.
+            if (!WatchStatePolicy.isStartedButIncomplete(checkpoint.progressFraction)) {
                 existing.remove(checkpointKey)
             } else {
                 existing[checkpointKey] = checkpoint
@@ -86,8 +85,8 @@ class RewritePlaybackProgressStore(
                 .toList()
             preferences[key] = RewritePlaybackProgressCodec.encode(retained)
         }
-        val numericProfileId = profileId.toIntOrNull() ?: return
-        if (WatchStatePolicy.isCompleted(checkpoint.progressFraction) || checkpoint.positionMs <= 0L) {
+        val numericProfileId = cloudLinkedProfileIdOrNull(profileId) ?: return
+        if (!WatchStatePolicy.isStartedButIncomplete(checkpoint.progressFraction)) {
             syncBridge?.remove(
                 profileId = numericProfileId,
                 progressKey = rewriteProgressKey(checkpoint.contentId, checkpoint.season, checkpoint.episode),
@@ -113,7 +112,7 @@ class RewritePlaybackProgressStore(
             preferences[key] = RewritePlaybackProgressCodec.encode(remaining)
         }
         syncBridge?.remove(
-            profileId = profileId.toIntOrNull() ?: return,
+            profileId = cloudLinkedProfileIdOrNull(profileId) ?: return,
             progressKey = rewriteProgressKey(contentId, season, episode),
             changedAtEpochMs = System.currentTimeMillis(),
         )
@@ -137,7 +136,8 @@ object RewritePlaybackProgressCodec {
         StoredPlaybackCheckpoints(checkpoints.map(StoredPlaybackCheckpoint::from)),
     )
 
-    fun decode(raw: String): List<RewritePlaybackCheckpoint> = runCatching {
+    fun decode(raw: String): List<RewritePlaybackCheckpoint> = decodeOrNull(raw).orEmpty()
+    fun decodeOrNull(raw: String): List<RewritePlaybackCheckpoint>? = runCatching {
         json.decodeFromString<StoredPlaybackCheckpoints>(raw).items
             .asSequence()
             .map(StoredPlaybackCheckpoint::toModel)
@@ -145,7 +145,7 @@ object RewritePlaybackProgressCodec {
             .sortedByDescending(RewritePlaybackCheckpoint::updatedAtEpochMs)
             .take(MAX_STORED_CHECKPOINTS)
             .toList()
-    }.getOrDefault(emptyList())
+    }.getOrNull()
 }
 
 private fun RewritePlaybackCheckpoint.isPersistable(): Boolean =
@@ -179,6 +179,9 @@ private data class StoredPlaybackCheckpoint(
     val contentType: String,
     val title: String,
     val posterUrl: String? = null,
+    val addonId: String? = null,
+    val parentId: String? = null,
+    val parentType: String? = null,
     val positionMs: Long,
     val durationMs: Long,
     val updatedAtEpochMs: Long,
@@ -186,20 +189,34 @@ private data class StoredPlaybackCheckpoint(
     val episode: Int? = null,
 ) {
     fun toModel() = RewritePlaybackCheckpoint(
-        contentId, contentType, title, posterUrl, positionMs, durationMs, updatedAtEpochMs, season, episode,
+        contentId = contentId,
+        contentType = contentType,
+        title = title,
+        posterUrl = posterUrl,
+        addonId = addonId,
+        parentId = parentId,
+        parentType = parentType,
+        positionMs = positionMs,
+        durationMs = durationMs,
+        updatedAtEpochMs = updatedAtEpochMs,
+        season = season,
+        episode = episode,
     )
 
     companion object {
         fun from(model: RewritePlaybackCheckpoint) = StoredPlaybackCheckpoint(
-            model.contentId,
-            model.contentType,
-            model.title,
-            model.posterUrl,
-            model.positionMs,
-            model.durationMs,
-            model.updatedAtEpochMs,
-            model.season,
-            model.episode,
+            contentId = model.contentId,
+            contentType = model.contentType,
+            title = model.title,
+            posterUrl = model.posterUrl,
+            addonId = model.addonId,
+            parentId = model.parentId,
+            parentType = model.parentType,
+            positionMs = model.positionMs,
+            durationMs = model.durationMs,
+            updatedAtEpochMs = model.updatedAtEpochMs,
+            season = model.season,
+            episode = model.episode,
         )
     }
 }

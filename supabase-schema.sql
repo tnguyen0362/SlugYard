@@ -1379,6 +1379,135 @@ BEGIN
         );
     END IF;
 
+    -- Watch progress mutations must update the materialized table that normal
+    -- pulls read. The ledger is the conflict/idempotency layer, while this
+    -- branch is the domain writer that keeps watch_progress and its delta
+    -- trigger in sync with the accepted mutation.
+    IF p_domain = 'WATCH_PROGRESS' THEN
+        IF p_operation = 'UPSERT' THEN
+            IF p_payload_json IS NULL THEN
+                RAISE EXCEPTION 'watch progress upsert payload is required'
+                    USING ERRCODE = '22023';
+            END IF;
+            INSERT INTO watch_progress (
+                user_id, profile_id, progress_key, content_id, content_type,
+                video_id, season, episode, position, duration, last_watched
+            ) VALUES (
+                auth.uid(),
+                COALESCE((p_payload_json->>'profile_id')::INTEGER, p_profile_id),
+                p_record_key,
+                p_payload_json->>'content_id',
+                p_payload_json->>'content_type',
+                COALESCE(p_payload_json->>'video_id', ''),
+                (p_payload_json->>'season')::INTEGER,
+                (p_payload_json->>'episode')::INTEGER,
+                COALESCE((p_payload_json->>'position')::BIGINT, 0),
+                COALESCE((p_payload_json->>'duration')::BIGINT, 0),
+                COALESCE((p_payload_json->>'last_watched')::BIGINT, p_client_changed_at)
+            )
+            ON CONFLICT (user_id, profile_id, progress_key) DO UPDATE SET
+                content_id = EXCLUDED.content_id,
+                content_type = EXCLUDED.content_type,
+                video_id = EXCLUDED.video_id,
+                season = EXCLUDED.season,
+                episode = EXCLUDED.episode,
+                position = EXCLUDED.position,
+                duration = EXCLUDED.duration,
+                last_watched = EXCLUDED.last_watched,
+                updated_at = NOW()
+            WHERE watch_progress.last_watched <= EXCLUDED.last_watched;
+        ELSE
+            DELETE FROM watch_progress
+             WHERE user_id = auth.uid()
+               AND profile_id = p_profile_id
+               AND progress_key = p_record_key;
+        END IF;
+    END IF;
+
+    -- Library / watched_items must also materialize into the tables that pulls read.
+    -- Tombstones alone are not enough for cross-device restore.
+    IF p_domain = 'LIBRARY' THEN
+        IF p_operation = 'UPSERT' THEN
+            IF p_payload_json IS NULL THEN
+                RAISE EXCEPTION 'library upsert payload is required'
+                    USING ERRCODE = '22023';
+            END IF;
+            INSERT INTO library (
+                user_id, profile_id, content_id, content_type, name, poster,
+                poster_shape, background, description, release_info, imdb_rating,
+                genres, addon_base_url, added_at
+            ) VALUES (
+                auth.uid(),
+                COALESCE((p_payload_json->>'profile_id')::INTEGER, p_profile_id),
+                COALESCE(p_payload_json->>'content_id', p_record_key),
+                COALESCE(p_payload_json->>'content_type', 'movie'),
+                COALESCE(p_payload_json->>'name', ''),
+                p_payload_json->>'poster',
+                COALESCE(p_payload_json->>'poster_shape', 'POSTER'),
+                p_payload_json->>'background',
+                p_payload_json->>'description',
+                p_payload_json->>'release_info',
+                (p_payload_json->>'imdb_rating')::REAL,
+                COALESCE(p_payload_json->'genres', '[]'::jsonb),
+                p_payload_json->>'addon_base_url',
+                COALESCE((p_payload_json->>'added_at')::BIGINT, p_client_changed_at, 0)
+            )
+            ON CONFLICT (user_id, profile_id, content_id) DO UPDATE SET
+                content_type = EXCLUDED.content_type,
+                name = EXCLUDED.name,
+                poster = EXCLUDED.poster,
+                poster_shape = EXCLUDED.poster_shape,
+                background = EXCLUDED.background,
+                description = EXCLUDED.description,
+                release_info = EXCLUDED.release_info,
+                imdb_rating = EXCLUDED.imdb_rating,
+                genres = EXCLUDED.genres,
+                addon_base_url = EXCLUDED.addon_base_url,
+                added_at = EXCLUDED.added_at,
+                updated_at = NOW();
+        ELSE
+            DELETE FROM library
+             WHERE user_id = auth.uid()
+               AND profile_id = p_profile_id
+               AND content_id = p_record_key;
+        END IF;
+    END IF;
+
+    IF p_domain = 'WATCHED_ITEMS' THEN
+        IF p_operation = 'UPSERT' THEN
+            IF p_payload_json IS NULL THEN
+                RAISE EXCEPTION 'watched item upsert payload is required'
+                    USING ERRCODE = '22023';
+            END IF;
+            INSERT INTO watched_items (
+                user_id, profile_id, content_id, content_type, title,
+                season, episode, watched_at
+            ) VALUES (
+                auth.uid(),
+                COALESCE((p_payload_json->>'profile_id')::INTEGER, p_profile_id),
+                COALESCE(p_payload_json->>'content_id', p_record_key),
+                COALESCE(p_payload_json->>'content_type', 'movie'),
+                COALESCE(p_payload_json->>'title', ''),
+                (p_payload_json->>'season')::INTEGER,
+                (p_payload_json->>'episode')::INTEGER,
+                COALESCE((p_payload_json->>'watched_at')::BIGINT, p_client_changed_at, 0)
+            )
+            ON CONFLICT (user_id, profile_id, content_id) DO UPDATE SET
+                content_type = EXCLUDED.content_type,
+                title = EXCLUDED.title,
+                season = EXCLUDED.season,
+                episode = EXCLUDED.episode,
+                watched_at = EXCLUDED.watched_at,
+                updated_at = NOW()
+            WHERE watched_items.watched_at <= EXCLUDED.watched_at;
+        ELSE
+            DELETE FROM watched_items
+             WHERE user_id = auth.uid()
+               AND profile_id = p_profile_id
+               AND content_id = p_record_key;
+        END IF;
+    END IF;
+
     INSERT INTO sync_tombstones (
         user_id, domain, profile_id, record_key, operation,
         client_changed_at, mutation_id, schema_version, payload_json

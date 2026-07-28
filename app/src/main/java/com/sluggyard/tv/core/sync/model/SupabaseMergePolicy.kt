@@ -39,7 +39,7 @@ object SupabaseMergePolicy {
     )
 
     fun mergeProgress(local: List<CloudWatchProgress>, remote: List<CloudWatchProgress>): List<CloudWatchProgress> =
-        mergeBy(local, remote, { it.profileId to it.progressKey }, CloudWatchProgress::lastWatched, ::progressTieBreak)
+        mergeBy(local, remote, { it.profileId to it.progressKey }, CloudWatchProgress::changedAt, ::progressTieBreak)
 
     fun mergeWatchedItems(local: List<CloudWatchedItem>, remote: List<CloudWatchedItem>): List<CloudWatchedItem> =
         mergeBy(local, remote, { it.profileId to it.contentId }, CloudWatchedItem::watchedAt, ::watchedTieBreak)
