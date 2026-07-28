@@ -1,5 +1,6 @@
 package com.sluggyard.tv.ui.rewrite.data
 
+import com.sluggyard.tv.BuildConfig
 import com.sluggyard.tv.core.streamresolution.DebridService
 import com.sluggyard.tv.ui.rewrite.RewriteNetworkClient
 import kotlinx.coroutines.CancellationException
@@ -14,18 +15,30 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 
+/**
+ * Configures a MediaFusion manifest that embeds debrid credentials.
+ *
+ * Tokens are only POSTed to [encryptBaseUrl] when that URL is explicitly configured
+ * (self-hosted / first-party MediaFusion). The shared community host is never used
+ * for encrypt-user-data, so plaintext debrid keys do not transit a third-party box.
+ */
 class RewriteMediaFusionConfigTransport(
     private val client: OkHttpClient = RewriteNetworkClient.create(),
     private val json: Json = Json { ignoreUnknownKeys = true },
+    private val encryptBaseUrl: String? = BuildConfig.MEDIAFUSION_ENCRYPT_BASE_URL,
 ) {
     suspend fun createManifestUrl(service: DebridService, apiKey: String): String = withContext(Dispatchers.IO) {
+        val base = encryptBaseUrl?.trim()?.trimEnd('/').orEmpty()
+        require(base.isNotBlank()) {
+            "MediaFusion debrid linking requires MEDIAFUSION_ENCRYPT_BASE_URL (self-hosted MediaFusion)"
+        }
         val provider = mediaFusionProviderPayload(service, apiKey)
         val body = buildJsonObject {
             put("streaming_provider", provider)
             put("streaming_providers", kotlinx.serialization.json.JsonArray(listOf(provider)))
         }.toString().toRequestBody("application/json".toMediaType())
         val request = Request.Builder()
-            .url("$MediaFusionManifestHost/encrypt-user-data")
+            .url("$base/encrypt-user-data")
             .post(body)
             .build()
         try {
@@ -36,11 +49,13 @@ class RewriteMediaFusionConfigTransport(
                 val payload = response.body?.string()
                     ?.let { json.parseToJsonElement(it).jsonObject }
                     ?: throw IllegalStateException("MediaFusion returned an empty configuration")
-                mediaFusionManifestUrl(decodeMediaFusionEncryptedPath(payload))
+                mediaFusionManifestUrl(base, decodeMediaFusionEncryptedPath(payload))
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (failure: IllegalStateException) {
+            throw failure
+        } catch (failure: IllegalArgumentException) {
             throw failure
         } catch (_: Exception) {
             throw IllegalStateException("MediaFusion could not configure this provider")
@@ -59,6 +74,7 @@ class RewriteProviderAddonConfigurator(
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
+                // Fall back to keyless bootstrap; do not send tokens to a third-party encrypt host.
                 null
             },
         )

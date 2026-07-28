@@ -203,7 +203,10 @@ private suspend fun PlayerRuntimeController.initializePlayerInternal(
     allowEngineFailover: Boolean,
     startPaused: Boolean
 ) {
-    if (allowEngineFailover) startupEngineFailoverTriggered = false
+    if (allowEngineFailover) {
+        startupEngineFailoverTriggered = false
+        postFirstFrameEngineFailoverTriggered = false
+    }
     autoSubtitleSelected = false
     hasScannedTextTracksOnce = false
     lastPlaybackDiagnosticsForReport = LastPlaybackDiagnostics.EMPTY

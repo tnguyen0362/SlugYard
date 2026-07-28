@@ -4,12 +4,32 @@ import android.app.Activity
 import android.os.SystemClock
 import android.util.Log
 import com.sluggyard.tv.R
+import com.sluggyard.tv.core.streamresolution.ResolvedPlaybackSource
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.lang.ref.WeakReference
 
 internal fun PlayerRuntimeController.attachHostActivity(activity: Activity?) {
     hostActivityRef = activity?.let { WeakReference(it) }
+}
+
+internal fun PlayerRuntimeController.configureRewriteLaunch(source: ResolvedPlaybackSource) {
+    if (initialPlaybackStarted) return
+    initialStreamUrl = source.url
+    currentStreamUrl = source.url
+    currentHeaders = emptyMap()
+    currentStreamMimeType = PlayerMediaSourceFactory.inferMimeType(
+        url = source.url,
+        filename = currentFilename,
+        responseHeaders = currentStreamResponseHeaders,
+    )
+    _uiState.update {
+        it.copy(
+            currentStreamUrl = source.url,
+            currentStreamName = source.sourceId,
+            error = null,
+        )
+    }
 }
 
 internal fun PlayerRuntimeController.startInitialPlaybackIfNeeded() {
@@ -34,7 +54,11 @@ internal fun PlayerRuntimeController.startInitialPlaybackIfNeeded() {
             "S${currentSeason ?: "-"}E${currentEpisode ?: "-"} infoHash=${infoHash != null} " +
             "startFromBeginning=${navigationArgs.startFromBeginning} streamName=${streamName ?: "n/a"}"
     )
-    Log.d("PlayerStartup", "startInitialPlayback: infoHash=$infoHash, streamUrl=${initialStreamUrl.take(80)}")
+    Log.d(
+        "PlayerStartup",
+        "startInitialPlayback: infoHash=${infoHash != null}, streamHost=${initialStreamUrl.safeStartupHost()} " +
+            "streamHash=${initialStreamUrl.hashCode().toUInt().toString(16)}",
+    )
 
     val isTorrentLaunch = infoHash != null && !initialStreamUrl.startsWith("http")
     if (isTorrentLaunch) {

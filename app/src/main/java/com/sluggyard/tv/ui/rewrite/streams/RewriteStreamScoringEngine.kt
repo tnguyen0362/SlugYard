@@ -24,22 +24,25 @@ internal object RewriteStreamScoringEngine {
         }
         if (playable.isEmpty()) return null
 
-        // Direct URLs remain the first stable tier for compatibility with the existing Rewrite
-        // contract. Cached torrents are the next stable tier, then unknown/not-applicable torrents
-        // are considered only when no immediately usable candidate exists.
-        val direct = playable.filter { !it.directUrl.isNullOrBlank() }
-        val cached = playable.filter { it.directUrl.isNullOrBlank() && it.cacheState == StreamCacheState.CACHED }
-        val pool = when {
-            direct.isNotEmpty() -> direct
-            cached.isNotEmpty() -> cached
-            else -> playable
-        }
-
         // DV7 is supported by the player conversion path. Only reject a known Profile 8.6
         // candidate when a safer alternative exists; do not blanket-reject every DV stream.
-        val safePool = pool.filterNot { it.isKnownUnsupportedDolbyVision() }.ifEmpty { pool }
+        val safePool = playable.filterNot { it.isKnownUnsupportedDolbyVision() }.ifEmpty { playable }
         return safePool.maxWithOrNull(
             compareBy<RewriteStreamCandidate> { score(it, context) }
+                .thenBy { it.id },
+        )
+    }
+
+    fun rankedCandidates(
+        candidates: List<RewriteStreamCandidate>,
+        context: Context,
+    ): List<RewriteStreamCandidate> {
+        val wellFormed = candidates
+            .filter { it.isWellFormed() }
+            .distinctBy { it.dedupeKey() }
+        val safePool = wellFormed.filterNot { it.isKnownUnsupportedDolbyVision() }.ifEmpty { wellFormed }
+        return safePool.sortedWith(
+            compareByDescending<RewriteStreamCandidate> { score(it, context) }
                 .thenBy { it.id },
         )
     }
@@ -75,7 +78,8 @@ internal object RewriteStreamScoringEngine {
 
     private fun classify(context: Context): ContentKind {
         val text = "${context.title} ${context.contentType} ${context.genres.joinToString(" ")}".lowercase()
-        if ("sport" in text || "news" in text || "live" in text && listOf("fight", "match", "event").any(text::contains)) {
+        val liveType = context.contentType.lowercase() in setOf("live", "event", "channel")
+        if (liveType || ("live" in text && listOf("fight", "match", "event").any(text::contains))) {
             return ContentKind.LIVE
         }
         if ("k-drama" in text || "kdrama" in text || "korean drama" in text) return ContentKind.K_DRAMA
@@ -98,7 +102,7 @@ internal object RewriteStreamScoringEngine {
         }
         val codecBonus = if (Regex("\\b(av1|hevc|h265|10[- ]?bit)\\b").containsMatchIn(text)) 8 else 0
         val hdrBonus = if (Regex("\\b(hdr10\\+?|dolby.?vision|dv)\\b").containsMatchIn(text)) 5 else 0
-        val bad = if (Regex("\\b(cam|telesync|ts|hdcam|screener)\\b").containsMatchIn(text)) 35 else 0
+        val bad = if (Regex("\\b(cam|hdcam|telesync|tscam|telecine|screener)\\b").containsMatchIn(text)) 35 else 0
         return (base + codecBonus + hdrBonus - bad).coerceIn(0, 100)
     }
 
@@ -130,7 +134,7 @@ internal object RewriteStreamScoringEngine {
     private fun reliabilityScore(candidate: RewriteStreamCandidate): Int {
         val cache = when (candidate.cacheState) {
             StreamCacheState.CACHED -> 100
-            StreamCacheState.NOT_APPLICABLE -> if (candidate.directUrl != null) 95 else 45
+            StreamCacheState.NOT_APPLICABLE -> if (candidate.directUrl != null) 100 else 45
             StreamCacheState.UNKNOWN -> if (candidate.directUrl != null) 90 else 45
             StreamCacheState.CHECKING -> 40
             StreamCacheState.NOT_CACHED -> 15
@@ -189,5 +193,11 @@ internal object RewriteStreamScoringEngine {
     private fun RewriteStreamCandidate.isKnownUnsupportedDolbyVision(): Boolean {
         val text = searchText().lowercase()
         return Regex("\\b(?:dolby[ ._-]*vision|dv)\\s*(?:profile\\s*|p\\s*)?8\\.6\\b").containsMatchIn(text)
+    }
+
+    private fun RewriteStreamCandidate.dedupeKey(): String = when {
+        !directUrl.isNullOrBlank() -> "url:$directUrl"
+        !infoHash.isNullOrBlank() -> "hash:${infoHash.lowercase()}:${fileIndex ?: -1}"
+        else -> id
     }
 }

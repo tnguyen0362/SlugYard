@@ -27,8 +27,13 @@ internal fun PlayerRuntimeController.maybeAutoSwitchInternalPlayerOnStartupError
     // ordinary transient errors after first frame stay on the current engine.
     if (!allowEngineFailover) return false
     if (!autoSwitchInternalPlayerOnErrorEnabled) return false
-    if (startupEngineFailoverTriggered) return false
     if (!allowAfterFirstFrame && !isStartupPhaseForEngineFailover()) return false
+    if (allowAfterFirstFrame) {
+        if (postFirstFrameEngineFailoverTriggered) return false
+        postFirstFrameEngineFailoverTriggered = true
+    } else if (startupEngineFailoverTriggered) {
+        return false
+    }
 
     val destination = pickOppositeEngine(currentInternalPlayerEngine)
     beginSwitchTraceSession(reason = "startup-failover", targetEngine = destination)
@@ -38,7 +43,7 @@ internal fun PlayerRuntimeController.maybeAutoSwitchInternalPlayerOnStartupError
     )
     rememberCurrentTrackPreferenceForEngineSwitch()
     Log.w(PlayerRuntimeController.TAG, "Startup playback error; auto-switching engine: $detailedError")
-    startupEngineFailoverTriggered = true
+    if (!allowAfterFirstFrame) startupEngineFailoverTriggered = true
 
     val resumeMs = currentPlaybackPositionMs()?.coerceAtLeast(0L) ?: 0L
     if (resumeMs > 0L) {
@@ -101,6 +106,7 @@ internal fun PlayerRuntimeController.switchInternalPlayerEngineManually() {
     }
 
     startupEngineFailoverTriggered = false
+    postFirstFrameEngineFailoverTriggered = false
     userPausedManually = false
     resetErrorRetryState()
     hidePlayerEngineSwitchInfoJob?.cancel()

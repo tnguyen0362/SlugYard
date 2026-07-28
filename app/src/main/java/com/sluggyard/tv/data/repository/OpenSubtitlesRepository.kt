@@ -126,7 +126,11 @@ class OpenSubtitlesRepository @Inject constructor(
     private fun cachedFileFor(subtitle: Subtitle): File {
         val hash = MessageDigest.getInstance("MD5").digest(subtitle.id.toByteArray())
             .joinToString("") { "%02x".format(it) }
+        val normalizedFormat = subtitle.format?.trim()?.lowercase()?.removePrefix(".")
         val ext = when {
+            normalizedFormat in
+                setOf("srt", "vtt", "webvtt", "ass", "ssa", "ttml", "dfxp", "sup", "pgs", "idx", "sub") ->
+                normalizedFormat.let { if (it == "webvtt") "vtt" else it }
             subtitle.url.endsWith(".vtt", true) -> "vtt"
             subtitle.url.endsWith(".ass", true) -> "ass"
             subtitle.url.endsWith(".ssa", true) -> "ssa"

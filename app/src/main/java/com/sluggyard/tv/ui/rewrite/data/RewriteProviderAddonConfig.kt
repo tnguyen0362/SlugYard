@@ -9,6 +9,8 @@ import java.nio.charset.StandardCharsets
 
 internal const val TorrentioManifestUrl = "https://torrentio.strem.fun/manifest.json"
 internal const val MediaFusionManifestHost = "https://mediafusionfortheweebs.midnightignite.me"
+/** Keyless catalog bootstrap — never embeds a debrid token. */
+internal const val MediaFusionBootstrapManifestUrl = "$MediaFusionManifestHost/manifest.json"
 
 data class RewriteConfiguredAddonUrls(
     val torrentioManifestUrl: String,
@@ -28,6 +30,11 @@ internal fun buildTorrentioManifestUrl(service: DebridService, apiKey: String): 
     return "${TorrentioManifestUrl.removeSuffix("/manifest.json")}/${torrentioProviderKey(service)}=$encoded/manifest.json"
 }
 
+/**
+ * Builds a MediaFusion encrypt request body. Callers must only POST this to a
+ * first-party / self-hosted MediaFusion encrypt URL — never to a shared third-party host
+ * with a live debrid token (see BUG-032).
+ */
 internal fun mediaFusionProviderPayload(service: DebridService, apiKey: String): JsonObject {
     val normalized = apiKey.trim()
     require(normalized.isNotBlank()) { "A Debrid API key is required to configure MediaFusion" }
@@ -44,10 +51,12 @@ internal fun decodeMediaFusionEncryptedPath(payload: JsonObject): String =
     payload["encrypted_str"]?.toString()?.trim('"')?.takeIf(String::isNotBlank)
         ?: throw IllegalArgumentException("MediaFusion returned no configured manifest")
 
-internal fun mediaFusionManifestUrl(encryptedPath: String): String {
+internal fun mediaFusionManifestUrl(host: String, encryptedPath: String): String {
+    val base = host.trim().trimEnd('/')
+    require(base.isNotBlank()) { "MediaFusion host is required" }
     val normalized = encryptedPath.trim()
     require(normalized.isNotBlank() && '/' !in normalized) { "MediaFusion returned an invalid configured manifest" }
-    return "$MediaFusionManifestHost/$normalized/manifest.json"
+    return "$base/$normalized/manifest.json"
 }
 
 private fun DebridService.mediaFusionDisplayName(): String = when (this) {

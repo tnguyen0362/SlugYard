@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
@@ -63,9 +62,7 @@ fun RewriteCloudManagerScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(SlugYardPalette.Surface, RoundedCornerShape(6.dp))
-                .padding(22.dp)
-                .focusRequester(contentFocusRequester)
-                .focusable(),
+                .padding(22.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             val active = connection.activeService
@@ -80,10 +77,11 @@ fun RewriteCloudManagerScreen(
                 style = MaterialTheme.typography.bodyLarge,
             )
             androidx.compose.foundation.layout.Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                DebridService.entries.forEach { service ->
+                DebridService.entries.forEachIndexed { index, service ->
                     FilterChip(
                         selected = selectedService == service,
                         onClick = { selectedService = service; message = null },
+                        modifier = if (index == 0) Modifier.focusRequester(contentFocusRequester) else Modifier,
                         label = { Text(serviceLabel(service)) },
                     )
                 }

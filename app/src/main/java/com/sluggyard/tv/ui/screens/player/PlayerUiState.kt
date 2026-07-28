@@ -6,7 +6,7 @@ import androidx.media3.common.C
 import androidx.media3.common.TrackGroup
 import androidx.media3.ui.AspectRatioFrameLayout
 import com.sluggyard.tv.core.streams.StreamBadgePlacement
-import com.sluggyard.tv.core.streamresolution.ResolvedPlaybackSource
+import com.sluggyard.tv.core.streamresolution.RewritePlaybackHandoff
 import com.sluggyard.tv.data.local.FrameRateMatchingMode
 import com.sluggyard.tv.data.local.InternalPlayerEngine
 import com.sluggyard.tv.data.local.LibassRenderType
@@ -405,7 +405,7 @@ sealed class PlayerEvent {
     data object OnReloadSourceStreams : PlayerEvent()
     data class OnSourceAddonFilterSelected(val addonName: String?) : PlayerEvent()
     data class OnSourceStreamSelected(val stream: Stream) : PlayerEvent()
-    data class OnRewritePlaybackSourceSelected(val source: ResolvedPlaybackSource) : PlayerEvent()
+    data class OnRewritePlaybackSourceSelected(val handoff: RewritePlaybackHandoff) : PlayerEvent()
     data object OnDismissTransientOverlay : PlayerEvent()
     data object OnRetry : PlayerEvent()
     data object OnReportPlaybackIssue : PlayerEvent()

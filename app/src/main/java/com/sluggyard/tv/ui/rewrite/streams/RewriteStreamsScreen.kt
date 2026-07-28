@@ -139,10 +139,9 @@ fun RewriteStreamsScreen(
                             style = if (item.key == "header:$title") MaterialTheme.typography.headlineLarge else MaterialTheme.typography.titleLarge,
                             modifier = Modifier.weight(1f).padding(top = if (item.key == "header:$title") 8.dp else 22.dp),
                         )
-                        if (item.key == "header:$title" && firstStreamId == null) {
+                        if (item.key == "header:$title") {
                             androidx.compose.material3.OutlinedButton(
                                 onClick = onBack,
-                                modifier = contentFocusRequester?.let { Modifier.focusRequester(it) } ?: Modifier,
                             ) {
                                 Text("Back")
                             }

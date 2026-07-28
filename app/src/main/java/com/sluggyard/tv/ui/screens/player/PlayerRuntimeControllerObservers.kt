@@ -14,6 +14,7 @@ import com.sluggyard.tv.data.local.MpvHardwareDecodeMode
 import com.sluggyard.tv.data.local.NextEpisodeThresholdMode
 import com.sluggyard.tv.data.local.PlayerSettings
 import com.sluggyard.tv.data.local.StreamAutoPlayMode
+import com.sluggyard.tv.data.repository.SkipInterval
 import com.sluggyard.tv.domain.model.Subtitle
 import com.sluggyard.tv.domain.model.WatchProgress
 import kotlinx.coroutines.Job
@@ -67,6 +68,7 @@ internal suspend fun PlayerRuntimeController.fetchAddonSubtitlesNow(
     onProgress: ((completed: Int, total: Int, addonName: String?) -> Unit)? = null
 ): List<Subtitle> {
     val request = buildSubtitleFetchRequest() ?: return emptyList()
+    if (rewriteSubtitleMode) return rewriteAddonSubtitles
 
     // Persist the installed addon order into UI state so subtitle badges can
     // render provider attribution even before results arrive.
@@ -131,6 +133,21 @@ internal suspend fun PlayerRuntimeController.fetchAddonSubtitlesNow(
     }.getOrDefault(emptyList())
 
     return (addonSubs + osSubs).distinctBy { it.id }
+}
+
+internal fun PlayerRuntimeController.enableRewriteSubtitleMode() {
+    rewriteSubtitleMode = true
+}
+
+internal fun PlayerRuntimeController.setRewriteAddonSubtitles(subtitles: List<Subtitle>) {
+    rewriteAddonSubtitles = subtitles
+    _uiState.update {
+        it.copy(
+            addonSubtitles = filterToVisibleAddonSubtitles(subtitles),
+            isLoadingAddonSubtitles = false,
+            addonSubtitlesError = null,
+        )
+    }
 }
 
 /**
@@ -539,6 +556,8 @@ private fun PlayerRuntimeController.reconcileSkipIntervals(
 ) {
     if (!settings.skipIntroEnabled) {
         if (skipIntervals.isNotEmpty()) skipIntervals = emptyList()
+        skipIntroFetchedKey = null
+        skipIntroInFlightKey = null
         return
     }
     if (!skipIntroWasEnabled) {
@@ -616,15 +635,21 @@ internal fun PlayerRuntimeController.fetchSkipIntervals(id: String?, season: Int
     val effectiveId = (id?.takeIf { it.isNotBlank() } ?: currentVideoId ?: contentId) ?: return
     val lookupId = normalizeSkipLookupId(effectiveId)
     val cacheKey = "$lookupId:${season ?: 0}:${episode ?: 0}"
-    if (skipIntroFetchedKey == cacheKey) return
-    skipIntroFetchedKey = cacheKey
+    if (skipIntroFetchedKey == cacheKey || skipIntroInFlightKey == cacheKey) return
+    skipIntroInFlightKey = cacheKey
 
     when {
-        tryFetchMalSkipIntervals(lookupId, episode) -> return
-        tryFetchKitsuSkipIntervals(lookupId, episode) -> return
-        tryFetchImdbSkipIntervals(lookupId, season, episode) -> return
-        else -> return
+        tryFetchMalSkipIntervals(lookupId, episode, cacheKey) -> return
+        tryFetchKitsuSkipIntervals(lookupId, episode, cacheKey) -> return
+        tryFetchImdbSkipIntervals(lookupId, season, episode, cacheKey) -> return
+        else -> skipIntroInFlightKey = null
     }
+}
+
+private fun PlayerRuntimeController.completeSkipLookup(cacheKey: String, result: List<SkipInterval>) {
+    skipIntroInFlightKey = null
+    skipIntroFetchedKey = cacheKey.takeIf { result.isNotEmpty() }
+    skipIntervals = result
 }
 
 /** Stremio episode IDs may append :season:episode to an otherwise valid IMDb series ID. */
@@ -633,32 +658,40 @@ internal fun normalizeSkipLookupId(id: String): String =
 
 private fun PlayerRuntimeController.tryFetchMalSkipIntervals(
     effectiveId: String,
-    episode: Int?
+    episode: Int?,
+    cacheKey: String,
 ): Boolean {
     if (!effectiveId.startsWith("mal:", ignoreCase = true)) return false
     val malId = effectiveId.removePrefix("mal:").removePrefix("MAL:")
-    val ep = episode ?: currentEpisode ?: return true
+    val ep = episode ?: currentEpisode ?: run {
+        skipIntroInFlightKey = null
+        return true
+    }
     scope.launch {
         val result = withTimeoutOrNull(15_000L) {
             skipIntroRepository.getSkipIntervalsForMal(malId, ep)
         }.orEmpty()
-        skipIntervals = result
+        completeSkipLookup(cacheKey, result)
     }
     return true
 }
 
 private fun PlayerRuntimeController.tryFetchKitsuSkipIntervals(
     effectiveId: String,
-    episode: Int?
+    episode: Int?,
+    cacheKey: String,
 ): Boolean {
     if (!effectiveId.startsWith("kitsu:", ignoreCase = true)) return false
     val kitsuId = effectiveId.substringAfter("kitsu:", "").ifEmpty { return false }
-    val ep = episode ?: currentEpisode ?: return true
+    val ep = episode ?: currentEpisode ?: run {
+        skipIntroInFlightKey = null
+        return true
+    }
     scope.launch {
         val result = withTimeoutOrNull(15_000L) {
             skipIntroRepository.getSkipIntervalsForKitsu(kitsuId, ep)
         }.orEmpty()
-        skipIntervals = result
+        completeSkipLookup(cacheKey, result)
     }
     return true
 }
@@ -666,7 +699,8 @@ private fun PlayerRuntimeController.tryFetchKitsuSkipIntervals(
 private fun PlayerRuntimeController.tryFetchImdbSkipIntervals(
     effectiveId: String,
     season: Int?,
-    episode: Int?
+    episode: Int?,
+    cacheKey: String,
 ): Boolean {
     if (!effectiveId.startsWith("tt", ignoreCase = true)) return false
     val s = season ?: currentSeason ?: 0
@@ -675,7 +709,7 @@ private fun PlayerRuntimeController.tryFetchImdbSkipIntervals(
         val result = withTimeoutOrNull(15_000L) {
             skipIntroRepository.getSkipIntervals(effectiveId, s, e)
         }.orEmpty()
-        skipIntervals = result
+        completeSkipLookup(cacheKey, result)
     }
     return true
 }

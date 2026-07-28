@@ -83,13 +83,16 @@ private class TorboxManualResolver(
     private val fileSelector: TorboxFileSelector = TorboxFileSelector(),
 ) : DebridManualResolver {
     override val service = DebridService.TORBOX
-    override suspend fun resolve(infoHash: String, fileIndex: Int?): ResolvedPlaybackSource {
+    override suspend fun resolve(infoHash: String, fileIndex: Int?): ResolvedPlaybackSource =
+        resolve(infoHash, fileIndex, null, null)
+
+    override suspend fun resolve(infoHash: String, fileIndex: Int?, season: Int?, episode: Int?): ResolvedPlaybackSource {
         val key = credentials.requiredKey(service)
         val torrentId = transport.createCachedTorrent(key, infoHash).orUnavailable("This torrent is not cached in Torbox")
         val selected = fileSelector.selectFile(
             transport.torrentFiles(key, torrentId).orUnavailable("Torbox could not prepare this stream")
                 .map { TorboxTorrentFileDto(it.id, it.name, null, null, it.mimeType, it.sizeBytes) },
-            resolveFor(infoHash, fileIndex), null, null,
+                resolveFor(infoHash, fileIndex), season, episode,
         ) ?: throw RewriteDebridUnavailableException("Torbox did not return a playable file")
         val url = transport.downloadUrl(key, torrentId, selected.id ?: throw RewriteDebridUnavailableException("Torbox did not return a playable file"))
             .orUnavailable("Torbox could not resolve this stream")
@@ -103,9 +106,12 @@ private class PremiumizeManualResolver(
     private val fileSelector: PremiumizeDirectDownloadFileSelector = PremiumizeDirectDownloadFileSelector(),
 ) : DebridManualResolver {
     override val service = DebridService.PREMIUMIZE
-    override suspend fun resolve(infoHash: String, fileIndex: Int?): ResolvedPlaybackSource {
+    override suspend fun resolve(infoHash: String, fileIndex: Int?): ResolvedPlaybackSource =
+        resolve(infoHash, fileIndex, null, null)
+
+    override suspend fun resolve(infoHash: String, fileIndex: Int?, season: Int?, episode: Int?): ResolvedPlaybackSource {
         val files = transport.directDownload(credentials.requiredKey(service), magnetFor(infoHash)).orUnavailable("Premiumize could not prepare this stream")
-        val selected = fileSelector.selectFile(files.map { PremiumizeDirectDownloadFileDto(it.path, it.sizeBytes, it.url) }, resolveFor(infoHash, fileIndex), null, null)
+        val selected = fileSelector.selectFile(files.map { PremiumizeDirectDownloadFileDto(it.path, it.sizeBytes, it.url) }, resolveFor(infoHash, fileIndex), season, episode)
             ?: throw RewriteDebridUnavailableException("Premiumize did not return a playable file")
         return ResolvedPlaybackSource(selected.link ?: throw RewriteDebridUnavailableException("Premiumize did not return a playable link"), infoHash)
     }
@@ -117,11 +123,14 @@ private class RealDebridManualResolver(
     private val fileSelector: RealDebridFileSelector = RealDebridFileSelector(),
 ) : DebridManualResolver {
     override val service = DebridService.REAL_DEBRID
-    override suspend fun resolve(infoHash: String, fileIndex: Int?): ResolvedPlaybackSource {
+    override suspend fun resolve(infoHash: String, fileIndex: Int?): ResolvedPlaybackSource =
+        resolve(infoHash, fileIndex, null, null)
+
+    override suspend fun resolve(infoHash: String, fileIndex: Int?, season: Int?, episode: Int?): ResolvedPlaybackSource {
         val key = credentials.requiredKey(service)
         val torrentId = transport.addMagnet(key, magnetFor(infoHash)).orUnavailable("Real-Debrid could not add this stream")
         val before = transport.torrentInfo(key, torrentId).orUnavailable("Real-Debrid could not inspect this stream")
-        val selected = fileSelector.selectFile(before.files.map { RealDebridTorrentFileDto(it.id, it.path, it.bytes, null) }, resolveFor(infoHash, fileIndex), null, null)
+        val selected = fileSelector.selectFile(before.files.map { RealDebridTorrentFileDto(it.id, it.path, it.bytes, null) }, resolveFor(infoHash, fileIndex), season, episode)
             ?: throw RewriteDebridUnavailableException("Real-Debrid did not return a playable file")
         transport.selectFile(key, torrentId, selected.id ?: throw RewriteDebridUnavailableException("Real-Debrid did not return a playable file"))
             .orUnavailable("Real-Debrid could not select this stream")

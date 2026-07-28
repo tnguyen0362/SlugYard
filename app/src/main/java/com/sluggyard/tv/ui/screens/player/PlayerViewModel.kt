@@ -13,6 +13,8 @@ import com.sluggyard.tv.core.player.PlaybackLaunchRequest
 import com.sluggyard.tv.core.player.RepositoryPlaybackProgressSink
 import com.sluggyard.tv.core.player.SubtitleFileCache
 import com.sluggyard.tv.core.player.SubtitleInput
+import com.sluggyard.tv.core.streamresolution.ResolvedPlaybackSource
+import com.sluggyard.tv.domain.model.Subtitle
 import com.sluggyard.tv.core.player.TrailerPlayerPool
 import com.sluggyard.tv.core.streams.StreamBadgePresentation
 import com.sluggyard.tv.core.tmdb.TmdbMetadataService
@@ -177,6 +179,18 @@ class PlayerViewModel @Inject constructor(
 
     fun onEvent(event: PlayerEvent) {
         controller.onEvent(event)
+    }
+
+    fun enableRewriteSubtitleMode() {
+        controller.enableRewriteSubtitleMode()
+    }
+
+    fun configureRewriteLaunch(source: ResolvedPlaybackSource) {
+        controller.configureRewriteLaunch(source)
+    }
+
+    fun setRewriteAddonSubtitles(subtitles: List<Subtitle>) {
+        controller.setRewriteAddonSubtitles(subtitles)
     }
 
     fun consumePendingExitReason() {

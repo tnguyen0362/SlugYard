@@ -94,7 +94,7 @@ private fun PlayerFailure(message: String, onBack: () -> Unit, modifier: Modifie
                 color = SlugYardPalette.OnCanvasMuted,
                 textAlign = TextAlign.Center,
             )
-            OutlinedButton(onClick = onBack) { Text("Back to streams") }
+            OutlinedButton(onClick = onBack) { Text("Back") }
         }
     }
 }

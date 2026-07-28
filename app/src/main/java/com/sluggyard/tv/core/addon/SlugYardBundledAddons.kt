@@ -21,7 +21,7 @@ object SlugYardBundledAddons {
     )
 
     const val SLUGYARD_COMMUNITY_ADDON_MANIFEST =
-        "https://mediafusionfortheweebs.midnightignite.me/D-JPpZFd2i8K8NFjTEDOFoYYZKfxv0RyIaBXdhVYa9m-ekkXhqkWB4WsahDS15AFA86fjwu7H2tB1wkkRpE-e17SJIhlmj_HX2-sPV0lC_2hg8XDANf_u4AHq1O-VS-C9ViZJWdm8dTGd4nsrFAVm0IjkAC2-M6YGZ2GPbG7nvklg/manifest.json"
+        "https://mediafusionfortheweebs.midnightignite.me/manifest.json"
 
     fun getDefaultAddons(debridSettings: DebridSettings? = null): List<String> =
         INFRASTRUCTURE_ADDONS.toMutableList().apply {

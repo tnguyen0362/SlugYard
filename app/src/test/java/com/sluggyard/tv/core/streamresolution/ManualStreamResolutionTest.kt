@@ -32,6 +32,7 @@ class ManualStreamResolutionTest {
 
         assertTrue(result is ManualResolutionResult.Ready)
         assertEquals("abcdef" to 4, resolver.lastRequest)
+        assertEquals("torrent", (result as ManualResolutionResult.Ready).source.sourceId)
     }
 
     @Test

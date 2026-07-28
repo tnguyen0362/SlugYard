@@ -19,6 +19,7 @@ import com.sluggyard.tv.ui.rewrite.data.RewriteHomeSettings
 import com.sluggyard.tv.ui.rewrite.data.RewriteProfileState
 import com.sluggyard.tv.ui.rewrite.debrid.RewriteDebridConnection
 import com.sluggyard.tv.core.addonprotocol.ManagedAddon
+import com.sluggyard.tv.core.aggregation.HomeCatalogKey
 import kotlinx.coroutines.launch
 
 @Composable
@@ -30,13 +31,13 @@ fun RewriteSettingsScreen(
     profileState: RewriteProfileState,
     onHideUnreleasedChanged: (Boolean) -> Unit,
     onRememberProfileChanged: (Boolean) -> Unit,
+    onCatalogOrderChanged: (List<HomeCatalogKey>) -> Unit,
     debridConnection: RewriteDebridConnection,
     onConnect: suspend (DebridService, String) -> Unit,
     onDisconnect: suspend (DebridService) -> Unit,
     onDebridEnabledChanged: suspend (Boolean) -> Unit,
     onSelect: suspend (DebridService) -> Unit,
     rewriteAddons: List<ManagedAddon>,
-    onAddonEnabledChanged: (String, Boolean) -> Unit,
     onConfigureAutoSources: suspend () -> Unit,
     onOpenProfiles: () -> Unit,
     contentFocusRequester: FocusRequester? = null,
@@ -68,7 +69,8 @@ fun RewriteSettingsScreen(
                 onTmdbEnrichContinueWatching = { scope.launch { facade.setTmdbEnrichContinueWatching(it) } },
                 onMdblistEnabled = { scope.launch { facade.setMdblistEnabled(it) } },
                 rewriteAddons = rewriteAddons,
-                onAddonEnabledChanged = onAddonEnabledChanged,
+                catalogOrderKeys = homeSettings.catalogOrderKeys,
+                onCatalogOrderChanged = onCatalogOrderChanged,
                 debridConnected = debridConnection.activeService != null,
                 onConfigureAutoSources = { scope.launch { onConfigureAutoSources() } },
             )
@@ -102,11 +104,7 @@ fun RewriteSettingsScreen(
                     categories = facade.categories,
                     selected = selectedCategory,
                     onSelect = { category ->
-                        if (category == RewriteSettingsCategory.Profiles) {
-                            onOpenProfiles()
-                        } else {
-                            lastOpenedCategory = category
-                        }
+                        lastOpenedCategory = category
                     },
                     categoryListState = categoryListState,
                     initialFocusRequester = contentFocusRequester,

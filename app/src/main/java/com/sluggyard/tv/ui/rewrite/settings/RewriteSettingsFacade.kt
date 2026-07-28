@@ -14,13 +14,11 @@ import com.sluggyard.tv.data.local.TmdbSettingsDataStore
 import com.sluggyard.tv.data.local.TraktAuthDataStore
 import com.sluggyard.tv.data.local.TraktAuthState
 import com.sluggyard.tv.data.local.TraktSettingsDataStore
-import com.sluggyard.tv.data.local.WatchProgressSource
 import com.sluggyard.tv.data.local.MoreLikeThisSourcePreference
 import com.sluggyard.tv.data.repository.TraktAuthService
 import com.sluggyard.tv.data.repository.TraktTokenPollResult
 import com.sluggyard.tv.data.remote.dto.trakt.TraktDeviceCodeResponseDto
 import com.sluggyard.tv.domain.model.DebridSettings
-import com.sluggyard.tv.domain.model.LibrarySourceMode
 import com.sluggyard.tv.domain.model.MDBListSettings
 import com.sluggyard.tv.domain.model.TmdbSettings
 import kotlinx.coroutines.flow.Flow
@@ -52,15 +50,12 @@ interface RewriteSettingsFacade {
     suspend fun pollTraktDeviceAuth(): TraktTokenPollResult
     suspend fun disconnectTrakt()
 
-    suspend fun setWatchProgressSource(source: WatchProgressSource)
-    suspend fun setLibrarySourceMode(mode: LibrarySourceMode)
     suspend fun setMoreLikeThisSource(source: MoreLikeThisSourcePreference)
     suspend fun setTmdbEnabled(enabled: Boolean)
     suspend fun setTmdbEnrichContinueWatching(enabled: Boolean)
     suspend fun setMdblistEnabled(enabled: Boolean)
     suspend fun setMdblistApiKey(apiKey: String)
     suspend fun setDebridEnabled(enabled: Boolean)
-    suspend fun setDebridProviderApiKey(providerId: String, apiKey: String)
     suspend fun setFrameRateMatchingMode(mode: FrameRateMatchingMode)
     suspend fun setResolutionMatchingEnabled(enabled: Boolean)
     suspend fun setAudioOutputChannels(channels: AudioOutputChannels)
@@ -119,14 +114,6 @@ class DefaultRewriteSettingsFacade @Inject constructor(
         traktAuthDataStore.clearAuth()
     }
 
-    override suspend fun setWatchProgressSource(source: WatchProgressSource) {
-        traktSettings.setWatchProgressSource(source)
-    }
-
-    override suspend fun setLibrarySourceMode(mode: LibrarySourceMode) {
-        traktSettings.setLibrarySourceMode(mode)
-    }
-
     override suspend fun setMoreLikeThisSource(source: MoreLikeThisSourcePreference) {
         traktSettings.setMoreLikeThisSource(source)
     }
@@ -149,10 +136,6 @@ class DefaultRewriteSettingsFacade @Inject constructor(
 
     override suspend fun setDebridEnabled(enabled: Boolean) {
         debridStore.setEnabled(enabled)
-    }
-
-    override suspend fun setDebridProviderApiKey(providerId: String, apiKey: String) {
-        debridStore.setProviderApiKey(providerId, apiKey)
     }
 
     override suspend fun setFrameRateMatchingMode(mode: FrameRateMatchingMode) {

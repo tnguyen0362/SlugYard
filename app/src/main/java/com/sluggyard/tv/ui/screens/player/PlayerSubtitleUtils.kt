@@ -129,6 +129,8 @@ internal object PlayerSubtitleUtils {
             path.endsWith(".vtt") || path.endsWith(".webvtt") -> MimeTypes.TEXT_VTT
             path.endsWith(".ass") || path.endsWith(".ssa") -> MimeTypes.TEXT_SSA
             path.endsWith(".ttml") || path.endsWith(".dfxp") -> MimeTypes.APPLICATION_TTML
+            path.endsWith(".sup") || path.endsWith(".pgs") -> "application/pgs"
+            path.endsWith(".idx") || path.endsWith(".sub") -> "application/vobsub"
             else -> MimeTypes.APPLICATION_SUBRIP
         }
     }

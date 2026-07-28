@@ -13,6 +13,7 @@ object SlugYardCommunitySourcePolicy {
         "https://v3-cinemeta.strem.io/manifest.json",
         "https://opensubtitles-v3.strem.io/manifest.json",
         "https://torrentio.strem.fun/manifest.json",
-        "https://mediafusionfortheweebs.midnightignite.me/D-JPpZFd2i8K8NFjTEDOFoYYZKfxv0RyIaBXdhVYa9m-ekkXhqkWB4WsahDS15AFA86fjwu7H2tB1wkkRpE-e17SJIhlmj_HX2-sPV0lC_2hg8XDANf_u4AHq1O-VS-C9ViZJWdm8dTGd4nsrFAVm0IjkAC2-M6YGZ2GPbG7nvklg/manifest.json",
+        // Keyless catalog only — never a pre-baked encrypted user path with embedded credentials.
+        "https://mediafusionfortheweebs.midnightignite.me/manifest.json",
     )
 }

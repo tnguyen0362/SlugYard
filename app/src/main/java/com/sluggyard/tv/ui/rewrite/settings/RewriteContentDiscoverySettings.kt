@@ -5,6 +5,7 @@ import androidx.compose.material3.Text
 import com.sluggyard.tv.domain.model.TmdbSettings
 import com.sluggyard.tv.domain.model.MDBListSettings
 import com.sluggyard.tv.core.addonprotocol.ManagedAddon
+import com.sluggyard.tv.core.aggregation.HomeCatalogKey
 
 @Composable
 internal fun ContentDiscoverySettings(
@@ -14,7 +15,8 @@ internal fun ContentDiscoverySettings(
     onTmdbEnrichContinueWatching: (Boolean) -> Unit,
     onMdblistEnabled: (Boolean) -> Unit,
     rewriteAddons: List<ManagedAddon>,
-    onAddonEnabledChanged: (String, Boolean) -> Unit,
+    catalogOrderKeys: List<String>,
+    onCatalogOrderChanged: (List<HomeCatalogKey>) -> Unit,
     debridConnected: Boolean,
     onConfigureAutoSources: () -> Unit,
 ) {
@@ -28,7 +30,22 @@ internal fun ContentDiscoverySettings(
         RewriteToggleRow("TMDB enrichment", "Improve artwork, metadata, dates, and details.", tmdb.enabled, onTmdbEnabled)
         RewriteToggleRow("Continue Watching artwork", "Use TMDB enrichment for saved playback tiles.", tmdb.enrichContinueWatching, onTmdbEnrichContinueWatching)
         RewriteToggleRow("MDBList ratings", "Show ratings from the configured MDBList account.", mdblist.enabled, onMdblistEnabled)
-        RewriteValueRow("Catalog ordering", "Follow installed addon order")
+        val customOrder = catalogOrderKeys.isNotEmpty()
+        RewriteCycleRow(
+            title = "Catalog ordering",
+            value = if (customOrder) "Reverse addon order" else "Installed addon order",
+            values = listOf("Installed addon order", "Reverse addon order"),
+        ) { value ->
+            onCatalogOrderChanged(
+                if (value == "Reverse addon order") {
+                    rewriteAddons.asReversed().flatMap { addon ->
+                        addon.manifest.catalogs.map { catalog -> HomeCatalogKey(addon.manifest.id, catalog.id) }
+                    }
+                } else {
+                    emptyList()
+                },
+            )
+        }
     }
     RewriteSettingsGroup("Auto Sources") {
         Text(
@@ -39,30 +56,26 @@ internal fun ContentDiscoverySettings(
         RewriteActionRow(
             title = "SlugYard Auto Sources",
             description = when {
-                !debridConnected -> "Connect a debrid provider first. Setup will configure Torrentio and MediaFusion automatically."
-                configuredAutoSources == autoSourceAddons.size && autoSourceAddons.isNotEmpty() -> "Ready. Torrentio and MediaFusion use your active debrid provider."
+                !debridConnected -> "Connect a debrid provider first. Setup configures Torrentio with your key; MediaFusion stays keyless unless you self-host encrypt."
+                configuredAutoSources == autoSourceAddons.size && autoSourceAddons.isNotEmpty() -> "Ready. Torrentio uses your active debrid provider; MediaFusion is keyless unless self-hosted."
                 configuredAutoSources > 0 -> "$configuredAutoSources of ${autoSourceAddons.size.coerceAtLeast(2)} sources ready. Run setup again to retry the unavailable source."
-                else -> "Configure Torrentio and MediaFusion for plug-and-play streaming."
+                else -> "Configure Torrentio for debrid streaming. MediaFusion catalogs stay available without sending your key to a third party."
             },
             actionLabel = if (configuredAutoSources > 0) "Reconfigure" else "Set up",
             onClick = onConfigureAutoSources,
         )
         autoSourceAddons.forEach { addon ->
-            RewriteToggleRow(
+            RewriteValueRow(
                 title = addon.manifest.name,
-                description = if (addon.configuredManifestUrl.isNullOrBlank()) "Needs setup" else "Configured for active debrid provider",
-                checked = addon.enabled,
-                onCheckedChange = { enabled -> onAddonEnabledChanged(addon.manifest.id, enabled) },
+                value = if (addon.configuredManifestUrl.isNullOrBlank()) "Needs setup" else "Ready for active debrid provider",
             )
         }
     }
     RewriteSettingsGroup("Installed addons") {
         visibleAddons.forEach { addon ->
-            RewriteToggleRow(
+            RewriteValueRow(
                 title = addon.manifest.name,
-                description = addon.manifestUrl,
-                checked = addon.enabled,
-                onCheckedChange = { enabled -> onAddonEnabledChanged(addon.manifest.id, enabled) },
+                value = "Managed source",
             )
         }
         if (visibleAddons.isEmpty()) RewriteValueRow("Sources", "No managed addons available")

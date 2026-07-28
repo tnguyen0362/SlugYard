@@ -63,6 +63,7 @@ fun RewriteAuthGate(
     sessions: SupabaseSessionStore,
     guestSession: RewriteGuestSessionStore,
     onAuthenticated: () -> Unit,
+    forceChoice: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     var mode by remember { mutableStateOf(AuthGateMode.Choice) }
@@ -93,7 +94,7 @@ fun RewriteAuthGate(
                 // Guest is an ongoing usage mode, not a one-shot bypass: once someone picks
                 // "Continue as Guest" we must not force them back through this screen on every
                 // process restart (TV low-memory kill, reboot, app update, etc).
-                if (guestSession.isGuest()) onAuthenticated()
+                if (guestSession.isGuest() && !forceChoice) onAuthenticated()
             }
         }
         bootstrapping = false
@@ -149,6 +150,9 @@ fun RewriteAuthGate(
                             color = SlugYardPalette.Accent,
                         )
                     } else if (mode == AuthGateMode.Choice) {
+                        message?.let { error ->
+                            Text(error, color = SlugYardPalette.Danger)
+                        }
                         AuthActionButton(
                             label = "Sign In",
                             onClick = { mode = AuthGateMode.SignIn; message = null },
@@ -162,11 +166,14 @@ fun RewriteAuthGate(
                         )
                         AuthActionButton(
                             label = "Continue as Guest",
-                            onClick = {
-                                scope.launch {
+                                onClick = {
+                                    scope.launch {
+                                    // Guest mode must not inherit an old authenticated session;
+                                    // otherwise background sync can continue under the wrong account.
+                                    auth.signOut()
                                     guestSession.setGuest(true)
                                     onAuthenticated()
-                                }
+                                    }
                             },
                             primary = false,
                         )

@@ -126,6 +126,7 @@ interface ArmApi {
 
 @JsonClass(generateAdapter = true)
 data class ArmEntry(
+    @Json(name = "season") val season: Int? = null,
     @Json(name = "myanimelist") val myanimelist: Int? = null,
     @Json(name = "anilist") val anilist: Int? = null,
     @Json(name = "kitsu") val kitsu: Int? = null,

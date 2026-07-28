@@ -15,6 +15,8 @@ import com.sluggyard.tv.core.addonprotocol.ManagedAddon
 import com.sluggyard.tv.core.addonprotocol.SlugYardCommunitySourcePolicy
 import com.sluggyard.tv.core.addonprotocol.reduceAddonRegistry
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -37,11 +39,16 @@ interface RewriteAddonRegistry {
 class RewriteAddonRegistryStore(
     private val dataStore: DataStore<Preferences>,
 ) : RewriteAddonRegistry {
-    override val state: Flow<AddonRegistryState> = dataStore.data.map { preferences ->
-        preferences[rewriteAddonRegistryKey]
+    private val runtimeConfiguredUrls = MutableStateFlow<Map<String, String>>(emptyMap())
+
+    override val state: Flow<AddonRegistryState> = combine(dataStore.data, runtimeConfiguredUrls) { preferences, runtime ->
+        val persisted = preferences[rewriteAddonRegistryKey]
             ?.let(RewriteAddonRegistryCodec::decode)
             ?.let(::sanitizeCuratedRegistry)
             ?: AddonRegistryState()
+        AddonRegistryState(persisted.addons.map { addon ->
+            addon.copy(configuredManifestUrl = runtime[addon.manifestUrl])
+        })
     }
 
     override suspend fun dispatch(action: AddonRegistryAction) {
@@ -57,6 +64,10 @@ class RewriteAddonRegistryStore(
     }
 
     override suspend fun ensureCurated(addons: List<ManagedAddon>) {
+        runtimeConfiguredUrls.value = addons
+            .filter { it.manifestUrl in SlugYardCommunitySourcePolicy.bootstrapManifestUrls }
+            .mapNotNull { addon -> addon.configuredManifestUrl?.let { addon.manifestUrl to it } }
+            .toMap()
         if (addons.isEmpty()) return
         dataStore.edit { preferences ->
             val current = preferences[rewriteAddonRegistryKey]
@@ -90,20 +101,13 @@ internal fun sanitizeCuratedRegistry(state: AddonRegistryState): AddonRegistrySt
             .filter { it.manifestUrl in SlugYardCommunitySourcePolicy.bootstrapManifestUrls }
             .map { addon ->
                 addon.copy(
-                    configuredManifestUrl = addon.configuredManifestUrl?.takeIf {
-                        isAllowedConfiguredManifest(addon.manifestUrl, it)
-                    },
+                    // Configured manifest URLs may contain provider tokens. They are runtime-only;
+                    // credentials remain in the encrypted provider store and are rehydrated by
+                    // community provisioning on app start.
+                    configuredManifestUrl = null,
                 )
             },
     )
-
-private fun isAllowedConfiguredManifest(registryUrl: String, configuredUrl: String): Boolean = runCatching {
-    val registry = java.net.URI(registryUrl)
-    val configured = java.net.URI(configuredUrl)
-    registry.scheme == configured.scheme &&
-        registry.host.equals(configured.host, ignoreCase = true) &&
-        configured.path.endsWith("/manifest.json")
-}.getOrDefault(false)
 
 object RewriteAddonRegistryCodec {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
@@ -113,7 +117,7 @@ object RewriteAddonRegistryCodec {
             addons = state.addons.map { addon ->
                 StoredAddon(
                     manifestUrl = addon.manifestUrl,
-                    configuredManifestUrl = addon.configuredManifestUrl,
+                    configuredManifestUrl = null,
                     enabled = addon.enabled,
                     manifest = addon.manifest.toStored(),
                 )
@@ -121,9 +125,10 @@ object RewriteAddonRegistryCodec {
         ),
     )
 
-    fun decode(raw: String): AddonRegistryState = runCatching {
+    fun decode(raw: String): AddonRegistryState = decodeOrNull(raw) ?: AddonRegistryState()
+    fun decodeOrNull(raw: String): AddonRegistryState? = runCatching {
         json.decodeFromString<StoredRegistry>(raw).toDomain()
-    }.getOrDefault(AddonRegistryState())
+    }.getOrNull()
 
     private fun AddonManifestContract.toStored() = StoredManifest(
         id = id,

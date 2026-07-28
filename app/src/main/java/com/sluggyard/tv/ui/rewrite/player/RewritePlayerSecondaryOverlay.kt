@@ -52,6 +52,7 @@ import com.sluggyard.tv.ui.screens.player.RewritePlayerSecondaryActions
 import com.sluggyard.tv.ui.rewrite.seasonDisplayLabel
 
 /** Rewrite-owned sources and episode sheets; they dispatch intents but never select playback files. */
+@Deprecated("Production uses RewritePlayerSecondaryOverlayV2; retained for legacy tests only.")
 @Composable
 fun RewritePlayerSecondaryOverlay(
     state: PlayerUiState,

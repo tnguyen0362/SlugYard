@@ -35,6 +35,7 @@ data class AddonSubtitleTrack(
     val id: String,
     val language: String?,
     val url: String,
+    val format: String? = null,
 )
 
 /** Decodes only documented response fields and ignores addon-specific extra data safely. */
@@ -98,6 +99,9 @@ object StremioResponseDecoder {
             id = objectValue.string("id")?.takeIf(String::isNotBlank) ?: "$index:$url",
             language = objectValue.string("lang") ?: objectValue.string("language"),
             url = url,
+            format = objectValue.string("format")
+                ?: url.substringBefore('?').substringBefore('#').substringAfterLast('.', "")
+                    .takeIf { it.isNotBlank() },
         )
     }
 

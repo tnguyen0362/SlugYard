@@ -7,6 +7,8 @@ import com.sluggyard.tv.core.addonprotocol.AddonTransportResult
 import com.sluggyard.tv.core.addonprotocol.ManagedAddon
 import com.sluggyard.tv.core.addonprotocol.StremioAddonGateway
 import com.sluggyard.tv.core.streamresolution.DebridService
+import com.sluggyard.tv.core.streamresolution.CacheCheckResult
+import com.sluggyard.tv.core.streamresolution.DebridProactiveCacheChecker
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
@@ -15,6 +17,7 @@ import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.assertTrue
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import java.util.concurrent.atomic.AtomicInteger
 
 class RewriteStreamsDataSourceTest {
 
@@ -60,6 +63,35 @@ class RewriteStreamsDataSourceTest {
         val state = source.streamGroups("series", "id", null).toList().last().single().state as RewriteStreamGroupState.Error
 
         assertEquals("bad: source responded with HTTP 400", state.message)
+    }
+
+    @Test
+    fun `duplicate torrent hashes across addons share one cache probe`() = runTest {
+        val checks = AtomicInteger(0)
+        val checker = object : DebridProactiveCacheChecker {
+            override val service = DebridService.TORBOX
+            override suspend fun check(infoHashes: Set<String>): Map<String, CacheCheckResult> {
+                checks.incrementAndGet()
+                return infoHashes.associateWith { CacheCheckResult.Definitive(true) }
+            }
+        }
+        val source = RewriteStreamsDataSource(
+            registrySnapshot = { AddonRegistryState(listOf(addon("one"), addon("two"))) },
+            gateway = object : StremioAddonGateway {
+                override suspend fun fetchManifest(manifestUrl: String) = error("unused")
+                override suspend fun fetchCatalog(manifestUrl: String, type: String, catalogId: String, extras: Map<String, String>) = error("unused")
+                override suspend fun fetchMeta(manifestUrl: String, type: String, id: String) = error("unused")
+                override suspend fun fetchStreams(manifestUrl: String, type: String, id: String) = AddonTransportResult.Success(
+                    Json.parseToJsonElement("""{"streams":[{"name":"Torrent","infoHash":"abcdef"}]}""").jsonObject,
+                )
+                override suspend fun fetchSubtitles(manifestUrl: String, type: String, id: String) = error("unused")
+            },
+            proactiveCacheCheckers = setOf(checker),
+        )
+
+        source.streamGroups("movie", "id", DebridService.TORBOX).toList()
+
+        assertEquals(1, checks.get())
     }
 
     private fun addon(id: String) = ManagedAddon(

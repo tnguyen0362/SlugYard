@@ -1,5 +1,6 @@
 package com.sluggyard.tv.ui.rewrite.player
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -55,11 +56,13 @@ enum class RewritePlayerSecondaryPanel {
 
 data class RewritePlayerSecondaryState(
     val title: String,
+    val contentType: String = "movie",
     val panel: RewritePlayerSecondaryPanel = RewritePlayerSecondaryPanel.HIDDEN,
     val sourceGroups: List<RewriteStreamGroup> = emptyList(),
     val sourceLoading: Boolean = false,
     val sourceError: String? = null,
     val selectedSourceAddon: String? = null,
+    val failedSourceIds: Set<String> = emptySet(),
     val episodeLoading: Boolean = false,
     val episodeError: String? = null,
     val seasons: List<Int> = emptyList(),
@@ -67,6 +70,9 @@ data class RewritePlayerSecondaryState(
     val episodes: List<RewriteDetailsEpisode> = emptyList(),
     val episodeSourceId: String? = null,
     val episodeSourceTitle: String? = null,
+    val episodeSourceSeason: Int? = null,
+    val episodeSourceEpisode: Int? = null,
+    val episodeSourceEpisodeTitle: String? = null,
 )
 
 data class RewritePlayerSecondaryActionsV2(
@@ -88,9 +94,25 @@ fun RewritePlayerSecondaryOverlayV2(
 ) {
     if (state.panel == RewritePlayerSecondaryPanel.HIDDEN) return
 
-    val firstFocusRequester = remember(state.panel, state.sourceGroups, state.episodes) { FocusRequester() }
-    LaunchedEffect(state.panel, state.sourceGroups, state.episodes, state.sourceLoading, state.episodeLoading) {
-        runCatching { firstFocusRequester.requestFocus() }
+    BackHandler { actions.onDismiss() }
+
+    val firstFocusRequester = remember(state.panel) { FocusRequester() }
+    val refreshFocusRequester = remember(state.panel) { FocusRequester() }
+    val hasFirstContent = when (state.panel) {
+        RewritePlayerSecondaryPanel.SOURCES,
+        RewritePlayerSecondaryPanel.EPISODE_SOURCES -> state.sourceGroups.any {
+            (it.state as? RewriteStreamGroupState.Content)?.streams?.any { stream ->
+                stream.id !in state.failedSourceIds
+            } == true
+        }
+        RewritePlayerSecondaryPanel.EPISODES -> state.episodes.isNotEmpty()
+        RewritePlayerSecondaryPanel.HIDDEN -> false
+    }
+    LaunchedEffect(state.panel, hasFirstContent, state.sourceLoading, state.episodeLoading) {
+        runCatching {
+            if (hasFirstContent) firstFocusRequester.requestFocus()
+            else refreshFocusRequester.requestFocus()
+        }
     }
 
     Box(
@@ -132,11 +154,20 @@ fun RewritePlayerSecondaryOverlayV2(
                     OutlinedButton(onClick = actions.onBackToEpisodes) { Text("Back") }
                 }
                 if (state.panel == RewritePlayerSecondaryPanel.EPISODES) {
-                    OutlinedButton(onClick = actions.onReloadEpisodes) { Text("Refresh") }
+                    OutlinedButton(
+                        onClick = actions.onReloadEpisodes,
+                        modifier = Modifier.focusRequester(refreshFocusRequester),
+                    ) { Text("Refresh") }
                 } else {
-                    OutlinedButton(onClick = actions.onReloadSources) { Text("Refresh") }
+                    OutlinedButton(
+                        onClick = actions.onReloadSources,
+                        modifier = Modifier.focusRequester(refreshFocusRequester),
+                    ) { Text("Refresh") }
                 }
-                OutlinedButton(onClick = actions.onDismiss) { Text("Close") }
+                OutlinedButton(
+                    onClick = actions.onDismiss,
+                    modifier = Modifier.focusRequester(refreshFocusRequester),
+                ) { Text("Close") }
             }
 
             when (state.panel) {
@@ -181,6 +212,16 @@ private fun SourceContent(
         .filter { state.selectedSourceAddon == null || it.addonName == state.selectedSourceAddon }
         .flatMap { group ->
             (group.state as? RewriteStreamGroupState.Content)?.streams.orEmpty()
+        }
+        .filterNot { it.id in state.failedSourceIds }
+        .let { values ->
+            com.sluggyard.tv.ui.rewrite.streams.RewriteStreamScoringEngine.rankedCandidates(
+                values,
+                com.sluggyard.tv.ui.rewrite.streams.RewriteStreamScoringEngine.Context(
+                    title = state.title,
+                    contentType = state.contentType,
+                ),
+            )
         }
     if (candidates.isNotEmpty()) {
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {

@@ -7,7 +7,7 @@ import com.sluggyard.tv.core.debrid.DirectDebridPlayableResult
 import com.sluggyard.tv.core.network.NetworkResult
 import com.sluggyard.tv.core.player.StreamAutoPlaySelector
 import com.sluggyard.tv.core.player.StreamScoringEngine
-import com.sluggyard.tv.core.streamresolution.ResolvedPlaybackSource
+import com.sluggyard.tv.core.streamresolution.RewritePlaybackHandoff
 import com.sluggyard.tv.data.local.PlayerSettings
 import com.sluggyard.tv.data.local.StreamAutoPlayMode
 import com.sluggyard.tv.data.local.StreamAutoPlaySource
@@ -15,6 +15,7 @@ import com.sluggyard.tv.domain.model.AddonStreams
 import com.sluggyard.tv.domain.model.Stream
 import com.sluggyard.tv.domain.model.StreamDebridCacheState
 import com.sluggyard.tv.domain.model.Video
+import com.sluggyard.tv.domain.model.WatchProgress
 import com.sluggyard.tv.domain.model.enabledAddons
 import com.sluggyard.tv.ui.components.SourceChipItem
 import com.sluggyard.tv.ui.components.SourceChipStatus
@@ -632,7 +633,7 @@ private fun PlayerRuntimeController.openExternalStreamInBrowser(
 }
 
 @androidx.annotation.OptIn(UnstableApi::class)
-internal fun PlayerRuntimeController.switchToSourceStream(stream: Stream) {
+internal fun PlayerRuntimeController.switchToSourceStream(stream: Stream, resumePositionMs: Long? = null) {
     sourceStreamsScope?.cancel()
     sourceStreamsScope = null
     sourceStreamsJob = null
@@ -653,21 +654,63 @@ internal fun PlayerRuntimeController.switchToSourceStream(stream: Stream) {
         return
     }
 
-    beginHttpSourceStream(stream, url)
-    loadSavedProgressFor(currentSeason, currentEpisode)
+    if (resumePositionMs != null) {
+        pendingResumeProgress = if (resumePositionMs > 0L) {
+            WatchProgress(
+                contentId = contentId.orEmpty(),
+                contentType = contentType.orEmpty(),
+                name = title,
+                poster = poster,
+                backdrop = backdrop,
+                logo = logo,
+                videoId = currentVideoId ?: contentId.orEmpty(),
+                season = currentSeason,
+                episode = currentEpisode,
+                episodeTitle = currentEpisodeTitle,
+                position = resumePositionMs,
+                duration = 0L,
+                lastWatched = System.currentTimeMillis(),
+            )
+        } else null
+    }
+    if (resumePositionMs == null) {
+        // The progress read must finish before beginHttpSourceStream() initializes the player;
+        // otherwise STATE_READY can fire before pendingResumeProgress is populated.
+        scope.launch {
+            loadSavedProgressSuspend(currentSeason, currentEpisode)
+            beginHttpSourceStream(stream, url)
+        }
+    } else {
+        beginHttpSourceStream(stream, url)
+    }
 }
 
 /**
  * Narrow bridge for the Rewrite source sheet. Rewrite performs discovery, ranking, and debrid
  * resolution itself; the retained player only receives the already-resolved URL at this boundary.
  */
-internal fun PlayerRuntimeController.switchToRewritePlaybackSource(source: ResolvedPlaybackSource) {
+internal fun PlayerRuntimeController.switchToRewritePlaybackSource(handoff: RewritePlaybackHandoff) {
+    contentId = handoff.contentId
+    contentType = handoff.contentType
+    currentVideoId = handoff.contentId
+    currentSeason = handoff.season
+    currentEpisode = handoff.episode
+    currentEpisodeTitle = handoff.episodeTitle
+    _uiState.update {
+        it.copy(
+            contentType = handoff.contentType,
+            currentVideoId = handoff.contentId,
+            currentSeason = handoff.season,
+            currentEpisode = handoff.episode,
+            currentEpisodeTitle = handoff.episodeTitle,
+        )
+    }
     switchToSourceStream(
         Stream(
-            name = source.sourceId,
-            title = source.sourceId,
+            name = handoff.source.sourceId,
+            title = handoff.source.sourceId,
             description = null,
-            url = source.url,
+            url = handoff.source.url,
             ytId = null,
             infoHash = null,
             fileIdx = null,
@@ -676,6 +719,7 @@ internal fun PlayerRuntimeController.switchToRewritePlaybackSource(source: Resol
             addonName = "Rewrite",
             addonLogo = null,
         ),
+        resumePositionMs = handoff.resumePositionMs,
     )
 }
 
@@ -1341,6 +1385,7 @@ private fun PlayerRuntimeController.beginHttpEpisodeStream(
     playbackStartedForParentalGuide = false
     skipIntervals = emptyList()
     skipIntroFetchedKey = null
+    skipIntroInFlightKey = null
     lastActiveSkipType = null
     autoSkippedIntervalKeys.clear()
 
@@ -1444,6 +1489,7 @@ private fun PlayerRuntimeController.switchToEpisodeStreamCommon(
     playbackStartedForParentalGuide = false
     skipIntervals = emptyList()
     skipIntroFetchedKey = null
+    skipIntroInFlightKey = null
     lastActiveSkipType = null
     autoSkippedIntervalKeys.clear()
 

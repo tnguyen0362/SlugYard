@@ -40,6 +40,7 @@ import com.sluggyard.tv.data.repository.TraktEpisodeMappingService
 import com.sluggyard.tv.data.repository.TraktScrobbleItem
 import com.sluggyard.tv.data.repository.TraktScrobbleService
 import com.sluggyard.tv.domain.model.Video
+import com.sluggyard.tv.domain.model.Subtitle
 import com.sluggyard.tv.domain.model.WatchProgress
 import com.sluggyard.tv.domain.repository.AddonRepository
 import com.sluggyard.tv.domain.repository.MetaRepository
@@ -159,13 +160,13 @@ class PlayerRuntimeController(
     )
 
     internal val navigationArgs = launchRequest
-    internal val initialStreamUrl: String = navigationArgs.streamUrl
+    internal var initialStreamUrl: String = navigationArgs.streamUrl
     internal val title: String = navigationArgs.title
     internal val streamName: String? = navigationArgs.streamName
     internal val year: String? = navigationArgs.year
     internal val headersJson: String? = navigationArgs.headersJson
-    internal val contentId: String? = navigationArgs.contentId
-    internal val contentType: String? = navigationArgs.contentType
+    internal var contentId: String? = navigationArgs.contentId
+    internal var contentType: String? = navigationArgs.contentType
     internal val contentName: String? = navigationArgs.contentName
     internal val poster: String? = navigationArgs.poster
     internal val backdrop: String? = navigationArgs.backdrop
@@ -374,9 +375,12 @@ class PlayerRuntimeController(
     internal var autoSkipSegmentTypes: Set<AutoSkipSegmentType> = emptySet()
     internal var playerSettingsInitialized: Boolean = false
     internal var skipIntroFetchedKey: String? = null
+    internal var skipIntroInFlightKey: String? = null
     internal val autoSkippedIntervalKeys: MutableSet<String> = mutableSetOf()
     internal var lastActiveSkipType: String? = null
     internal var autoSubtitleSelected: Boolean = false
+    internal var rewriteSubtitleMode: Boolean = false
+    internal var rewriteAddonSubtitles: List<Subtitle> = emptyList()
     internal var lastSubtitlePreferredLanguage: String? = null
     internal var lastSubtitleSecondaryLanguage: String? = null
     internal var lastUseForcedSubtitles: Boolean? = null
@@ -398,6 +402,7 @@ class PlayerRuntimeController(
     internal var streamReuseLastLinkEnabled: Boolean = false
     internal var autoSwitchInternalPlayerOnErrorEnabled: Boolean = false
     internal var startupEngineFailoverTriggered: Boolean = false
+    internal var postFirstFrameEngineFailoverTriggered: Boolean = false
     internal var runtimeInternalPlayerEngineOverride: InternalPlayerEngine? = null
     internal var resolvedAutoPlayerEngine: InternalPlayerEngine? = null
     internal var currentInternalPlayerEngine: InternalPlayerEngine = InternalPlayerEngine.EXOPLAYER

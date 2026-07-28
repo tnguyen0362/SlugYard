@@ -28,6 +28,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.sluggyard.tv.core.streamresolution.DebridService
@@ -47,6 +51,7 @@ private fun RewriteSettingsRowShell(
     onClick: (() -> Unit)?,
     focused: Boolean,
     interaction: MutableInteractionSource,
+    contentDescription: String? = null,
     content: @Composable RowScope.() -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
@@ -60,6 +65,14 @@ private fun RewriteSettingsRowShell(
                     if (onClick != null) {
                         Modifier.clickable(interactionSource = interaction, indication = null, onClick = onClick)
                     } else Modifier
+                )
+                .then(
+                    contentDescription?.let { description ->
+                        Modifier.semantics {
+                            this.contentDescription = description
+                            role = Role.Button
+                        }
+                    } ?: Modifier,
                 )
                 .padding(horizontal = 4.dp, vertical = 18.dp),
         ) {
@@ -83,7 +96,12 @@ internal fun RewriteToggleRow(
 ) {
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
-    RewriteSettingsRowShell(onClick = { onCheckedChange(!checked) }, focused = focused, interaction = interaction) {
+    RewriteSettingsRowShell(
+        onClick = { onCheckedChange(!checked) },
+        focused = focused,
+        interaction = interaction,
+        contentDescription = "$title. $description. ${if (checked) "On" else "Off"}.",
+    ) {
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
@@ -106,7 +124,12 @@ internal fun RewriteToggleRow(
 @Composable
 internal fun RewriteValueRow(title: String, value: String) {
     val interaction = remember { MutableInteractionSource() }
-    RewriteSettingsRowShell(onClick = null, focused = false, interaction = interaction) {
+    RewriteSettingsRowShell(
+        onClick = null,
+        focused = false,
+        interaction = interaction,
+        contentDescription = "$title: $value",
+    ) {
         Text(
             title,
             style = MaterialTheme.typography.titleMedium,
@@ -135,7 +158,12 @@ internal fun RewriteActionRow(
 ) {
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
-    RewriteSettingsRowShell(onClick = onClick, focused = focused, interaction = interaction) {
+    RewriteSettingsRowShell(
+        onClick = onClick,
+        focused = focused,
+        interaction = interaction,
+        contentDescription = "$title. $description. $actionLabel",
+    ) {
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(

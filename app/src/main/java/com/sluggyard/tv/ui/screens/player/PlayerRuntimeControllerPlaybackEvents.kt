@@ -610,7 +610,8 @@ private fun PlayerRuntimeController.isShortPlaceholderStream(): Boolean {
 }
 
 internal fun PlayerRuntimeController.saveWatchProgressInternal(position: Long, duration: Long, syncRemote: Boolean = true) {
-    if (contentId.isNullOrEmpty() || contentType.isNullOrEmpty()) return
+    val currentContentId = contentId?.takeIf { it.isNotEmpty() } ?: return
+    val currentContentType = contentType?.takeIf { it.isNotEmpty() } ?: return
     if (position < 1_000L) return
 
     val fallbackPercent = if (duration <= 0L) 5f else null
@@ -619,19 +620,19 @@ internal fun PlayerRuntimeController.saveWatchProgressInternal(position: Long, d
     // but videoId carries a valid IMDB/TMDB, use the resolved ID to avoid
     // duplicate CW entries (one local with a garbage ID, one from Trakt).
     val effectiveContentId = if (isTraktCwActive) {
-        resolveEffectiveContentId(contentId, currentVideoId)
+        resolveEffectiveContentId(currentContentId, currentVideoId)
     } else {
-        contentId
+        currentContentId
     }
 
     val progress = WatchProgress(
         contentId = effectiveContentId,
-        contentType = contentType,
+        contentType = currentContentType,
         name = contentName ?: title,
         poster = poster,
         backdrop = backdrop,
         logo = logo,
-        videoId = currentVideoId ?: contentId,
+        videoId = currentVideoId ?: currentContentId,
         season = currentSeason,
         episode = currentEpisode,
         episodeTitle = currentEpisodeTitle,
@@ -998,7 +999,7 @@ fun PlayerRuntimeController.onEvent(event: PlayerEvent) {
         PlayerEvent.OnReloadSourceStreams -> loadSourceStreams(forceRefresh = true)
         is PlayerEvent.OnSourceAddonFilterSelected -> filterSourceStreamsByAddon(event.addonName)
         is PlayerEvent.OnSourceStreamSelected -> switchToSourceStream(event.stream)
-        is PlayerEvent.OnRewritePlaybackSourceSelected -> switchToRewritePlaybackSource(event.source)
+        is PlayerEvent.OnRewritePlaybackSourceSelected -> switchToRewritePlaybackSource(event.handoff)
         PlayerEvent.OnDismissTransientOverlay -> dismissTransientOverlay()
         PlayerEvent.OnRetry -> handleRetry()
         PlayerEvent.OnReportPlaybackIssue -> submitPlaybackIssueReport()

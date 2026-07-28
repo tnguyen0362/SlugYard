@@ -8,6 +8,6 @@ class RewriteSettingsEffectsTest {
     fun profileSelectionFallsBackToFirstProfileWhenRememberLastIsDisabled() {
         assertEquals("second", effectiveProfileId("second", true, listOf("first", "second")))
         assertEquals("first", effectiveProfileId("second", false, listOf("first", "second")))
-        assertEquals("default", effectiveProfileId("missing", false, emptyList()))
+        assertEquals("1", effectiveProfileId("missing", false, emptyList()))
     }
 }

@@ -17,5 +17,10 @@ class SlugYardCommunitySourcePolicyTest {
     fun `never embeds a customer debrid credential in a backend manifest URL`() {
         assertTrue(SlugYardCommunitySourcePolicy.bootstrapManifestUrls.isNotEmpty())
         assertFalse(SlugYardCommunitySourcePolicy.bootstrapManifestUrls.any { it.contains("apikey=", ignoreCase = true) })
+        assertFalse(
+            SlugYardCommunitySourcePolicy.bootstrapManifestUrls.any {
+                it.contains("/D-", ignoreCase = false) || it.contains("encrypted", ignoreCase = true)
+            },
+        )
     }
 }

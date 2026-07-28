@@ -4,6 +4,7 @@ import com.sluggyard.tv.ui.rewrite.RewriteNetworkClient
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -81,11 +82,18 @@ class RewriteTorboxTransport(
         Request.Builder().url("https://api.torbox.app/$path").header("Authorization", "Bearer ${apiKey.trim()}").post(body).build(),
     )
 
-    private suspend fun request(request: Request): RewriteTorboxResult<JsonObject> = withContext(Dispatchers.IO) {
+    private suspend fun request(request: Request): RewriteTorboxResult<JsonObject> = retryRewriteProviderCall(
+        isRetryable = { result ->
+            result is RewriteTorboxResult.NetworkFailure ||
+                result is RewriteTorboxResult.HttpFailure && (result.statusCode == 408 || result.statusCode == 429 || result.statusCode >= 500)
+        },
+    ) {
+        executeOnce(request)
+    }
+
+    private suspend fun executeOnce(request: Request): RewriteTorboxResult<JsonObject> = withContext(Dispatchers.IO) {
         try {
-            android.util.Log.d("SlugYardTorbox", "request ${request.method} ${request.url.encodedPath}")
             client.newCall(request).execute().use { response ->
-                android.util.Log.d("SlugYardTorbox", "response ${request.url.encodedPath} code=${response.code}")
                 if (!response.isSuccessful) return@withContext RewriteTorboxResult.HttpFailure(response.code)
                 val text = response.body?.string() ?: return@withContext RewriteTorboxResult.InvalidResponse
                 val payload = runCatching { json.parseToJsonElement(text).jsonObject }.getOrNull()
@@ -95,9 +103,22 @@ class RewriteTorboxTransport(
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (failure: Exception) {
-            android.util.Log.e("SlugYardTorbox", "request failed ${request.url.encodedPath}", failure)
+            android.util.Log.e("SlugYardTorbox", "provider request failed", failure)
             RewriteTorboxResult.NetworkFailure(failure)
         }
+    }
+}
+
+internal suspend fun <T> retryRewriteProviderCall(
+    isRetryable: (T) -> Boolean,
+    operation: suspend () -> T,
+): T {
+    var attempt = 0
+    while (true) {
+        val result = operation()
+        if (!isRetryable(result) || attempt >= 2) return result
+        delay(250L shl attempt)
+        attempt++
     }
 }
 

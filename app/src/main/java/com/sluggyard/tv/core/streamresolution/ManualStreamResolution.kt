@@ -7,11 +7,27 @@ data class ManualStreamSelection(
     val directUrl: String?,
     val infoHash: String?,
     val fileIndex: Int?,
+    val season: Int? = null,
+    val episode: Int? = null,
 )
 
 data class ResolvedPlaybackSource(
     val url: String,
     val sourceId: String,
+)
+
+data class RewritePlaybackHandoff(
+    val source: ResolvedPlaybackSource,
+    val contentId: String,
+    val contentType: String,
+    val title: String,
+    val season: Int? = null,
+    val episode: Int? = null,
+    val episodeTitle: String? = null,
+    val addonId: String? = null,
+    val parentId: String? = null,
+    val parentType: String? = null,
+    val resumePositionMs: Long = 0L,
 )
 
 sealed interface ManualResolutionResult {
@@ -24,6 +40,8 @@ sealed interface ManualResolutionResult {
 interface DebridManualResolver {
     val service: DebridService
     suspend fun resolve(infoHash: String, fileIndex: Int?): ResolvedPlaybackSource
+    suspend fun resolve(infoHash: String, fileIndex: Int?, season: Int?, episode: Int?): ResolvedPlaybackSource =
+        resolve(infoHash, fileIndex)
 }
 
 /**
@@ -50,7 +68,10 @@ class ManualStreamResolutionCoordinator(
         val resolver = resolvers.firstOrNull { it.service == service }
             ?: return ManualResolutionResult.Unavailable("The configured debrid provider is unavailable")
         return try {
-            ManualResolutionResult.Ready(resolver.resolve(infoHash, selection.fileIndex))
+            ManualResolutionResult.Ready(
+                resolver.resolve(infoHash, selection.fileIndex, selection.season, selection.episode)
+                    .copy(sourceId = selection.id),
+            )
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (failure: Exception) {

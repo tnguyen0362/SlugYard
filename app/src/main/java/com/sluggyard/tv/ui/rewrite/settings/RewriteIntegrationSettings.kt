@@ -28,9 +28,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.sluggyard.tv.core.streamresolution.DebridService
 import com.sluggyard.tv.data.local.TraktAuthState
-import com.sluggyard.tv.data.local.WatchProgressSource
 import com.sluggyard.tv.domain.model.DebridSettings
-import com.sluggyard.tv.domain.model.LibrarySourceMode
 import com.sluggyard.tv.domain.model.TmdbSettings
 import com.sluggyard.tv.domain.model.MDBListSettings
 import com.sluggyard.tv.ui.rewrite.debrid.RewriteDebridConnection
@@ -59,7 +57,6 @@ internal fun IntegrationsSettings(
     var credentialError by remember { mutableStateOf<String?>(null) }
     var traktCode by remember { mutableStateOf<com.sluggyard.tv.data.remote.dto.trakt.TraktDeviceCodeResponseDto?>(null) }
     var traktMessage by remember { mutableStateOf<String?>(null) }
-    val moreLikeThisSource by facade.traktSettings.moreLikeThisSource.collectAsState(initial = com.sluggyard.tv.data.local.MoreLikeThisSourcePreference.TMDB)
 
     RewriteSettingsGroup("Trakt") {
         RewriteValueRow("Connection", if (traktAuth.isAuthenticated) "Connected${traktAuth.username?.let { " as $it" } ?: ""}" else "Not connected")
@@ -79,8 +76,9 @@ internal fun IntegrationsSettings(
                 )
                 LaunchedEffect(code) {
                     var intervalMs = 2500L
-                    while (true) {
+                    repeat(240) {
                         kotlinx.coroutines.delay(intervalMs)
+                        if (traktCode?.userCode != code.userCode) return@LaunchedEffect
                         when (val result = facade.pollTraktDeviceAuth()) {
                             is com.sluggyard.tv.data.repository.TraktTokenPollResult.Pending,
                             is com.sluggyard.tv.data.repository.TraktTokenPollResult.AlreadyUsed -> Unit
@@ -90,35 +88,34 @@ internal fun IntegrationsSettings(
                             is com.sluggyard.tv.data.repository.TraktTokenPollResult.Approved -> {
                                 traktMessage = "Connected${result.username?.let { " as $it" } ?: ""}"
                                 traktCode = null
-                                break
+                                return@LaunchedEffect
                             }
                             is com.sluggyard.tv.data.repository.TraktTokenPollResult.Denied -> {
                                 traktMessage = "Authorization denied."
                                 traktCode = null
-                                break
+                                return@LaunchedEffect
                             }
                             is com.sluggyard.tv.data.repository.TraktTokenPollResult.Expired -> {
                                 traktMessage = "QR code expired. Try again."
                                 traktCode = null
-                                break
+                                return@LaunchedEffect
                             }
                             is com.sluggyard.tv.data.repository.TraktTokenPollResult.Failed -> {
                                 traktMessage = result.reason
                                 traktCode = null
-                                break
+                                return@LaunchedEffect
                             }
                         }
+                    }
+                    if (traktCode?.userCode == code.userCode) {
+                        traktMessage = "QR code expired. Try again."
+                        traktCode = null
                     }
                 }
             }
         }
         traktMessage?.let { RewriteValueRow("Trakt", it) }
         if (traktAuth.isAuthenticated) RewriteActionRow("Disconnect Trakt", "Remove the Trakt token for this profile.") { scope.launch { facade.disconnectTrakt() } }
-        val watchSource by facade.traktSettings.watchProgressSource.collectAsState(initial = WatchProgressSource.TRAKT)
-        val librarySource by facade.traktSettings.librarySourceMode.collectAsState(initial = LibrarySourceMode.LOCAL)
-        RewriteCycleRow("Continue Watching source", watchSource.name, listOf("TRAKT", "SLUGYARD_SYNC")) { value -> scope.launch { facade.setWatchProgressSource(WatchProgressSource.valueOf(value)) } }
-        RewriteCycleRow("Library source", librarySource.name, listOf("LOCAL", "TRAKT")) { value -> scope.launch { facade.setLibrarySourceMode(LibrarySourceMode.valueOf(value)) } }
-        RewriteCycleRow("More Like This source", moreLikeThisSource.name, com.sluggyard.tv.data.local.MoreLikeThisSourcePreference.entries.map { it.name }) { value -> scope.launch { facade.setMoreLikeThisSource(com.sluggyard.tv.data.local.MoreLikeThisSourcePreference.valueOf(value)) } }
     }
     RewriteSettingsGroup("TMDB and ratings") {
         RewriteValueRow("TMDB", if (tmdb.enabled) "Enabled" else "Disabled")

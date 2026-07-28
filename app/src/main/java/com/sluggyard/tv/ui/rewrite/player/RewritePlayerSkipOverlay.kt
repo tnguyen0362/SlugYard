@@ -20,6 +20,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.unit.dp
 import com.sluggyard.tv.ui.design.SlugYardPalette
 import com.sluggyard.tv.ui.design.SlugYardTvMetrics
@@ -35,6 +36,7 @@ fun RewritePlayerSkipOverlay(
     focusRequester: FocusRequester,
     modifier: Modifier = Modifier,
 ) {
+    val notNowFocusRequester = androidx.compose.runtime.remember { FocusRequester() }
     val interval = state.activeSkipInterval
     val intervalType = interval?.type.orEmpty()
     val visible = interval != null &&
@@ -42,9 +44,11 @@ fun RewritePlayerSkipOverlay(
         !state.showPauseOverlay &&
         !state.showLoadingOverlay &&
         state.postPlayMode == null
-    LaunchedEffect(visible) {
+    LaunchedEffect(visible, state.showControls) {
         actions.onVisibilityChanged(visible)
-        if (visible) focusRequester.requestFocusReliably(retries = 8)
+        // Transport controls own focus while visible. The skip prompt only claims initial focus
+        // when the player has no other active action row.
+        if (visible && !state.showControls) focusRequester.requestFocusReliably(retries = 8)
     }
     AnimatedVisibility(visible = visible, enter = fadeIn(), exit = fadeOut()) {
         Box(modifier = modifier.fillMaxSize()) {
@@ -58,7 +62,9 @@ fun RewritePlayerSkipOverlay(
             ) {
                 Button(
                     onClick = actions.onSkip,
-                    modifier = Modifier.focusRequester(focusRequester),
+                     modifier = Modifier
+                         .focusRequester(focusRequester)
+                         .focusProperties { right = notNowFocusRequester },
                     shape = RoundedCornerShape(4.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = SlugYardPalette.Accent,
@@ -66,7 +72,11 @@ fun RewritePlayerSkipOverlay(
                     ),
                 ) { Text(skipLabel(intervalType)) }
                 Spacer(Modifier.width(10.dp))
-                OutlinedButton(onClick = actions.onDismiss, shape = RoundedCornerShape(4.dp)) {
+                 OutlinedButton(
+                     onClick = actions.onDismiss,
+                     modifier = Modifier.focusRequester(notNowFocusRequester),
+                     shape = RoundedCornerShape(4.dp),
+                 ) {
                     Text("Not now")
                 }
             }
@@ -76,6 +86,10 @@ fun RewritePlayerSkipOverlay(
 
 private fun skipLabel(type: String): String = when {
     type.contains("recap", ignoreCase = true) -> "Skip recap"
-    type.contains("outro", ignoreCase = true) || type.contains("ending", ignoreCase = true) || type.contains("ed", ignoreCase = true) -> "Skip outro"
+    type.equals("ed", ignoreCase = true) ||
+        type.contains("mixed-ed", ignoreCase = true) ||
+        type.contains("outro", ignoreCase = true) ||
+        type.contains("ending", ignoreCase = true) ||
+        type.contains("credits", ignoreCase = true) -> "Skip outro"
     else -> "Skip intro"
 }

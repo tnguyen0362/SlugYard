@@ -140,6 +140,8 @@ fun PlayerScreen(
     viewModel: PlayerViewModel = hiltViewModel(),
     onBackPress: (currentVideoId: String?, currentSeason: Int?, currentEpisode: Int?, autoPlayEnabled: Boolean, playbackCompleted: Boolean) -> Unit,
     onPlaybackErrorBack: () -> Unit = { onBackPress(null, null, null, false, false) },
+    onBeforeExit: ((PlaybackTimelineState) -> Unit)? = null,
+    onRewriteNextEpisode: (() -> Boolean)? = null,
     onPlaybackEnded: ((nextVideoId: String?, nextSeason: Int?, nextEpisode: Int?, exitReason: PlayerExitReason?) -> Unit)? = null,
     controlsOverlay: @Composable (PlayerUiState, RewritePlayerControlActions, FocusRequester, PlaybackTimelineState) -> Unit,
     secondaryOverlay: @Composable (PlayerUiState, RewritePlayerSecondaryActions) -> Unit,
@@ -174,6 +176,7 @@ fun PlayerScreen(
 
     val exitPlayer: () -> Unit = {
         val timeline = viewModel.playbackTimeline.value
+        onBeforeExit?.invoke(timeline)
         viewModel.stopAndRelease()
         val completed = timeline.duration > 0L &&
             (timeline.currentPosition.toFloat() / timeline.duration.toFloat()) >= WatchProgress.COMPLETED_THRESHOLD
@@ -207,9 +210,10 @@ fun PlayerScreen(
             true
         )
     }
-    val continueToNextEpisodeFromEndPrompt = {
+    val continueToNextEpisodeFromEndPrompt = nextAction@{
         val next = nextEpisodeForEndPrompt
         if (next != null) {
+            if (onRewriteNextEpisode?.invoke() == true) return@nextAction
             viewModel.stopAndRelease()
             val cb = currentOnPlaybackEnded
             if (cb != null) {
@@ -812,7 +816,11 @@ fun PlayerScreen(
         postPlayOverlay(
             uiState.copy(postPlayMode = visiblePostPlayMode),
             RewritePlayerPostPlayActions(
-                onPlayNext = { viewModel.onEvent(PlayerEvent.OnPlayNextEpisode) },
+                onPlayNext = {
+                    if (onRewriteNextEpisode?.invoke() != true) {
+                        viewModel.onEvent(PlayerEvent.OnPlayNextEpisode)
+                    }
+                },
                 onContinueStillWatching = { viewModel.onEvent(PlayerEvent.OnStillWatchingContinue) },
                 onDismissStillWatching = { viewModel.onEvent(PlayerEvent.OnDismissStillWatchingPrompt) },
             ),

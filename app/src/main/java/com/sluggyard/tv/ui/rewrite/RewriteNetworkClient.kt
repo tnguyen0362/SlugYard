@@ -10,7 +10,7 @@ import java.util.concurrent.TimeUnit
  * its retry state. This deliberately stays separate from the retained playback transport.
  */
 internal object RewriteNetworkClient {
-    fun create(): OkHttpClient =
+    private val sharedClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
             .connectTimeout(8, TimeUnit.SECONDS)
             .readTimeout(15, TimeUnit.SECONDS)
@@ -18,4 +18,8 @@ internal object RewriteNetworkClient {
             .callTimeout(20, TimeUnit.SECONDS)
             .retryOnConnectionFailure(true)
             .build()
+    }
+
+    /** One connection pool for the Rewrite addon and provider fan-out. */
+    fun create(): OkHttpClient = sharedClient
 }

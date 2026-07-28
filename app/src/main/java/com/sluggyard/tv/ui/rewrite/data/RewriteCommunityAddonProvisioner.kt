@@ -9,6 +9,8 @@ import com.sluggyard.tv.core.aggregation.AddonFanoutResult
 import com.sluggyard.tv.core.aggregation.AddonFanoutTask
 import com.sluggyard.tv.core.aggregation.boundedAddonFanout
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 data class CommunityProvisioningReport(
     val installedCount: Int,
@@ -25,7 +27,15 @@ class RewriteCommunityAddonProvisioner(
     private val gateway: StremioAddonGateway,
     private val registry: RewriteAddonRegistry,
 ) {
+    private val provisionMutex = Mutex()
+
     suspend fun provision(configured: RewriteConfiguredAddonUrls? = null): CommunityProvisioningReport {
+        return provisionMutex.withLock {
+            provisionLocked(configured)
+        }
+    }
+
+    private suspend fun provisionLocked(configured: RewriteConfiguredAddonUrls?): CommunityProvisioningReport {
         val requests = SlugYardCommunitySourcePolicy.bootstrapManifestUrls.map { registryUrl ->
             val requestUrl = when {
                 registryUrl.contains("torrentio", ignoreCase = true) -> configured?.torrentioManifestUrl

@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import com.sluggyard.tv.data.local.toTrackPreference
+import com.sluggyard.tv.domain.model.WatchProgress
 
 internal fun PlayerRuntimeController.preparePlaybackBeforeStart(
     url: String,
@@ -95,6 +96,23 @@ internal fun PlayerRuntimeController.preparePlaybackBeforeStart(
                 message = context.getString(com.sluggyard.tv.R.string.player_loading_preparing)
             )
             loadSavedProgressSuspend(currentSeason, currentEpisode)
+        }
+        navigationArgs.startPositionMs?.takeIf { it > 0L }?.let { positionMs ->
+            pendingResumeProgress = WatchProgress(
+                contentId = contentId.orEmpty(),
+                contentType = contentType.orEmpty(),
+                name = title,
+                poster = poster,
+                backdrop = backdrop,
+                logo = logo,
+                videoId = currentVideoId ?: contentId.orEmpty(),
+                season = currentSeason,
+                episode = currentEpisode,
+                episodeTitle = currentEpisodeTitle,
+                position = positionMs,
+                duration = 0L,
+                lastWatched = System.currentTimeMillis(),
+            )
         }
         recordLoadingDiagnosticEvent(
             phase = "initializing_player",

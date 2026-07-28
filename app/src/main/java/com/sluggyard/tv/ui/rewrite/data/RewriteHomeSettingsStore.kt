@@ -72,11 +72,12 @@ object RewriteHomeSettingsCodec {
     fun encode(settings: RewriteHomeSettings) = json.encodeToString(
         StoredHomeSettings(settings.hideUnreleased, settings.excludedCatalogKeys.sorted(), settings.catalogOrderKeys),
     )
-    fun decode(raw: String): RewriteHomeSettings = runCatching {
+    fun decode(raw: String): RewriteHomeSettings = decodeOrNull(raw) ?: RewriteHomeSettings()
+    fun decodeOrNull(raw: String): RewriteHomeSettings? = runCatching {
         json.decodeFromString<StoredHomeSettings>(raw).let {
             RewriteHomeSettings(it.hideUnreleased, it.excludedCatalogKeys.toSet(), it.catalogOrderKeys)
         }
-    }.getOrDefault(RewriteHomeSettings())
+    }.getOrNull()
 }
 
 @Serializable

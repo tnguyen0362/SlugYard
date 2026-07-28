@@ -54,7 +54,16 @@ class RewritePremiumizeTransport(
 
     private fun bearer(key: String) = "Bearer ${key.trim()}"
 
-    private suspend fun request(request: Request): RewriteTorboxResult<JsonObject> = withContext(Dispatchers.IO) {
+    private suspend fun request(request: Request): RewriteTorboxResult<JsonObject> = retryRewriteProviderCall(
+        isRetryable = { result ->
+            result is RewriteTorboxResult.NetworkFailure ||
+                result is RewriteTorboxResult.HttpFailure && (result.statusCode == 408 || result.statusCode == 429 || result.statusCode >= 500)
+        },
+    ) {
+        executeOnce(request)
+    }
+
+    private suspend fun executeOnce(request: Request): RewriteTorboxResult<JsonObject> = withContext(Dispatchers.IO) {
         try {
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) return@withContext RewriteTorboxResult.HttpFailure(response.code)

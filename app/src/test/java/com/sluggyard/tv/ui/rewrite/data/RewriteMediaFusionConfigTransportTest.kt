@@ -15,8 +15,8 @@ class RewriteMediaFusionConfigTransportTest {
         val payload = buildJsonObject { put("encrypted_str", "encrypted-config") }
 
         assertEquals(
-            "https://mediafusionfortheweebs.midnightignite.me/encrypted-config/manifest.json",
-            mediaFusionManifestUrl(decodeMediaFusionEncryptedPath(payload)),
+            "https://mediafusion.example/encrypted-config/manifest.json",
+            mediaFusionManifestUrl("https://mediafusion.example", decodeMediaFusionEncryptedPath(payload)),
         )
     }
 
@@ -32,6 +32,16 @@ class RewriteMediaFusionConfigTransportTest {
     fun malformedMediaFusionResponseIsRejected() {
         assertFailsWith<IllegalArgumentException> {
             decodeMediaFusionEncryptedPath(Json.parseToJsonElement("{}").jsonObject)
+        }
+    }
+
+    @Test
+    fun encryptWithoutConfiguredBaseUrlIsRejected() {
+        val transport = RewriteMediaFusionConfigTransport(encryptBaseUrl = "")
+        assertFailsWith<IllegalArgumentException> {
+            kotlinx.coroutines.runBlocking {
+                transport.createManifestUrl(DebridService.TORBOX, "torbox-key")
+            }
         }
     }
 }

@@ -12,6 +12,7 @@ import com.sluggyard.tv.core.aggregation.DEFAULT_ADDON_CONCURRENCY
 import com.sluggyard.tv.core.aggregation.boundedAddonFanout
 import com.sluggyard.tv.core.streamresolution.DebridService
 import com.sluggyard.tv.core.streamresolution.StreamCachePolicy
+import com.sluggyard.tv.core.streamresolution.StreamCacheState
 import com.sluggyard.tv.core.streamresolution.DebridProactiveCacheChecker
 import com.sluggyard.tv.core.streamresolution.resolveProactiveCacheStates
 import com.sluggyard.tv.core.streamresolution.selectProactiveCacheChecker
@@ -23,6 +24,7 @@ import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 
 /** A progressive, per-addon stream result list for the rewritten Streams surface. */
@@ -44,6 +46,9 @@ class RewriteStreamsDataSource(
         send(groups.toList())
         val groupsMutex = Mutex()
         val cacheJobs = mutableListOf<Job>()
+        val cacheStates = mutableMapOf<String, StreamCacheState>()
+        val cacheChecksInFlight = mutableSetOf<String>()
+        val cacheSemaphore = Semaphore(permits = 2)
         val byTask = LinkedHashMap<String, ManagedAddon>()
         val tasks = addons.map { addon ->
             val taskKey = addon.manifest.id
@@ -101,31 +106,52 @@ class RewriteStreamsDataSource(
             }
             val checker = selectProactiveCacheChecker(configuredDebrid, proactiveCacheCheckers)
             val content = state as? RewriteStreamGroupState.Content ?: return@collect
-            val hashes = content.streams.mapNotNull { it.infoHash }.toSet()
+            val hashes = content.streams.mapNotNull { it.infoHash?.trim()?.lowercase()?.takeIf(String::isNotBlank) }.toSet()
             if (checker != null && hashes.isNotEmpty()) {
                 // Cache probes are independent of addon fetches. Keep source discovery
                 // progressive instead of blocking the collector on one provider timeout.
+                val hashesToCheck = groupsMutex.withLock {
+                    hashes.filter { it !in cacheStates && cacheChecksInFlight.add(it) }.toSet()
+                }
+                if (hashesToCheck.isEmpty()) return@collect
                 cacheJobs += launch {
                     val states = try {
-                        resolveProactiveCacheStates(checker.service, hashes, checker.check(hashes))
+                        cacheSemaphore.withPermit {
+                            resolveProactiveCacheStates(checker.service, hashesToCheck, checker.check(hashesToCheck))
+                        }
                     } catch (cancelled: CancellationException) {
                         throw cancelled
                     } catch (_: Exception) {
-                        resolveProactiveCacheStates(checker.service, hashes, emptyMap())
+                        resolveProactiveCacheStates(checker.service, hashesToCheck, emptyMap())
                     }
                     groupsMutex.withLock {
-                        val current = groups[index].state as? RewriteStreamGroupState.Content ?: return@withLock
-                        groups[index] = groups[index].copy(
-                            state = RewriteStreamGroupState.Content(current.streams.map { candidate ->
-                                candidate.infoHash?.let { hash -> candidate.copy(cacheState = states[hash] ?: candidate.cacheState) } ?: candidate
-                            }),
-                        )
+                        cacheStates.putAll(states)
+                        cacheChecksInFlight.removeAll(hashesToCheck)
+                        groups.indices.forEach { groupIndex ->
+                            val current = groups[groupIndex].state as? RewriteStreamGroupState.Content ?: return@forEach
+                            groups[groupIndex] = groups[groupIndex].copy(
+                                state = RewriteStreamGroupState.Content(current.streams.map { candidate ->
+                                    candidate.infoHash?.trim()?.lowercase()?.let { hash ->
+                                        candidate.copy(cacheState = cacheStates[hash] ?: candidate.cacheState)
+                                    } ?: candidate
+                                }),
+                            )
+                        }
                         send(groups.toList())
                     }
                 }
             }
         }
         cacheJobs.joinAll()
+    }
+}
+
+private suspend fun <T> Semaphore.withPermit(block: suspend () -> T): T {
+    acquire()
+    return try {
+        block()
+    } finally {
+        release()
     }
 }
 

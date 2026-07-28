@@ -45,7 +45,10 @@ class SkipIntroRepository @Inject constructor(
         }
         val entriesDeferred = async { resolveArmEntries(imdbId) }
         val entries = entriesDeferred.await()
-        val malId = entries.getOrNull(season - 1)?.myanimelist?.toString()
+        val seasonEntry = entries.firstOrNull { it.season == season }
+            ?: entries.getOrNull(season - 1)
+            ?: entries.firstOrNull()
+        val malId = seasonEntry?.myanimelist?.toString()
             ?: entries.firstOrNull()?.myanimelist?.toString()
         val aniSkipDeferred = async {
             if (malId != null) fetchAniSkip(malId, episode) else emptyList()
@@ -54,7 +57,7 @@ class SkipIntroRepository @Inject constructor(
         return@coroutineScope mergeByPriority(
             introDbDeferred.await(),
             aniSkipDeferred.await()
-        ).also { intervalCache[cacheKey] = it }
+        ).also { result -> if (result.isNotEmpty()) intervalCache[cacheKey] = result }
     }
 
     suspend fun getSkipIntervalsForMal(malId: String, episode: Int): List<SkipInterval> = coroutineScope {
@@ -72,11 +75,12 @@ class SkipIntroRepository @Inject constructor(
         val imdbId = imdbIdDeferred.await()
         if (imdbId != null) {
             val entries = resolveArmEntries(imdbId)
-            val season = entries.indexOfFirst { it.myanimelist == malId.toIntOrNull() } + 1
+            val season = entries.firstOrNull { it.myanimelist == malId.toIntOrNull() }?.season
+                ?: (entries.indexOfFirst { it.myanimelist == malId.toIntOrNull() } + 1)
             introDb = if (introDbConfigured) fetchIntroDb(imdbId, season, episode) else emptyList()
         }
 
-        return@coroutineScope mergeByPriority(introDb, aniSkipDeferred.await()).also { intervalCache[cacheKey] = it }
+        return@coroutineScope mergeByPriority(introDb, aniSkipDeferred.await()).also { result -> if (result.isNotEmpty()) intervalCache[cacheKey] = result }
     }
 
     suspend fun getSkipIntervalsForKitsu(kitsuId: String, episode: Int): List<SkipInterval> = coroutineScope {
@@ -102,11 +106,12 @@ class SkipIntroRepository @Inject constructor(
         val imdbId = imdbIdDeferred.await()
         if (imdbId != null) {
             val entries = resolveArmEntries(imdbId)
-            val season = entries.indexOfFirst { it.kitsu == kitsuId.toIntOrNull() } + 1
+            val season = entries.firstOrNull { it.kitsu == kitsuId.toIntOrNull() }?.season
+                ?: (entries.indexOfFirst { it.kitsu == kitsuId.toIntOrNull() } + 1)
             introDb = if (introDbConfigured) fetchIntroDb(imdbId, season, episode) else emptyList()
         }
 
-        return@coroutineScope mergeByPriority(introDb, aniSkipDeferred.await()).also { intervalCache[cacheKey] = it }
+        return@coroutineScope mergeByPriority(introDb, aniSkipDeferred.await()).also { result -> if (result.isNotEmpty()) intervalCache[cacheKey] = result }
     }
 
     /**

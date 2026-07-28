@@ -49,7 +49,16 @@ class RewriteRealDebridTransport(
     private fun base(path: String) = "https://api.real-debrid.com/rest/1.0/$path"
     private fun bearer(key: String) = "Bearer ${key.trim()}"
 
-    private suspend fun call(request: Request): RewriteTorboxResult<JsonObject> = withContext(Dispatchers.IO) {
+    private suspend fun call(request: Request): RewriteTorboxResult<JsonObject> = retryRewriteProviderCall(
+        isRetryable = { result ->
+            result is RewriteTorboxResult.NetworkFailure ||
+                result is RewriteTorboxResult.HttpFailure && (result.statusCode == 408 || result.statusCode == 429 || result.statusCode >= 500)
+        },
+    ) {
+        executeOnce(request)
+    }
+
+    private suspend fun executeOnce(request: Request): RewriteTorboxResult<JsonObject> = withContext(Dispatchers.IO) {
         try { client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) return@withContext RewriteTorboxResult.HttpFailure(response.code)
             val payload = runCatching { json.parseToJsonElement(response.body?.string().orEmpty()).jsonObject }.getOrNull()
@@ -62,7 +71,16 @@ class RewriteRealDebridTransport(
         }
     }
 
-    private suspend fun callStatus(request: Request): RewriteTorboxResult<Unit> = withContext(Dispatchers.IO) {
+    private suspend fun callStatus(request: Request): RewriteTorboxResult<Unit> = retryRewriteProviderCall(
+        isRetryable = { result ->
+            result is RewriteTorboxResult.NetworkFailure ||
+                result is RewriteTorboxResult.HttpFailure && (result.statusCode == 408 || result.statusCode == 429 || result.statusCode >= 500)
+        },
+    ) {
+        executeStatusOnce(request)
+    }
+
+    private suspend fun executeStatusOnce(request: Request): RewriteTorboxResult<Unit> = withContext(Dispatchers.IO) {
         try { client.newCall(request).execute().use { response ->
             if (response.isSuccessful || response.code == 202) RewriteTorboxResult.Success(Unit)
             else RewriteTorboxResult.HttpFailure(response.code)

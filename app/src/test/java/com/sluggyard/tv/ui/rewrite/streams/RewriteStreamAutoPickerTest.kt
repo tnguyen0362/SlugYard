@@ -17,6 +17,16 @@ class RewriteStreamAutoPickerTest {
     }
 
     @Test
+    fun highQualityCachedTorrentBeatsLowQualityDirectUrl() {
+        val direct = candidate("direct", directUrl = "https://stream.test/video")
+            .copy(title = "480p CAM")
+        val cached = candidate("cached", cacheState = StreamCacheState.CACHED, infoHash = "cached-hash")
+            .copy(title = "2160p HDR10")
+
+        assertEquals(cached, selectRewriteAutoPlayCandidate(groups(direct, cached)))
+    }
+
+    @Test
     fun nonDolbyVisionDirectStreamWinsOverHigherQualityDolbyVisionStream() {
         val dolbyVision = candidate("dolby", directUrl = "https://stream.test/dv")
             .copy(title = "2160p Dolby Vision Profile 8.6")
