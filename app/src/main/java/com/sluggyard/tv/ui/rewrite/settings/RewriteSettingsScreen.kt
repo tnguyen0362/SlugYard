@@ -13,7 +13,6 @@ import androidx.compose.ui.focus.FocusRequester
 import com.sluggyard.tv.core.streamresolution.DebridService
 import com.sluggyard.tv.data.local.PlayerSettings
 import com.sluggyard.tv.data.local.TraktAuthState
-import com.sluggyard.tv.domain.model.DebridSettings
 import com.sluggyard.tv.domain.model.TmdbSettings
 import com.sluggyard.tv.ui.rewrite.data.RewriteHomeSettings
 import com.sluggyard.tv.ui.rewrite.data.RewriteProfileState
@@ -38,9 +37,11 @@ fun RewriteSettingsScreen(
     onDebridEnabledChanged: suspend (Boolean) -> Unit,
     onSelect: suspend (DebridService) -> Unit,
     rewriteAddons: List<ManagedAddon>,
-    onConfigureAutoSources: suspend () -> Unit,
+    onInstallCommunityAddons: suspend () -> Unit,
+    onUninstallCommunityAddons: suspend () -> Unit,
     onOpenProfiles: () -> Unit,
     contentFocusRequester: FocusRequester? = null,
+    headerFocusRequester: FocusRequester? = null,
     modifier: Modifier = Modifier,
 ) {
     var destination by remember { mutableStateOf<SettingsDestination>(SettingsDestination.Root) }
@@ -49,12 +50,7 @@ fun RewriteSettingsScreen(
     val scope = rememberCoroutineScope()
     val traktAuth by facade.traktAuth.collectAsState(initial = TraktAuthState())
     val tmdb by facade.tmdbSettings.collectAsState(initial = TmdbSettings())
-    val mdblist by facade.mdblistSettings.collectAsState(initial = com.sluggyard.tv.domain.model.MDBListSettings())
-    val debrid by facade.debridSettings.collectAsState(initial = DebridSettings())
     val player by facade.playerSettings.collectAsState(initial = PlayerSettings())
-    val openSubtitlesEnabled by facade.openSubtitlesEnabled.collectAsState(initial = false)
-    val openSubtitlesKey by facade.openSubtitlesApiKey.collectAsState(initial = "")
-    val openSubtitlesAutoDownload by facade.openSubtitlesAutoDownload.collectAsState(initial = false)
 
     @Composable
     fun RenderSettingsDetail(category: RewriteSettingsCategory) {
@@ -64,29 +60,23 @@ fun RewriteSettingsScreen(
             RewriteSettingsCategory.Layout -> LayoutSettings(facade, homeSettings, profileState, onHideUnreleasedChanged, onRememberProfileChanged)
             RewriteSettingsCategory.ContentDiscovery -> ContentDiscoverySettings(
                 tmdb = tmdb,
-                mdblist = mdblist,
                 onTmdbEnabled = { scope.launch { facade.setTmdbEnabled(it) } },
                 onTmdbEnrichContinueWatching = { scope.launch { facade.setTmdbEnrichContinueWatching(it) } },
-                onMdblistEnabled = { scope.launch { facade.setMdblistEnabled(it) } },
                 rewriteAddons = rewriteAddons,
-                catalogOrderKeys = homeSettings.catalogOrderKeys,
-                onCatalogOrderChanged = onCatalogOrderChanged,
                 debridConnected = debridConnection.activeService != null,
-                onConfigureAutoSources = { scope.launch { onConfigureAutoSources() } },
+                onInstallCommunityAddons = onInstallCommunityAddons,
+                onUninstallCommunityAddons = onUninstallCommunityAddons,
             )
             RewriteSettingsCategory.Integrations -> IntegrationsSettings(
                 facade,
                 traktAuth,
                 tmdb,
-                mdblist,
-                debrid,
-                openSubtitlesEnabled,
-                openSubtitlesKey,
-                openSubtitlesAutoDownload,
                 debridConnection,
+                rewriteAddons = rewriteAddons,
+                onInstallCommunityAddons = onInstallCommunityAddons,
+                onUninstallCommunityAddons = onUninstallCommunityAddons,
                 onConnect,
                 onDisconnect,
-                onDebridEnabledChanged,
                 onSelect,
             )
             RewriteSettingsCategory.Display -> DisplaySettings(facade, player, scope)
@@ -108,6 +98,7 @@ fun RewriteSettingsScreen(
                     },
                     categoryListState = categoryListState,
                     initialFocusRequester = contentFocusRequester,
+                    headerFocusRequester = headerFocusRequester,
                     modifier = modifier,
                 ) {
                     RewriteSettingsDetailScaffold(

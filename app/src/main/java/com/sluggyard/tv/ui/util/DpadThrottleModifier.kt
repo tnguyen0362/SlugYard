@@ -94,38 +94,22 @@ fun Modifier.dpadRepeatThrottle(
         }
 
         if (isVertical) {
-            // Prefer the currently-focused item's explicit neighbor over Compose's default
-            // geometric focus search -- see the class doc on DpadVerticalNeighbors above.
+            // First tap: never steal vertical focus at the ancestor. Poster cards / focusProperties
+            // own a single clean move. The old "re-assert focus 12× over ~1s" loop made Home feel
+            // like a stuck remote (focus thrash + scroll fights).
+            if (native.repeatCount == 0) return@onPreviewKeyEvent false
+
             val isUp = native.keyCode == KeyEvent.KEYCODE_DPAD_UP
             val neighbor = if (isUp) dpadVerticalNeighbors.up else dpadVerticalNeighbors.down
             val bringIntoView = if (isUp) dpadVerticalNeighbors.upBringIntoView else dpadVerticalNeighbors.downBringIntoView
             if (neighbor != null) {
-                // Explicitly scroll the target into view first -- requestFocus() alone doesn't
-                // guarantee the LazyColumn's scroll position follows, especially for a target
-                // that just entered the prefetch window and isn't fully visible yet. Then a
-                // plain requestFocus() can silently no-op (throws, swallowed) if the target
-                // hasn't been placed by the LazyColumn on this frame; requestFocusReliably()
-                // retries across a few frames instead of dropping the DPAD press with no visible
-                // effect. See RewriteFocusUtils.kt.
                 scope.launch {
                     bringIntoView?.invoke()
-                    runCatching { neighbor.requestFocusReliably() }
-                    // A target that just scrolled into place can accept focus and then silently
-                    // drop it a couple hundred milliseconds later (observed on-device: a fresh
-                    // LazyColumn/LazyRow item's focus-triggered scale/elevation animation
-                    // settling appears to invalidate its focus target right after landing).
-                    // Re-assert repeatedly over ~1s so the request eventually wins against
-                    // whatever transient recomposition is reverting it, rather than leaving the
-                    // user stranded back on whatever had focus before.
-                    repeat(12) {
-                        kotlinx.coroutines.delay(80)
-                        runCatching { neighbor.requestFocus() }
-                    }
+                    neighbor.requestFocusReliably(retries = 6)
                 }
                 return@onPreviewKeyEvent true
             }
-            if (native.repeatCount == 0) return@onPreviewKeyEvent false
-            val direction = if (native.keyCode == KeyEvent.KEYCODE_DPAD_UP) FocusDirection.Up else FocusDirection.Down
+            val direction = if (isUp) FocusDirection.Up else FocusDirection.Down
             focusManager.moveFocus(direction)
             return@onPreviewKeyEvent true
         } else {

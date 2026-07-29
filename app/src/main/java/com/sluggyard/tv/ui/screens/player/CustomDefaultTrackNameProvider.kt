@@ -68,14 +68,26 @@ class CustomDefaultTrackNameProvider(resources: Resources) : DefaultTrackNamePro
                 MimeTypes.VIDEO_VP9 -> "VP9"
                 MimeTypes.VIDEO_DOLBY_VISION -> "Dolby Vision"
                 // Subtitle codecs
-                "application/pgs" -> "PGS"
-                MimeTypes.APPLICATION_SUBRIP -> "SRT"
-                MimeTypes.TEXT_SSA -> "SSA"
-                MimeTypes.TEXT_VTT -> "VTT"
+                "application/pgs", "application/x-pgs", "image/x-pgs" -> "PGS"
+                MimeTypes.APPLICATION_SUBRIP, "application/x-subrip", "text/x-srt" -> "SRT"
+                MimeTypes.TEXT_SSA, "text/x-ass", "text/x-ssa", "application/x-ass",
+                "s_text/ass", "s_text/ssa", "ass", "ssa" -> "ASS"
+                MimeTypes.TEXT_VTT, "text/vtt" -> "VTT"
                 MimeTypes.APPLICATION_TTML -> "TTML"
                 MimeTypes.APPLICATION_TX3G -> "TX3G"
                 MimeTypes.APPLICATION_DVBSUBS -> "DVB"
-                else -> null
+                else -> {
+                    val lower = mimeType.lowercase()
+                    when {
+                        "pgs" in lower || "hdmv" in lower -> "PGS"
+                        "ass" in lower || "ssa" in lower -> "ASS"
+                        "subrip" in lower || lower.endsWith("srt") -> "SRT"
+                        "vtt" in lower -> "VTT"
+                        "ttml" in lower -> "TTML"
+                        "dvb" in lower -> "DVB"
+                        else -> null
+                    }
+                }
             }
         }
 

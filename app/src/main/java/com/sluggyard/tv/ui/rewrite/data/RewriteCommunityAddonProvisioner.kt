@@ -29,14 +29,29 @@ class RewriteCommunityAddonProvisioner(
 ) {
     private val provisionMutex = Mutex()
 
-    suspend fun provision(configured: RewriteConfiguredAddonUrls? = null): CommunityProvisioningReport {
+    suspend fun provision(
+        configured: RewriteConfiguredAddonUrls? = null,
+        debridConfigured: Boolean = configured != null,
+    ): CommunityProvisioningReport {
         return provisionMutex.withLock {
-            provisionLocked(configured)
+            provisionLocked(configured, debridConfigured)
         }
     }
 
-    private suspend fun provisionLocked(configured: RewriteConfiguredAddonUrls?): CommunityProvisioningReport {
-        val requests = SlugYardCommunitySourcePolicy.bootstrapManifestUrls.map { registryUrl ->
+    /** Removes curated community manifests from the rewrite registry (Install can restore them). */
+    suspend fun uninstall(): CommunityProvisioningReport {
+        return provisionMutex.withLock {
+            registry.clearCurated()
+            CommunityProvisioningReport(installedCount = 0, unavailableCount = 0)
+        }
+    }
+
+    private suspend fun provisionLocked(
+        configured: RewriteConfiguredAddonUrls?,
+        debridConfigured: Boolean,
+    ): CommunityProvisioningReport {
+        val registryUrls = SlugYardCommunitySourcePolicy.provisionManifestUrls(debridConfigured)
+        val requests = registryUrls.map { registryUrl ->
             val requestUrl = when {
                 registryUrl.contains("torrentio", ignoreCase = true) -> configured?.torrentioManifestUrl
                 registryUrl.contains("mediafusion", ignoreCase = true) -> configured?.mediaFusionManifestUrl
@@ -69,7 +84,10 @@ class RewriteCommunityAddonProvisioner(
                 }
             }
         }
-        registry.ensureCurated(curated)
+        registry.ensureCurated(
+            addons = curated,
+            retainManifestUrls = registryUrls.toSet(),
+        )
         return CommunityProvisioningReport(
             installedCount = curated.size,
             unavailableCount = requests.size - curated.size,

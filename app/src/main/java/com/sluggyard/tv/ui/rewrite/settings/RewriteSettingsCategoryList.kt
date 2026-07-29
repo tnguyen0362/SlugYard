@@ -23,18 +23,27 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.focusable
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.sluggyard.tv.ui.design.SlugYardPalette
 import com.sluggyard.tv.ui.design.SlugYardTvMetrics
 import com.sluggyard.tv.ui.rewrite.requestFocusReliably
+import kotlinx.coroutines.launch
 
 @Composable
 fun RewriteSettingsCategoryList(
@@ -97,12 +106,28 @@ fun RewriteSettingsSplitPane(
     onSelect: (RewriteSettingsCategory) -> Unit,
     categoryListState: LazyListState,
     initialFocusRequester: FocusRequester?,
+    headerFocusRequester: FocusRequester? = null,
     modifier: Modifier = Modifier,
     detail: @Composable () -> Unit,
 ) {
-    val firstFocusRequester = initialFocusRequester ?: remember { FocusRequester() }
-    LaunchedEffect(firstFocusRequester, categories.firstOrNull()) {
-        firstFocusRequester.requestFocusReliably(retries = 8)
+    // Header Down must land on an always-composed anchor. Attaching the shell FR only to a
+    // LazyColumn category row fails intermittently when that row is disposed off-screen.
+    val entryFocusRequester = initialFocusRequester ?: remember { FocusRequester() }
+    val selectedCategoryFocusRequester = remember { FocusRequester() }
+    val scope = rememberCoroutineScope()
+    fun focusSelectedCategory() {
+        scope.launch {
+            val index = categories.indexOf(selected).coerceAtLeast(0)
+            categoryListState.scrollToItem(index)
+            selectedCategoryFocusRequester.requestFocusReliably(retries = 10)
+        }
+    }
+    var didRequestInitialFocus by remember { mutableStateOf(false) }
+    LaunchedEffect(entryFocusRequester) {
+        if (!didRequestInitialFocus) {
+            didRequestInitialFocus = true
+            entryFocusRequester.requestFocusReliably(retries = 8)
+        }
     }
     Row(
         modifier = modifier.fillMaxSize().background(SlugYardPalette.Canvas),
@@ -114,6 +139,15 @@ fun RewriteSettingsSplitPane(
                 .padding(horizontal = 48.dp, vertical = 40.dp),
             verticalArrangement = Arrangement.spacedBy(28.dp),
         ) {
+            Box(
+                modifier = Modifier
+                    .size(1.dp)
+                    .focusRequester(entryFocusRequester)
+                    .onFocusChanged { state ->
+                        if (state.isFocused) focusSelectedCategory()
+                    }
+                    .focusable(),
+            )
             Text("Settings", style = MaterialTheme.typography.displayLarge)
             LazyColumn(
                 state = categoryListState,
@@ -124,7 +158,10 @@ fun RewriteSettingsSplitPane(
                     RewriteSettingsCategoryRow(
                         category = category,
                         onClick = { onSelect(category) },
-                        focusRequester = if (category == categories.firstOrNull()) firstFocusRequester else null,
+                        focusRequester = if (category == selected) selectedCategoryFocusRequester else null,
+                        // Only the first category escapes Up into the root header so list
+                        // traversal still walks category → category.
+                        upFocusRequester = headerFocusRequester.takeIf { category == categories.firstOrNull() },
                         selected = category == selected,
                     )
                 }
@@ -147,6 +184,7 @@ private fun RewriteSettingsCategoryRow(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     focusRequester: FocusRequester? = null,
+    upFocusRequester: FocusRequester? = null,
     selected: Boolean = false,
 ) {
     val interaction = remember { MutableInteractionSource() }
@@ -156,21 +194,38 @@ private fun RewriteSettingsCategoryRow(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+                .focusProperties { upFocusRequester?.let { up = it } }
                 .fillMaxWidth()
-                .background(if (focused || selected) SlugYardPalette.Surface else Color.Transparent)
-                .then(
-                    if (focused) Modifier.border(2.dp, SlugYardPalette.FocusRing, RoundedCornerShape(8.dp))
-                    else if (selected) Modifier.border(2.dp, SlugYardPalette.Accent, RoundedCornerShape(8.dp))
-                    else Modifier,
+                .background(
+                    when {
+                        focused -> SlugYardPalette.SurfaceElevated
+                        selected -> SlugYardPalette.Surface
+                        else -> Color.Transparent
+                    },
                 )
                 .clickable(interactionSource = interaction, indication = null, onClick = onClick)
-                .padding(horizontal = 4.dp, vertical = 18.dp),
+                .padding(horizontal = 12.dp, vertical = 16.dp),
         ) {
+            // Single focus cue: left accent bar — no competing pill/outline on top of the fill.
+            Box(
+                modifier = Modifier
+                    .padding(end = 12.dp)
+                    .width(4.dp)
+                    .height(36.dp)
+                    .background(
+                        when {
+                            focused -> SlugYardPalette.Accent
+                            selected -> SlugYardPalette.OnCanvasMuted.copy(alpha = 0.45f)
+                            else -> Color.Transparent
+                        },
+                        RoundedCornerShape(2.dp),
+                    ),
+            )
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
                     category.title,
                     style = MaterialTheme.typography.titleLarge,
-                    color = if (focused) SlugYardPalette.OnCanvas else SlugYardPalette.OnCanvas,
+                    color = SlugYardPalette.OnCanvas,
                 )
                 Text(category.description, style = MaterialTheme.typography.bodyMedium, color = SlugYardPalette.OnCanvasMuted)
             }

@@ -421,7 +421,7 @@ private fun PlayerRuntimeController.reconcilePlayerSettings(settings: PlayerSett
 
     if (showOnlyPreferredChanged) reconcileShowOnlyPreferredLanguages(settings)
 
-    reconcileSkipIntervals(settings, previous.skipIntroEnabled)
+    reconcileSkipIntervals(settings, previous.skipIntroEnabled, firstEmission)
 
     // First emission: kick off parental guide fetch if enabled.
     if (firstEmission && settings.parentalGuideEnabled) {
@@ -533,8 +533,9 @@ private fun PlayerRuntimeController.reconcilePreferredAudioLanguages(settings: P
     mpvPreferredAudioLanguages = resolved
     if (isUsingMpvEngine()) {
         mpvView?.applySubtitleLanguagePreferences(
-            settings.subtitleStyle.preferredLanguage,
-            settings.subtitleStyle.secondaryPreferredLanguage
+            preferred = settings.subtitleStyle.preferredLanguage,
+            secondary = settings.subtitleStyle.secondaryPreferredLanguage,
+            preferAss = shouldPreferAssSubtitles(),
         )
     }
 }
@@ -552,7 +553,8 @@ private fun PlayerRuntimeController.reconcileShowOnlyPreferredLanguages(settings
 /** Clears skip intervals when the feature is off; fetches when newly enabled. */
 private fun PlayerRuntimeController.reconcileSkipIntervals(
     settings: PlayerSettings,
-    skipIntroWasEnabled: Boolean
+    skipIntroWasEnabled: Boolean,
+    firstEmission: Boolean
 ) {
     if (!settings.skipIntroEnabled) {
         if (skipIntervals.isNotEmpty()) skipIntervals = emptyList()
@@ -560,7 +562,11 @@ private fun PlayerRuntimeController.reconcileSkipIntervals(
         skipIntroInFlightKey = null
         return
     }
-    if (!skipIntroWasEnabled) {
+    // The reported-settings snapshot already defaults skipIntroEnabled to true, so the
+    // "newly enabled" edge never fired for a fresh session — AniSkip/IntroDB intervals were
+    // only fetched after an in-player source or episode switch. fetchSkipIntervals dedupes
+    // by lookup key, so requesting on the first emission is safe.
+    if (firstEmission || !skipIntroWasEnabled) {
         fetchSkipIntervals(currentVideoId ?: contentId, currentSeason, currentEpisode)
     }
 }

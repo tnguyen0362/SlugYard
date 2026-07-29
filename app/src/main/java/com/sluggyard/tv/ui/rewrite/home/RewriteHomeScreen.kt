@@ -1,6 +1,7 @@
 package com.sluggyard.tv.ui.rewrite.home
 
-import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -26,11 +27,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.focusable
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.ScrollState
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.MutableState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
@@ -38,10 +40,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -60,6 +60,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -69,6 +70,8 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
@@ -78,11 +81,19 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
+import coil3.size.Size
 import com.sluggyard.tv.ui.design.SlugYardPalette
 import com.sluggyard.tv.ui.design.SlugYardTvMetrics
+import com.sluggyard.tv.ui.rewrite.preferCardBackdropUrl
+import com.sluggyard.tv.ui.rewrite.preferLargePosterUrl
+import com.sluggyard.tv.ui.rewrite.preferTvBackdropUrl
 import com.sluggyard.tv.ui.rewrite.requestFocusReliably
 import com.sluggyard.tv.ui.rewrite.rewriteContentTypeLabel
 import com.sluggyard.tv.ui.rewrite.rewriteEpisodeLabel
+import com.sluggyard.tv.ui.rewrite.rewriteVerticalFocusExits
+import com.sluggyard.tv.ui.util.DpadVerticalNeighbors
+import com.sluggyard.tv.ui.util.LocalDpadVerticalNeighbors
 import com.sluggyard.tv.ui.util.dpadRepeatThrottle
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
@@ -102,6 +113,12 @@ data class RewriteHomePoster(
     val parentId: String? = null,
     val parentType: String? = null,
     val resumePositionMs: Long = 0L,
+    /** Short synopsis shown on the focused poster — from catalog meta when available. */
+    val summary: String? = null,
+    /** Landscape / backdrop art when the catalog provides it (preferred for wide focus). */
+    val backdropUrl: String? = null,
+    val contentGenres: String? = null,
+    val contentLanguage: String? = null,
 )
 
 data class RewriteHomeRow(
@@ -133,18 +150,62 @@ data class RewriteHomeState(
     val statusMessage: String? = null,
 )
 
+/**
+ * Keep focused catalog **rows** (title + posters) clear of the floating root nav.
+ *
+ * Each shelf ends with [RewriteHomeCatalogFocusTopInset] of empty space. BringIntoView pins the
+ * next shelf's title at that same inset from the top — so the previous shelf's posters sit fully
+ * above the viewport and only empty canvas remains under the header (breathing room), not a
+ * chopped leftover row.
+ */
 @OptIn(ExperimentalFoundationApi::class)
-private val RewriteHomeBringIntoViewSpec = object : BringIntoViewSpec {
-    override val scrollAnimationSpec: AnimationSpec<Float> = tween(durationMillis = 140)
+@Composable
+private fun rememberRewriteHomeBringIntoViewSpec(): BringIntoViewSpec {
+    val density = LocalDensity.current
+    val topInsetPx = with(density) { RewriteHomeCatalogFocusTopInset.toPx() }
+    val bottomInsetPx = with(density) { 48.dp.toPx() }
+    return remember(topInsetPx, bottomInsetPx) {
+        object : BringIntoViewSpec {
+            override val scrollAnimationSpec: AnimationSpec<Float> = tween(durationMillis = 0)
 
-    override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
-        val trailingEdge = offset + size
-        return when {
-            offset < 40f -> offset - 40f
-            trailingEdge > containerSize - 40f -> trailingEdge - containerSize + 40f
-            else -> 0f
+            override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
+                val trailingEdge = offset + size
+                // Button-sized targets: never pin toward the top — Home restores the hero via scrollToItem(0).
+                if (size <= 96f) {
+                    return when {
+                        trailingEdge > containerSize - bottomInsetPx ->
+                            trailingEdge - containerSize + bottomInsetPx
+                        else -> 0f
+                    }
+                }
+                return when {
+                    offset < topInsetPx -> offset - topInsetPx
+                    trailingEdge > containerSize - bottomInsetPx -> trailingEdge - containerSize + bottomInsetPx
+                    else -> 0f
+                }
+            }
         }
     }
+}
+
+/**
+ * Header clearance for a focused shelf title — also the trailing gap after every catalog row.
+ * Matching those two values is what keeps the previous rail fully off-screen when you go Down.
+ */
+private val RewriteHomeCatalogFocusTopInset = (SlugYardTvMetrics.RootNavBarHeight + 20.dp)
+
+/** Focused Home tiles expand to a real ~16:9 layout width (pushes neighbors — no overlap). */
+private const val HomePosterLandscapeAspect = 16f / 9f
+/** Coil decode cap for landscape backdrops (sharp on TV without decoding at full focus px). */
+private const val MaxLandscapeDecodeWidthPx = 780
+private const val LandscapeFocusDwellMs = 180L
+private const val RowBringIntoViewDebounceMs = 120L
+
+/** Hero Play / View Details must not trigger LazyColumn bring-into-view (chops the title). */
+@OptIn(ExperimentalFoundationApi::class)
+private val RewriteHomeHeroNoBringIntoViewSpec = object : BringIntoViewSpec {
+    override val scrollAnimationSpec: AnimationSpec<Float> = tween(durationMillis = 0)
+    override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float = 0f
 }
 
 /**
@@ -161,6 +222,7 @@ fun RewriteHomeScreen(
     onPlay: (RewriteHero) -> Unit,
     onDetails: (RewriteHero) -> Unit,
     onPosterSelected: (RewriteHomePoster) -> Unit,
+    onContinueWatchingSelected: ((RewriteHomePoster) -> Unit)? = null,
     onContinueWatchingLongPress: ((RewriteHomePoster) -> Unit)? = null,
     onRetry: () -> Unit,
     smoothFocusMovement: Boolean = true,
@@ -171,23 +233,82 @@ fun RewriteHomeScreen(
     headerFocusRequester: FocusRequester? = null,
     requestInitialFocus: Boolean = true,
     onInitialFocusRequested: () -> Unit = {},
+    /** Watchlist stays portrait; Home shelves expand to landscape on focus. */
+    expandOnFocus: Boolean = true,
     modifier: Modifier = Modifier,
     // Persisted by the caller (outside this composable's own lifecycle) so returning from
     // Details/Streams doesn't reset which hero was showing or scroll every row back to the
     // start -- this composable is fully disposed and recomposed fresh on Home<->Details nav
     // since RewriteAppShell's `when(destination)` only calls it while destination == Home.
-    rowScrollStates: MutableMap<String, ScrollState> = remember { mutableMapOf() },
+    rowScrollStates: MutableMap<String, LazyListState> = remember { mutableMapOf() },
     heroIndexState: MutableState<Int> = remember { mutableStateOf(0) },
     lastHeroKeyState: MutableState<String?> = remember { mutableStateOf(null) },
 ) {
     val rowFocusRequesters = remember(state.rows.map { it.id }) {
         List(state.rows.size) { FocusRequester() }
     }
-    val scrollState = rememberScrollState()
+    val listState = rememberLazyListState()
     val scrollScope = rememberCoroutineScope()
+    // Hero Play lives inside a LazyColumn item, so it unmounts when scrolled away. Header DPAD_DOWN
+    // must land on an always-composed bridge that scrolls home to top, then hands focus off.
+    val heroPlayFocusRequester = remember { FocusRequester() }
     val heroKey = state.heroCandidates.joinToString(separator = "|") { it.id }
     var heroIndex by heroIndexState
     var heroActionFocused by remember { mutableStateOf(false) }
+    val summaryById = remember(state.heroCandidates, state.hero?.id, state.hero?.summary) {
+        buildMap {
+            state.hero?.summary?.takeIf { it.isNotBlank() }?.let { put(state.hero!!.id, it) }
+            state.heroCandidates.forEach { candidate ->
+                candidate.summary.takeIf { it.isNotBlank() }?.let { put(candidate.id, it) }
+            }
+        }
+    }
+    val visibleHero = state.heroCandidates.getOrNull(heroIndex) ?: state.hero
+    /** First non–Continue Watching row — wrap target for last→Popular loops. */
+    val firstCatalogRowIndex = remember(state.rows.map { it.id }) {
+        state.rows.indexOfFirst { it.id != "continue_watching" }.let { if (it < 0) 0 else it }
+    }
+    fun firstCatalogListIndex(): Int {
+        var index = 0
+        if (state.statusMessage != null && (visibleHero != null || state.rows.isNotEmpty())) index++
+        if (visibleHero == null && state.rows.isEmpty()) index++
+        if (visibleHero != null) {
+            index++ // hero panel
+            index++ // hero exit gap — empty band under nav when first shelf is focused
+        }
+        return index
+    }
+    suspend fun focusPrimaryContent() {
+        listState.scrollToItem(0)
+        val target = when {
+            visibleHero != null -> heroPlayFocusRequester
+            state.rows.isNotEmpty() -> rowFocusRequesters.firstOrNull()
+            else -> heroPlayFocusRequester // empty/loading panel
+        }
+        target?.requestFocusReliably(retries = 8)
+    }
+    suspend fun focusHeroActions() {
+        listState.scrollToItem(0)
+        kotlinx.coroutines.delay(24)
+        heroPlayFocusRequester.requestFocusReliably(retries = 10)
+    }
+    suspend fun focusCatalogRow(rowIndex: Int) {
+        if (state.rows.isEmpty()) return
+        val clamped = rowIndex.coerceIn(0, state.rows.lastIndex)
+        listState.scrollToItem(firstCatalogListIndex() + clamped)
+        val requester = rowFocusRequesters.getOrNull(clamped) ?: return
+        if (requester.requestFocusReliably(retries = 8)) return
+        // The entry card lives at LazyRow index 0; a horizontally scrolled shelf decomposes it,
+        // which is what made the later rails (Romance / Family / Crime) unreachable.
+        state.rows.getOrNull(clamped)?.id
+            ?.let(rowScrollStates::get)
+            ?.takeIf { it.firstVisibleItemIndex > 0 }
+            ?.scrollToItem(0)
+        requester.requestFocusReliably(retries = 8)
+    }
+    suspend fun focusFirstCatalogRow() {
+        focusCatalogRow(firstCatalogRowIndex)
+    }
     LaunchedEffect(heroKey, heroActionFocused) {
         // Only reset to the first hero when the candidate set actually changed identity (a
         // fresh catalog load) -- not merely because this composable remounted after returning
@@ -203,76 +324,185 @@ fun RewriteHomeScreen(
             }
         }
     }
-    LaunchedEffect(contentFocusRequester, requestInitialFocus, state.hero != null) {
+    LaunchedEffect(contentFocusRequester, requestInitialFocus, state.hero != null, state.rows.map { it.id }) {
         if (!requestInitialFocus) return@LaunchedEffect
-        if (state.hero != null) scrollState.scrollTo(0)
-        contentFocusRequester?.requestFocusReliably(retries = 8)
+        focusPrimaryContent()
         onInitialFocusRequested()
     }
-    val visibleHero = state.heroCandidates.getOrNull(heroIndex) ?: state.hero
-    CompositionLocalProvider(LocalBringIntoViewSpec provides RewriteHomeBringIntoViewSpec) {
-        Column(
+    val catalogBringIntoViewSpec = rememberRewriteHomeBringIntoViewSpec()
+    val dpadVerticalNeighbors = remember { DpadVerticalNeighbors() }
+    // Which shelf owns focus right now. Horizontal moves inside one shelf must not re-run the
+    // row-level BringIntoView — that per-keypress scroll animation was the catalog lag.
+    val focusedRowIdState = remember { mutableStateOf<String?>(null) }
+    CompositionLocalProvider(
+        LocalBringIntoViewSpec provides catalogBringIntoViewSpec,
+        LocalDpadVerticalNeighbors provides dpadVerticalNeighbors,
+    ) {
+        Box(
             modifier = modifier
                 .fillMaxSize()
-                .background(SlugYardPalette.Canvas)
-                .dpadRepeatThrottle()
-                .verticalScroll(scrollState),
-            verticalArrangement = Arrangement.spacedBy(40.dp),
+                .background(SlugYardPalette.Canvas),
         ) {
-            if (state.statusMessage != null && (visibleHero != null || state.rows.isNotEmpty())) {
-                Text(
-                    state.statusMessage,
-                    modifier = Modifier.padding(horizontal = SlugYardTvMetrics.ScreenHorizontalInset),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = SlugYardPalette.OnCanvasMuted,
+            if (contentFocusRequester != null) {
+                Box(
+                    modifier = Modifier
+                        .size(1.dp)
+                        .focusRequester(contentFocusRequester)
+                        .focusProperties {
+                            // Header calls requestFocus() on this bridge; keep it out of spatial search
+                            // so DPAD never lands on an invisible 1dp sink.
+                            left = FocusRequester.Cancel
+                            right = FocusRequester.Cancel
+                            up = FocusRequester.Cancel
+                            down = FocusRequester.Cancel
+                        }
+                        .onFocusChanged { focusState ->
+                            if (focusState.isFocused) {
+                                scrollScope.launch { focusPrimaryContent() }
+                            }
+                        }
+                        .focusable(),
                 )
+            }
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .dpadRepeatThrottle(),
+                contentPadding = PaddingValues(
+                    top = if (visibleHero == null) SlugYardTvMetrics.RootNavBarHeight else 0.dp,
+                    bottom = 56.dp,
+                ),
+                verticalArrangement = Arrangement.spacedBy(0.dp),
+            ) {
+            if (state.statusMessage != null && (visibleHero != null || state.rows.isNotEmpty())) {
+                item(key = "status") {
+                    Text(
+                        state.statusMessage,
+                        modifier = Modifier.padding(horizontal = SlugYardTvMetrics.ScreenHorizontalInset),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = SlugYardPalette.OnCanvasMuted,
+                    )
+                }
             }
             if (visibleHero == null && state.rows.isEmpty()) {
-                RewriteHomeStatusPanel(
-                    isLoading = state.isLoading,
-                    message = state.statusMessage,
-                    onRetry = onRetry,
-                    focusRequester = contentFocusRequester,
-                )
+                item(key = "empty") {
+                    RewriteHomeStatusPanel(
+                        isLoading = state.isLoading,
+                        message = state.statusMessage,
+                        onRetry = onRetry,
+                        focusRequester = heroPlayFocusRequester,
+                    )
+                }
             }
             visibleHero?.let { hero ->
-                RewriteHeroPanel(
-                    hero = hero,
-                    onPlay = { onPlay(hero) },
-                    onDetails = { onDetails(hero) },
-                    contentFocusRequester = contentFocusRequester,
-                    headerFocusRequester = headerFocusRequester,
-                    downFocusRequester = rowFocusRequesters.firstOrNull(),
-                     onHeroFocusChanged = { focused ->
-                         heroActionFocused = focused
-                         scrollScope.launch { scrollState.scrollTo(0) }
-                     },
-                )
+                item(key = "hero:${hero.id}") {
+                    RewriteHeroPanel(
+                        hero = hero,
+                        onPlay = { onPlay(hero) },
+                        onDetails = { onDetails(hero) },
+                        contentFocusRequester = heroPlayFocusRequester,
+                        headerFocusRequester = headerFocusRequester,
+                        downFocusRequester = rowFocusRequesters.getOrNull(firstCatalogRowIndex),
+                        onPrepareFocusDown = {
+                            listState.scrollToItem(firstCatalogListIndex() + firstCatalogRowIndex)
+                            delay(24)
+                        },
+                        onRequestFocusDown = { scrollScope.launch { focusFirstCatalogRow() } },
+                        onHeroFocusChanged = { focused ->
+                            heroActionFocused = focused
+                            // Restore the full hero — never leave Play/Details pinned mid-viewport.
+                            if (focused) {
+                                scrollScope.launch { listState.scrollToItem(0) }
+                            }
+                        },
+                    )
+                }
+                item(key = "hero_exit_gap") {
+                    Spacer(modifier = Modifier.height(RewriteHomeCatalogFocusTopInset))
+                }
             }
-            state.rows.forEachIndexed { index, row ->
+            itemsIndexed(
+                items = state.rows,
+                key = { _, row -> row.id },
+            ) { index, row ->
+                val upRequester = when {
+                    index <= 0 && visibleHero != null -> heroPlayFocusRequester
+                    index <= 0 -> headerFocusRequester
+                    else -> rowFocusRequesters.getOrNull(index - 1)
+                }
+                // Last shelf wraps to Popular/Featured. The Thriller bug was wrapping while later
+                // rails were still loading (Thriller temporarily lastIndex) — splash now waits
+                // until catalogs settle, so wrap is intentional again, not a dead-end.
+                val downRequester = if (index >= state.rows.lastIndex) {
+                    rowFocusRequesters.getOrNull(firstCatalogRowIndex)
+                } else {
+                    rowFocusRequesters.getOrNull(index + 1)
+                }
                 RewritePosterRow(
                     row = row,
-                    scrollState = rowScrollStates.getOrPut(row.id) { ScrollState(0) },
+                    listState = rowScrollStates.getOrPut(row.id) { LazyListState() },
                     smoothFocusMovement = smoothFocusMovement,
-                    onPosterSelected = onPosterSelected,
+                    expandOnFocus = expandOnFocus,
+                    onPosterSelected = if (row.id == "continue_watching" && onContinueWatchingSelected != null) {
+                        onContinueWatchingSelected
+                    } else {
+                        onPosterSelected
+                    },
                     onPosterLongPress = if (row.id == "continue_watching") {
                         onContinueWatchingLongPress
                     } else {
                         null
                     },
-                    entryFocusRequester = when {
-                        index == 0 && visibleHero == null -> contentFocusRequester ?: rowFocusRequesters[index]
-                        else -> rowFocusRequesters[index]
+                    entryFocusRequester = rowFocusRequesters[index],
+                    upFocusRequester = upRequester,
+                    downFocusRequester = downRequester,
+                    onFocusUp = {
+                        scrollScope.launch {
+                            when {
+                                index <= 0 && visibleHero != null -> focusHeroActions()
+                                index <= 0 -> headerFocusRequester?.requestFocusReliably(retries = 6)
+                                else -> focusCatalogRow(index - 1)
+                            }
+                        }
                     },
-                    upFocusRequester = if (index == 0) {
-                        if (visibleHero == null) null else contentFocusRequester
-                    } else {
-                        rowFocusRequesters[index - 1]
+                    onFocusDown = {
+                        scrollScope.launch {
+                            if (index >= state.rows.lastIndex) {
+                                focusCatalogRow(firstCatalogRowIndex)
+                            } else {
+                                focusCatalogRow(index + 1)
+                            }
+                        }
+                        Unit
                     },
-                    downFocusRequester = rowFocusRequesters.getOrNull(index + 1),
+                    onPrepareFocusUp = {
+                        when {
+                            index <= 0 && visibleHero != null -> {
+                                listState.scrollToItem(0)
+                                delay(24)
+                            }
+                            index <= 0 -> Unit
+                            else -> {
+                                listState.scrollToItem(firstCatalogListIndex() + index - 1)
+                                delay(24)
+                            }
+                        }
+                    },
+                    onPrepareFocusDown = {
+                        val target = if (index >= state.rows.lastIndex) {
+                            firstCatalogRowIndex
+                        } else {
+                            index + 1
+                        }
+                        listState.scrollToItem(firstCatalogListIndex() + target)
+                        delay(24)
+                    },
+                    focusedRowIdState = focusedRowIdState,
+                    summaryLookup = summaryById::get,
                 )
             }
-            Spacer(Modifier.height(56.dp))
+            }
         }
     }
 }
@@ -328,39 +558,76 @@ private fun RewriteHeroPanel(
     contentFocusRequester: FocusRequester? = null,
     headerFocusRequester: FocusRequester? = null,
     downFocusRequester: FocusRequester? = null,
+    onPrepareFocusDown: (suspend () -> Unit)? = null,
+    onRequestFocusDown: () -> Unit = {},
     onHeroFocusChanged: (Boolean) -> Unit = {},
 ) {
     val playFocusRequester = remember { FocusRequester() }
     val initialFocusRequester = contentFocusRequester ?: playFocusRequester
+    val dpadNeighbors = LocalDpadVerticalNeighbors.current
+    val heroDownModifier = Modifier.onPreviewKeyEvent { event ->
+        if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionDown) {
+            onRequestFocusDown()
+            true
+        } else {
+            false
+        }
+    }
+    val heroNeighborModifier = Modifier.onFocusChanged { state ->
+        onHeroFocusChanged(state.isFocused)
+        if (state.isFocused) {
+            dpadNeighbors.up = headerFocusRequester
+            dpadNeighbors.down = downFocusRequester
+            dpadNeighbors.upBringIntoView = null
+            dpadNeighbors.downBringIntoView = onPrepareFocusDown
+        } else if (
+            dpadNeighbors.up == headerFocusRequester &&
+            dpadNeighbors.down == downFocusRequester
+        ) {
+            dpadNeighbors.up = null
+            dpadNeighbors.down = null
+            dpadNeighbors.upBringIntoView = null
+            dpadNeighbors.downBringIntoView = null
+        }
+    }
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            // Tall enough that the bottom-aligned title/pills/summary/buttons column never
-            // overflows above the box's own top edge (Compose doesn't clip an
-            // Alignment.BottomStart child to its parent's bounds by default, so an undersized box
-            // here renders the title off the top of the screen) while still leaving the Play
-            // button on-screen without needing a scroll on initial load.
-            .height(420.dp)
+            // Full-bleed under the floating nav; keep height modest so title + actions stay
+            // fully on-screen after scrollToItem(0) (taller heroes got their top chopped).
+            .height(440.dp)
             .background(SlugYardPalette.Surface),
     ) {
+        val heroContext = LocalContext.current
         hero.backdropUrl?.takeIf(String::isNotBlank)?.let { backdropUrl ->
             AsyncImage(
-                model = backdropUrl,
+                model = remember(backdropUrl) {
+                    ImageRequest.Builder(heroContext)
+                        .data(preferTvBackdropUrl(backdropUrl))
+                        .size(Size(1280, 720))
+                        .build()
+                },
                 contentDescription = null,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
                 alpha = 0.54f,
             )
         } ?: hero.posterUrl?.let { posterUrl ->
+            val posterModel = remember(posterUrl) {
+                ImageRequest.Builder(heroContext)
+                    .data(preferLargePosterUrl(posterUrl))
+                    .size(Size(500, 750))
+                    .build()
+            }
             AsyncImage(
-                model = posterUrl,
+                model = posterModel,
                 contentDescription = null,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
                 alpha = 0.20f,
             )
             AsyncImage(
-                model = posterUrl,
+                model = posterModel,
                 contentDescription = null,
                 modifier = Modifier
                     .align(Alignment.CenterEnd)
@@ -429,8 +696,8 @@ private fun RewriteHeroPanel(
                 )
             }
             Spacer(Modifier.height(22.dp))
-            // Keep button-to-button movement inside the hero from moving the catalog viewport.
-            CompositionLocalProvider(LocalBringIntoViewSpec provides RewriteHomeBringIntoViewSpec) {
+            // Keep button focus from scrolling/chopping the hero via bring-into-view.
+            CompositionLocalProvider(LocalBringIntoViewSpec provides RewriteHomeHeroNoBringIntoViewSpec) {
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     HeroActionButton(
                         "Play",
@@ -438,14 +705,10 @@ private fun RewriteHeroPanel(
                         onPlay,
                         primary = true,
                         modifier = Modifier
-                        .focusRequester(initialFocusRequester)
-                        .then(
-                            headerFocusRequester?.let { requester ->
-                                Modifier.focusProperties { up = requester }
-                            } ?: Modifier,
-                        )
-                            .onFocusChanged { onHeroFocusChanged(it.isFocused) }
-                            .focusProperties { downFocusRequester?.let { down = it } },
+                            .focusRequester(initialFocusRequester)
+                            .rewriteVerticalFocusExits(up = headerFocusRequester, down = downFocusRequester)
+                            .then(heroDownModifier)
+                            .then(heroNeighborModifier),
                     )
                     HeroActionButton(
                         "View Details",
@@ -453,8 +716,9 @@ private fun RewriteHeroPanel(
                         onDetails,
                         primary = false,
                         modifier = Modifier
-                             .onFocusChanged { onHeroFocusChanged(it.isFocused) }
-                            .focusProperties { downFocusRequester?.let { down = it } },
+                            .rewriteVerticalFocusExits(up = headerFocusRequester, down = downFocusRequester)
+                            .then(heroDownModifier)
+                            .then(heroNeighborModifier),
                     )
                 }
             }
@@ -488,29 +752,54 @@ private fun HeroActionButton(
     primary: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    if (primary) {
-        Button(
-            onClick = onClick,
-            modifier = modifier,
-            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = SlugYardPalette.OnCanvas,
-                contentColor = SlugYardPalette.Canvas,
-            ),
-        ) {
-            Icon(icon, contentDescription = null)
-            Spacer(Modifier.width(8.dp))
-            Text(label, style = MaterialTheme.typography.labelLarge)
-        }
-    } else {
-        OutlinedButton(onClick = onClick, modifier = modifier, contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)) {
-            Icon(icon, contentDescription = null)
-            Spacer(Modifier.width(8.dp))
-            Text(label, style = MaterialTheme.typography.labelLarge)
-        }
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    val shape = RoundedCornerShape(SlugYardTvMetrics.PillCornerRadius)
+    val container = when {
+        focused -> SlugYardPalette.Accent
+        primary -> SlugYardPalette.OnCanvas
+        else -> SlugYardPalette.SurfaceElevated.copy(alpha = 0.72f)
+    }
+    val content = when {
+        focused -> Color(0xFF181818)
+        primary -> SlugYardPalette.Canvas
+        else -> SlugYardPalette.OnCanvas
+    }
+    Row(
+        modifier = modifier
+            .graphicsLayer {
+                scaleX = if (focused) 1.08f else 1f
+                scaleY = if (focused) 1.08f else 1f
+            }
+            .clip(shape)
+            .background(container, shape)
+            .then(
+                if (focused) {
+                    Modifier.border(SlugYardTvMetrics.FocusRingWidth, SlugYardPalette.FocusRing, shape)
+                } else if (!primary) {
+                    Modifier.border(1.5.dp, SlugYardPalette.OnCanvas.copy(alpha = 0.45f), shape)
+                } else {
+                    Modifier
+                },
+            )
+            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
+            .padding(horizontal = 22.dp, vertical = 14.dp)
+            .semantics { role = Role.Button },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Icon(icon, contentDescription = null, tint = content)
+        Text(
+            label,
+            style = MaterialTheme.typography.titleMedium,
+            color = content,
+            fontWeight = if (focused) FontWeight.Bold else FontWeight.SemiBold,
+        )
     }
 }
 
+
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun RewritePosterRow(
     row: RewriteHomeRow,
@@ -520,40 +809,84 @@ private fun RewritePosterRow(
     entryFocusRequester: FocusRequester? = null,
     upFocusRequester: FocusRequester? = null,
     downFocusRequester: FocusRequester? = null,
-    scrollState: ScrollState = rememberScrollState(),
+    onFocusUp: (() -> Unit)? = null,
+    onFocusDown: (() -> Unit)? = null,
+    onPrepareFocusUp: (suspend () -> Unit)? = null,
+    onPrepareFocusDown: (suspend () -> Unit)? = null,
+    listState: LazyListState = rememberLazyListState(),
+    expandOnFocus: Boolean = true,
+    focusedRowIdState: MutableState<String?>? = null,
+    summaryLookup: (String) -> String? = { null },
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
-        Text(
-            text = row.title,
-            modifier = Modifier.padding(horizontal = SlugYardTvMetrics.ScreenHorizontalInset),
-            style = MaterialTheme.typography.titleLarge,
-        )
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(scrollState)
-                .padding(horizontal = SlugYardTvMetrics.ScreenHorizontalInset),
-            horizontalArrangement = Arrangement.spacedBy(SlugYardTvMetrics.RowGap),
+    // Bring the whole shelf (title + posters) into view so section labels never sit under the nav.
+    val rowBringIntoViewRequester = remember { BringIntoViewRequester() }
+    val rowScope = rememberCoroutineScope()
+    var rowBringIntoViewJob by remember { mutableStateOf<Job?>(null) }
+    var lastRowBringIntoViewAtMs by remember { mutableStateOf(0L) }
+    Column {
+        Column(
+            modifier = Modifier.bringIntoViewRequester(rowBringIntoViewRequester),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            row.posters.forEachIndexed { index, poster ->
-                RewritePosterCard(
-                    poster = poster,
-                    smoothFocusMovement = smoothFocusMovement,
-                    onClick = { onPosterSelected(poster) },
-                    onLongClick = onPosterLongPress?.let { handler -> { handler(poster) } },
-                    showTypeBadge = row.id == "continue_watching",
-                    episodeLabel = if (row.id == "continue_watching") {
-                        rewriteEpisodeLabel(poster.season, poster.episode)
-                    } else {
-                        null
-                    },
-                    // Each row's first card is the stable vertical focus anchor.
-                    focusRequester = if (index == 0) entryFocusRequester else null,
-                    upFocusRequester = if (index == 0) upFocusRequester else null,
-                    downFocusRequester = if (index == 0) downFocusRequester else null,
-                )
+            Text(
+                text = row.title,
+                modifier = Modifier.padding(horizontal = SlugYardTvMetrics.ScreenHorizontalInset),
+                style = MaterialTheme.typography.titleLarge,
+            )
+            LazyRow(
+                state = listState,
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(
+                    horizontal = SlugYardTvMetrics.ScreenHorizontalInset,
+                    vertical = 18.dp,
+                ),
+                horizontalArrangement = Arrangement.spacedBy(SlugYardTvMetrics.RowGap),
+            ) {
+                itemsIndexed(row.posters, key = { _, poster -> "${row.id}:${poster.id}" }) { index, poster ->
+                    RewritePosterCard(
+                        poster = poster,
+                        smoothFocusMovement = smoothFocusMovement,
+                        onClick = { onPosterSelected(poster) },
+                        onLongClick = onPosterLongPress?.let { handler -> { handler(poster) } },
+                        episodeLabel = if (row.id == "continue_watching") {
+                            rewriteEpisodeLabel(poster.season, poster.episode)
+                        } else {
+                            null
+                        },
+                        summary = summaryLookup(poster.id) ?: poster.summary,
+                        // Entry requester stays on index 0 for row-to-row landings; every index still
+                        // gets the same vertical FocusRequester exits (LazyRow index-0 Up/Down bug).
+                        focusRequester = if (index == 0) entryFocusRequester else null,
+                        upFocusRequester = upFocusRequester,
+                        downFocusRequester = downFocusRequester,
+                        onFocusUp = onFocusUp,
+                        onFocusDown = onFocusDown,
+                        onPrepareFocusUp = onPrepareFocusUp,
+                        onPrepareFocusDown = onPrepareFocusDown,
+                        onFocusedChanged = { focused ->
+                            if (focused && focusedRowIdState?.value != row.id) {
+                                focusedRowIdState?.value = row.id
+                                rowBringIntoViewJob?.cancel()
+                                rowBringIntoViewJob = rowScope.launch {
+                                    val now = System.currentTimeMillis()
+                                    val waitMs = RowBringIntoViewDebounceMs - (now - lastRowBringIntoViewAtMs)
+                                    if (waitMs > 0) delay(waitMs)
+                                    lastRowBringIntoViewAtMs = System.currentTimeMillis()
+                                    rowBringIntoViewRequester.bringIntoView()
+                                }
+                            }
+                        },
+                        showTypeBadge = false,
+                        expandOnFocus = expandOnFocus,
+                        cardWidth = 176.dp,
+                        cardHeight = 264.dp,
+                    )
+                }
             }
         }
+        // Trailing empty band matches BringIntoView top inset: when the next shelf is pinned
+        // under the header, this spacer (not the previous posters) fills the nav breathing room.
+        Spacer(modifier = Modifier.height(RewriteHomeCatalogFocusTopInset))
     }
 }
 
@@ -567,35 +900,98 @@ internal fun RewritePosterCard(
     focusRequester: FocusRequester? = null,
     upFocusRequester: FocusRequester? = null,
     downFocusRequester: FocusRequester? = null,
+    onFocusUp: (() -> Unit)? = null,
+    onFocusDown: (() -> Unit)? = null,
+    onPrepareFocusUp: (suspend () -> Unit)? = null,
+    onPrepareFocusDown: (suspend () -> Unit)? = null,
     cardWidth: Dp = 176.dp,
     cardHeight: Dp = 264.dp,
     showTypeBadge: Boolean = false,
     episodeLabel: String? = null,
+    summary: String? = null,
+    onFocusedChanged: ((Boolean) -> Unit)? = null,
+    /** When false, focused cards stay portrait (search). Home uses landscape expand. */
+    expandOnFocus: Boolean = true,
 ) {
     val interactions = remember { MutableInteractionSource() }
     val focused by interactions.collectIsFocusedAsState()
     val bringIntoViewRequester = remember { BringIntoViewRequester() }
     val scope = rememberCoroutineScope()
     var bringIntoViewJob by remember { mutableStateOf<Job?>(null) }
-    val scale by animateFloatAsState(
-        targetValue = if (focused) SlugYardTvMetrics.RowFocusScale else 1f,
-        animationSpec = tween(220),
-        label = "poster focus scale",
+    val dpadNeighbors = LocalDpadVerticalNeighbors.current
+    // Real layout width expand so the next portrait tile is pushed, not drawn underneath.
+    // Frame is ~16:9 at the row height — backdrops are 16:9; a near-square crop looked "off-center".
+    val focusedWidth = if (expandOnFocus) {
+        (cardHeight.value * HomePosterLandscapeAspect).dp
+    } else {
+        cardWidth
+    }
+    val animatedWidth by animateDpAsState(
+        targetValue = if (focused && expandOnFocus) focusedWidth else cardWidth,
+        animationSpec = if (smoothFocusMovement) {
+            tween(durationMillis = 110, easing = FastOutSlowInEasing)
+        } else {
+            tween(0)
+        },
+        label = "poster focus width",
     )
+    LaunchedEffect(focused) {
+        onFocusedChanged?.invoke(focused)
+    }
 
-    val focusMovementModifier = if (smoothFocusMovement) {
+    val focusMovementModifier = if (smoothFocusMovement && onFocusedChanged == null) {
+        // Standalone cards (e.g. Search) bring themselves into view. Home shelves use the
+        // row-level requester so the section title stays visible under the floating nav.
         Modifier
             .bringIntoViewRequester(bringIntoViewRequester)
             .onFocusChanged { state ->
                 bringIntoViewJob?.cancel()
+                bringIntoViewJob = null
                 if (state.isFocused) {
                     bringIntoViewJob = scope.launch {
-                        delay(140)
                         bringIntoViewRequester.bringIntoView()
                     }
                 }
             }
     } else Modifier
+
+    // One owner for vertical exits: scroll-then-focus callbacks when provided, else FocusRequesters.
+    // Do not also leave focusProperties pointing at live requesters — that double-fires with this.
+    val verticalNavModifier = Modifier.onPreviewKeyEvent { event ->
+        if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+        when (event.key) {
+            Key.DirectionUp -> {
+                when {
+                    onFocusUp != null -> {
+                        onFocusUp()
+                        true
+                    }
+                    upFocusRequester != null -> {
+                        upFocusRequester.requestFocus()
+                        true
+                    }
+                    else -> false
+                }
+            }
+            Key.DirectionDown -> {
+                when {
+                    onFocusDown != null -> {
+                        onFocusDown()
+                        true
+                    }
+                    downFocusRequester != null -> {
+                        downFocusRequester.requestFocus()
+                        true
+                    }
+                    else -> false
+                }
+            }
+            else -> false
+        }
+    }
+
+    var longPressJob by remember { mutableStateOf<Job?>(null) }
+    var longPressFired by remember { mutableStateOf(false) }
 
     val interactionModifier = if (onLongClick != null) {
         Modifier.combinedClickable(
@@ -612,32 +1008,34 @@ internal fun RewritePosterCard(
         )
     }
 
-    Box(
+    Column(
         modifier = focusMovementModifier
+            .then(verticalNavModifier)
             .let { if (focusRequester != null) it.focusRequester(focusRequester) else it }
-            .focusProperties {
-                upFocusRequester?.let { up = it }
-                downFocusRequester?.let { down = it }
+            // Cancel geometric Up/Down — verticalNavModifier owns a single move (avoids thrash).
+            .rewriteVerticalFocusExits(up = null, down = null)
+            .onFocusChanged { state ->
+                if (state.isFocused) {
+                    dpadNeighbors.up = upFocusRequester
+                    dpadNeighbors.down = downFocusRequester
+                    dpadNeighbors.upBringIntoView = onPrepareFocusUp
+                    dpadNeighbors.downBringIntoView = onPrepareFocusDown
+                } else if (
+                    dpadNeighbors.up == upFocusRequester &&
+                    dpadNeighbors.down == downFocusRequester
+                ) {
+                    dpadNeighbors.up = null
+                    dpadNeighbors.down = null
+                    dpadNeighbors.upBringIntoView = null
+                    dpadNeighbors.downBringIntoView = null
+                }
             }
-            .size(width = cardWidth, height = cardHeight)
             .zIndex(if (focused) 1f else 0f)
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-                shadowElevation = if (focused) 18f else 0f
-            }
-            .then(
-                if (focused) {
-                    Modifier.border(3.dp, SlugYardPalette.FocusRing, RoundedCornerShape(SlugYardTvMetrics.CardCornerRadius))
-                } else Modifier,
-            )
-            .clip(RoundedCornerShape(SlugYardTvMetrics.CardCornerRadius))
-            .background(SlugYardPalette.SurfaceElevated)
+            .width(animatedWidth)
             .semantics {
                 contentDescription = buildString {
                     append(poster.title)
                     episodeLabel?.let { append(". $it") }
-                    rewriteContentTypeLabel(poster.contentType)?.let { append(". $it") }
                     if (onLongClick != null) {
                         append(". Hold Select or press Menu for more options")
                     }
@@ -647,11 +1045,37 @@ internal fun RewritePosterCard(
             .then(
                 if (onLongClick != null) {
                     Modifier.onPreviewKeyEvent { event ->
-                        if (event.type == KeyEventType.KeyDown && event.key == Key.Menu) {
-                            onLongClick()
-                            true
-                        } else {
-                            false
+                        val isSelectKey = event.key == Key.DirectionCenter ||
+                            event.key == Key.Enter ||
+                            event.key == Key.NumPadEnter
+                        when {
+                            event.type == KeyEventType.KeyDown && event.key == Key.Menu -> {
+                                onLongClick()
+                                true
+                            }
+                            isSelectKey && event.type == KeyEventType.KeyDown -> {
+                                if (longPressJob == null) {
+                                    longPressFired = false
+                                    longPressJob = scope.launch {
+                                        delay(750)
+                                        longPressFired = true
+                                        onLongClick()
+                                    }
+                                }
+                                true
+                            }
+                            isSelectKey && event.type == KeyEventType.KeyUp -> {
+                                longPressJob?.cancel()
+                                longPressJob = null
+                                if (longPressFired) {
+                                    longPressFired = false
+                                    true
+                                } else {
+                                    onClick()
+                                    true
+                                }
+                            }
+                            else -> false
                         }
                     }
                 } else {
@@ -659,71 +1083,206 @@ internal fun RewritePosterCard(
                 },
             )
             .then(interactionModifier),
-        contentAlignment = Alignment.Center,
     ) {
-        // Drawn underneath the image so a failed/missing load (Coil renders nothing on
-        // error) still leaves a readable card instead of a bare placeholder box.
-        Text(
-            poster.title,
-            modifier = Modifier.padding(12.dp),
-            style = MaterialTheme.typography.labelLarge,
-            color = SlugYardPalette.OnCanvasMuted,
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-            maxLines = 4,
-            overflow = TextOverflow.Ellipsis,
-        )
-        if (!poster.imageUrl.isNullOrBlank()) {
-            AsyncImage(
-                model = poster.imageUrl,
-                contentDescription = null,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop,
-            )
-        }
-        episodeLabel?.let { label ->
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(8.dp)
-                    .clip(RoundedCornerShape(3.dp))
-                    .background(SlugYardPalette.Canvas.copy(alpha = 0.88f))
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
-            ) {
-                Text(
-                    label,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = SlugYardPalette.OnCanvas,
-                    fontWeight = FontWeight.SemiBold,
+        Box(
+            modifier = Modifier
+                .size(width = animatedWidth, height = cardHeight)
+                .then(
+                    if (focused) {
+                        Modifier.border(3.dp, SlugYardPalette.FocusRing, RoundedCornerShape(SlugYardTvMetrics.CardCornerRadius))
+                    } else Modifier,
                 )
+                .clip(RoundedCornerShape(SlugYardTvMetrics.CardCornerRadius))
+                .background(SlugYardPalette.SurfaceElevated),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                poster.title,
+                modifier = Modifier.padding(12.dp),
+                style = MaterialTheme.typography.labelLarge,
+                color = SlugYardPalette.OnCanvasMuted,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                maxLines = 4,
+                overflow = TextOverflow.Ellipsis,
+            )
+            // Portrait is the always-on base layer. Landscape only loads after focus so fast
+            // flings don't starve Coil of poster decodes (empty portrait frames).
+            val context = LocalContext.current
+            val density = LocalDensity.current
+            val posterDecode = remember(cardWidth, cardHeight, density) {
+                with(density) {
+                    Size(cardWidth.roundToPx().coerceAtLeast(1), cardHeight.roundToPx().coerceAtLeast(1))
+                }
             }
-        }
-        if (showTypeBadge) {
-            rewriteContentTypeLabel(poster.contentType)?.let { typeLabel ->
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(8.dp)
-                        .clip(RoundedCornerShape(3.dp))
-                        .background(SlugYardPalette.Accent)
-                        .padding(horizontal = 6.dp, vertical = 2.dp),
-                ) {
-                    Text(
-                        typeLabel.uppercase(),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color(0xFF181818),
-                        fontWeight = FontWeight.Medium,
+            val landscapeDecode = remember(focusedWidth, cardHeight, density) {
+                with(density) {
+                    Size(
+                        focusedWidth.roundToPx().coerceAtMost(MaxLandscapeDecodeWidthPx).coerceAtLeast(1),
+                        cardHeight.roundToPx().coerceAtLeast(1),
                     )
                 }
             }
-        }
-        poster.progressFraction?.let { progress ->
-            androidx.compose.foundation.layout.Box(
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .fillMaxWidth(progress.coerceIn(0f, 1f))
-                    .height(4.dp)
-                    .background(SlugYardPalette.Accent),
-            )
+            // Prefer true poster art for the unfocused tile — never substitute backdrop here.
+            val posterUrl = remember(poster.id, poster.imageUrl) {
+                preferLargePosterUrl(poster.imageUrl)
+            }
+            val landscapeUrl = remember(poster.id, poster.backdropUrl, expandOnFocus) {
+                if (!expandOnFocus) null
+                else poster.backdropUrl
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let { preferCardBackdropUrl(it) }
+                    ?.takeIf { it != posterUrl }
+            }
+            if (posterUrl != null) {
+                val posterRequest = remember(poster.id, posterUrl, posterDecode) {
+                    ImageRequest.Builder(context)
+                        .data(posterUrl)
+                        .size(posterDecode)
+                        .memoryCacheKey("poster:${poster.id}:$posterUrl")
+                        .diskCacheKey("poster:${poster.id}:$posterUrl")
+                        .build()
+                }
+                AsyncImage(
+                    model = posterRequest,
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                    alignment = Alignment.Center,
+                )
+            } else if (!poster.backdropUrl.isNullOrBlank() && !expandOnFocus) {
+                // Search / non-expand tiles with backdrop-only art still need a visible frame.
+                val fallbackUrl = remember(poster.id, poster.backdropUrl) {
+                    preferLargePosterUrl(poster.backdropUrl)
+                }
+                if (fallbackUrl != null) {
+                    AsyncImage(
+                        model = remember(poster.id, fallbackUrl, posterDecode) {
+                            ImageRequest.Builder(context)
+                                .data(fallbackUrl)
+                                .size(posterDecode)
+                                .memoryCacheKey("poster-fallback:${poster.id}:$fallbackUrl")
+                                .build()
+                        },
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop,
+                    )
+                }
+            }
+            // Landscape only once focus has settled AND the art decoded — keep portrait visible
+            // underneath until then. The dwell gate stops a fast fling from queueing a Coil
+            // decode for every card it passes through.
+            var landscapeArmed by remember(landscapeUrl) { mutableStateOf(false) }
+            LaunchedEffect(focused, landscapeUrl) {
+                if (!focused || landscapeUrl == null) {
+                    landscapeArmed = false
+                    return@LaunchedEffect
+                }
+                delay(LandscapeFocusDwellMs)
+                landscapeArmed = true
+            }
+            if (landscapeArmed && landscapeUrl != null) {
+                var landscapeReady by remember(landscapeUrl) { mutableStateOf(false) }
+                val landscapeRequest = remember(poster.id, landscapeUrl, landscapeDecode) {
+                    ImageRequest.Builder(context)
+                        .data(landscapeUrl)
+                        .size(landscapeDecode)
+                        .memoryCacheKey("card-backdrop:${poster.id}:$landscapeUrl")
+                        .diskCacheKey("card-backdrop:${poster.id}:$landscapeUrl")
+                        .build()
+                }
+                AsyncImage(
+                    model = landscapeRequest,
+                    contentDescription = null,
+                    onSuccess = { landscapeReady = true },
+                    onError = { landscapeReady = false },
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer { alpha = if (landscapeReady) 1f else 0f },
+                    // 16:9 art in a 16:9 frame — center crop keeps the subject framed.
+                    contentScale = ContentScale.Crop,
+                    alignment = Alignment.Center,
+                )
+            }
+            if (focused) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(Color.Transparent, SlugYardPalette.Canvas.copy(alpha = 0.88f)),
+                            ),
+                        )
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        episodeLabel?.let { label ->
+                            Text(
+                                label,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = SlugYardPalette.Accent,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                            )
+                        }
+                        summary?.takeIf { it.isNotBlank() }?.let { text ->
+                            Text(
+                                text,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = SlugYardPalette.OnCanvas,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+            }
+            episodeLabel?.takeIf { !focused }?.let { label ->
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(8.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(SlugYardPalette.Canvas.copy(alpha = 0.88f))
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                ) {
+                    Text(
+                        label,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = SlugYardPalette.OnCanvas,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
+            if (showTypeBadge) {
+                rewriteContentTypeLabel(poster.contentType)?.let { typeLabel ->
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(8.dp)
+                            .clip(RoundedCornerShape(3.dp))
+                            .background(SlugYardPalette.Accent)
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                    ) {
+                        Text(
+                            typeLabel.uppercase(),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color(0xFF181818),
+                            fontWeight = FontWeight.Medium,
+                        )
+                    }
+                }
+            }
+            poster.progressFraction?.let { progress ->
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .fillMaxWidth(progress.coerceIn(0f, 1f))
+                        .height(4.dp)
+                        .background(SlugYardPalette.Accent),
+                )
+            }
         }
     }
 }

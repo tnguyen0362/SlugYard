@@ -1,83 +1,273 @@
 package com.sluggyard.tv.ui.rewrite.settings
 
-import androidx.compose.runtime.Composable
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
-import com.sluggyard.tv.domain.model.TmdbSettings
-import com.sluggyard.tv.domain.model.MDBListSettings
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.unit.dp
 import com.sluggyard.tv.core.addonprotocol.ManagedAddon
-import com.sluggyard.tv.core.aggregation.HomeCatalogKey
+import com.sluggyard.tv.core.addonprotocol.SlugYardCommunitySourcePolicy
+import com.sluggyard.tv.domain.model.TmdbSettings
+import kotlinx.coroutines.launch
 
 @Composable
 internal fun ContentDiscoverySettings(
     tmdb: TmdbSettings,
-    mdblist: MDBListSettings,
     onTmdbEnabled: (Boolean) -> Unit,
     onTmdbEnrichContinueWatching: (Boolean) -> Unit,
-    onMdblistEnabled: (Boolean) -> Unit,
     rewriteAddons: List<ManagedAddon>,
-    catalogOrderKeys: List<String>,
-    onCatalogOrderChanged: (List<HomeCatalogKey>) -> Unit,
     debridConnected: Boolean,
-    onConfigureAutoSources: () -> Unit,
+    onInstallCommunityAddons: suspend () -> Unit,
+    onUninstallCommunityAddons: suspend () -> Unit,
 ) {
-    val autoSourceAddons = rewriteAddons.filter { addon ->
-        val name = "${addon.manifest.name} ${addon.manifest.id} ${addon.manifestUrl}".lowercase()
-        "torrentio" in name || "mediafusion" in name
+    val scope = rememberCoroutineScope()
+    var setupBusy by remember { mutableStateOf(false) }
+    var setupMessage by remember { mutableStateOf<String?>(null) }
+    var showSetupDialog by remember { mutableStateOf(false) }
+    var uninstallConfirm by remember { mutableStateOf(false) }
+    val packInstalled = SlugYardCommunitySourcePolicy.isCommunityPackInstalled(rewriteAddons)
+    val watchHubInstalled = SlugYardCommunitySourcePolicy.isWatchHubInstalled(rewriteAddons)
+    val contentSourcesReady = rewriteAddons.any { addon ->
+        SlugYardCommunitySourcePolicy.isContentSourceManifest(addon.manifestUrl) &&
+            !addon.configuredManifestUrl.isNullOrBlank()
     }
-    val visibleAddons = rewriteAddons - autoSourceAddons.toSet()
-    val configuredAutoSources = autoSourceAddons.count { !it.configuredManifestUrl.isNullOrBlank() }
+    val catalogAddons = rewriteAddons.filter { addon ->
+        !SlugYardCommunitySourcePolicy.isContentSourceManifest(addon.manifestUrl) &&
+            !SlugYardCommunitySourcePolicy.isWatchHubManifest(addon.manifestUrl)
+    }
     RewriteSettingsGroup("Content enrichment") {
-        RewriteToggleRow("TMDB enrichment", "Improve artwork, metadata, dates, and details.", tmdb.enabled, onTmdbEnabled)
+        RewriteToggleRow("TMDB enrichment", "Improve artwork, metadata, cast, and details.", tmdb.enabled, onTmdbEnabled)
         RewriteToggleRow("Continue Watching artwork", "Use TMDB enrichment for saved playback tiles.", tmdb.enrichContinueWatching, onTmdbEnrichContinueWatching)
-        RewriteToggleRow("MDBList ratings", "Show ratings from the configured MDBList account.", mdblist.enabled, onMdblistEnabled)
-        val customOrder = catalogOrderKeys.isNotEmpty()
-        RewriteCycleRow(
-            title = "Catalog ordering",
-            value = if (customOrder) "Reverse addon order" else "Installed addon order",
-            values = listOf("Installed addon order", "Reverse addon order"),
-        ) { value ->
-            onCatalogOrderChanged(
-                if (value == "Reverse addon order") {
-                    rewriteAddons.asReversed().flatMap { addon ->
-                        addon.manifest.catalogs.map { catalog -> HomeCatalogKey(addon.manifest.id, catalog.id) }
-                    }
-                } else {
-                    emptyList()
-                },
-            )
-        }
     }
-    RewriteSettingsGroup("Auto Sources") {
+    RewriteSettingsGroup("Community addons") {
         Text(
-            "Third-party addons are provided by their authors. You are responsible for using them in accordance with the laws and terms that apply where you live.",
+            when {
+                debridConnected && packInstalled ->
+                    "SlugYard Sources are installed. Debrid stream addons are configured for your provider."
+                debridConnected ->
+                    "Your debrid key is connected. Install community addons for catalogs, WatchHub, and stream sources."
+                packInstalled && watchHubInstalled ->
+                    "Community addons are installed. Without debrid, Play opens WatchHub (where to watch)."
+                else ->
+                    "Install community addons for catalogs and WatchHub. Connect TorBox / Real-Debrid / Premiumize in Cloud Manager for torrent streams."
+            },
             style = androidx.compose.material3.MaterialTheme.typography.bodyMedium,
             color = com.sluggyard.tv.ui.design.SlugYardPalette.OnCanvasMuted,
         )
         RewriteActionRow(
-            title = "SlugYard Auto Sources",
+            title = "SlugYard Sources",
             description = when {
-                !debridConnected -> "Connect a debrid provider first. Setup configures Torrentio with your key; MediaFusion stays keyless unless you self-host encrypt."
-                configuredAutoSources == autoSourceAddons.size && autoSourceAddons.isNotEmpty() -> "Ready. Torrentio uses your active debrid provider; MediaFusion is keyless unless self-hosted."
-                configuredAutoSources > 0 -> "$configuredAutoSources of ${autoSourceAddons.size.coerceAtLeast(2)} sources ready. Run setup again to retry the unavailable source."
-                else -> "Configure Torrentio for debrid streaming. MediaFusion catalogs stay available without sending your key to a third party."
+                packInstalled && debridConnected && contentSourcesReady -> "Installed with debrid stream sources."
+                packInstalled && watchHubInstalled -> "Installed (WatchHub + catalogs)."
+                packInstalled -> "Installed."
+                else -> "Install the bundled community addon pack (catalogs, WatchHub, stream sources)."
             },
-            actionLabel = if (configuredAutoSources > 0) "Reconfigure" else "Set up",
-            onClick = onConfigureAutoSources,
+            actionLabel = if (packInstalled) "Reinstall" else "Install",
+            onClick = {
+                setupMessage = null
+                showSetupDialog = true
+            },
         )
-        autoSourceAddons.forEach { addon ->
-            RewriteValueRow(
-                title = addon.manifest.name,
-                value = if (addon.configuredManifestUrl.isNullOrBlank()) "Needs setup" else "Ready for active debrid provider",
+        if (packInstalled) {
+            RewriteActionRow(
+                title = "Uninstall community addons",
+                description = "Remove curated catalogs, WatchHub, and stream sources from this device.",
+                actionLabel = "Uninstall",
+                onClick = { uninstallConfirm = true },
             )
         }
+        RewriteValueRow(
+            title = "Status",
+            value = when {
+                !packInstalled -> "Not installed"
+                debridConnected && contentSourcesReady -> "Installed · debrid ready"
+                watchHubInstalled -> "Installed · WatchHub ready"
+                else -> "Installed"
+            },
+        )
+        RewriteValueRow(
+            title = "WatchHub",
+            value = if (watchHubInstalled) "Ready" else "Not installed",
+        )
     }
-    RewriteSettingsGroup("Installed addons") {
-        visibleAddons.forEach { addon ->
+    RewriteSettingsGroup("Catalogs") {
+        catalogAddons.forEach { addon ->
             RewriteValueRow(
                 title = addon.manifest.name,
-                value = "Managed source",
+                value = "Managed catalog",
             )
         }
-        if (visibleAddons.isEmpty()) RewriteValueRow("Sources", "No managed addons available")
+        if (catalogAddons.isEmpty()) RewriteValueRow("Catalogs", "No managed catalogs available")
     }
+    if (showSetupDialog) {
+        CommunityAddonsSetupDialog(
+            busy = setupBusy,
+            message = setupMessage,
+            debridConnected = debridConnected,
+            installed = packInstalled,
+            onConfirm = {
+                setupBusy = true
+                setupMessage = null
+                scope.launch {
+                    runCatching { onInstallCommunityAddons() }
+                        .onSuccess {
+                            setupMessage = if (debridConnected) {
+                                "Community addons installed. Stream sources are ready."
+                            } else {
+                                "Community addons installed. WatchHub is ready without debrid."
+                            }
+                        }
+                        .onFailure { setupMessage = it.message ?: "Could not install community addons." }
+                    setupBusy = false
+                }
+            },
+            onDismiss = {
+                if (!setupBusy) {
+                    showSetupDialog = false
+                    setupMessage = null
+                }
+            },
+        )
+    }
+    if (uninstallConfirm) {
+        CommunityAddonsUninstallDialog(
+            busy = setupBusy,
+            message = setupMessage,
+            onConfirm = {
+                setupBusy = true
+                setupMessage = null
+                scope.launch {
+                    runCatching { onUninstallCommunityAddons() }
+                        .onSuccess {
+                            setupMessage = "Community addons removed."
+                            uninstallConfirm = false
+                            setupBusy = false
+                        }
+                        .onFailure {
+                            setupMessage = it.message ?: "Could not uninstall community addons."
+                            setupBusy = false
+                        }
+                }
+            },
+            onDismiss = {
+                if (!setupBusy) {
+                    uninstallConfirm = false
+                    setupMessage = null
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun CommunityAddonsSetupDialog(
+    busy: Boolean,
+    message: String?,
+    debridConnected: Boolean,
+    installed: Boolean,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val focusRequester = remember { FocusRequester() }
+    BackHandler(enabled = !busy, onBack = onDismiss)
+    LaunchedEffect(Unit) { focusRequester.requestFocus() }
+    AlertDialog(
+        onDismissRequest = { if (!busy) onDismiss() },
+        title = { Text(if (installed) "Reinstall community addons" else "Install community addons") },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    if (debridConnected) {
+                        "Install catalogs, WatchHub, and stream sources for your active debrid provider."
+                    } else {
+                        "Install catalogs and WatchHub. Play will show where to watch until you connect a debrid provider."
+                    },
+                )
+                if (busy) {
+                    CircularProgressIndicator()
+                    Text("Installing…")
+                }
+                message?.let {
+                    Text(
+                        it,
+                        color = if (it.contains("installed", ignoreCase = true) || it.contains("ready", ignoreCase = true)) {
+                            com.sluggyard.tv.ui.design.SlugYardPalette.OnCanvas
+                        } else {
+                            com.sluggyard.tv.ui.design.SlugYardPalette.Danger
+                        },
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onConfirm,
+                enabled = !busy,
+                modifier = Modifier.focusRequester(focusRequester),
+            ) { Text(if (busy) "Working…" else if (installed) "Reinstall" else "Install") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !busy) { Text("Close") }
+        },
+    )
+}
+
+@Composable
+private fun CommunityAddonsUninstallDialog(
+    busy: Boolean,
+    message: String?,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val focusRequester = remember { FocusRequester() }
+    BackHandler(enabled = !busy, onBack = onDismiss)
+    LaunchedEffect(Unit) { focusRequester.requestFocus() }
+    AlertDialog(
+        onDismissRequest = { if (!busy) onDismiss() },
+        title = { Text("Uninstall community addons") },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text("Remove curated catalogs, WatchHub, and stream sources. You can install them again anytime.")
+                if (busy) {
+                    CircularProgressIndicator()
+                    Text("Removing…")
+                }
+                message?.let {
+                    Text(it, color = com.sluggyard.tv.ui.design.SlugYardPalette.Danger)
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onConfirm,
+                enabled = !busy,
+                modifier = Modifier.focusRequester(focusRequester),
+            ) { Text(if (busy) "Working…" else "Uninstall") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !busy) { Text("Cancel") }
+        },
+    )
 }

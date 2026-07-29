@@ -97,22 +97,26 @@ internal fun PlayerRuntimeController.preparePlaybackBeforeStart(
             )
             loadSavedProgressSuspend(currentSeason, currentEpisode)
         }
+        // Prefer the newer of rewrite checkpoint (startPositionMs) vs legacy watch DB.
         navigationArgs.startPositionMs?.takeIf { it > 0L }?.let { positionMs ->
-            pendingResumeProgress = WatchProgress(
-                contentId = contentId.orEmpty(),
-                contentType = contentType.orEmpty(),
-                name = title,
-                poster = poster,
-                backdrop = backdrop,
-                logo = logo,
-                videoId = currentVideoId ?: contentId.orEmpty(),
-                season = currentSeason,
-                episode = currentEpisode,
-                episodeTitle = currentEpisodeTitle,
-                position = positionMs,
-                duration = 0L,
-                lastWatched = System.currentTimeMillis(),
-            )
+            val existing = pendingResumeProgress
+            if (existing == null || positionMs >= existing.position) {
+                pendingResumeProgress = WatchProgress(
+                    contentId = contentId.orEmpty(),
+                    contentType = contentType.orEmpty(),
+                    name = title,
+                    poster = poster,
+                    backdrop = backdrop,
+                    logo = logo,
+                    videoId = currentVideoId ?: contentId.orEmpty(),
+                    season = currentSeason,
+                    episode = currentEpisode,
+                    episodeTitle = currentEpisodeTitle,
+                    position = positionMs,
+                    duration = existing?.duration?.takeIf { it > 0L } ?: 0L,
+                    lastWatched = System.currentTimeMillis(),
+                )
+            }
         }
         recordLoadingDiagnosticEvent(
             phase = "initializing_player",

@@ -36,13 +36,45 @@ class ManualStreamResolutionTest {
     }
 
     @Test
-    fun `torrent without configured resolver is unavailable rather than handed to player`() = runTest {
+    fun `torrent without debrid hands torrent sentinel to player`() = runTest {
         val result = ManualStreamResolutionCoordinator(emptySet()).prepare(
-            ManualStreamSelection("torrent", null, "abcdef", null),
+            ManualStreamSelection(
+                id = "torrent",
+                directUrl = null,
+                infoHash = "abcdef",
+                fileIndex = 2,
+                filename = "show.mkv",
+                streamName = "1080p",
+            ),
             null,
         )
 
-        assertTrue(result is ManualResolutionResult.Unavailable)
+        val ready = result as ManualResolutionResult.Ready
+        assertEquals("torrent://abcdef", ready.source.url)
+        assertEquals("abcdef", ready.source.infoHash)
+        assertEquals(2, ready.source.fileIndex)
+        assertEquals("show.mkv", ready.source.filename)
+        assertEquals("1080p", ready.source.streamName)
+    }
+
+    @Test
+    fun `direct resolution preserves proxy headers and binge group`() = runTest {
+        val result = ManualStreamResolutionCoordinator(emptySet()).prepare(
+            ManualStreamSelection(
+                id = "direct",
+                directUrl = "https://cdn/play",
+                infoHash = null,
+                fileIndex = null,
+                requestHeaders = mapOf("User-Agent" to "SlugYard"),
+                bingeGroup = "group-1",
+                videoHash = "abc",
+            ),
+            null,
+        )
+        val source = (result as ManualResolutionResult.Ready).source
+        assertEquals(mapOf("User-Agent" to "SlugYard"), source.requestHeaders)
+        assertEquals("group-1", source.bingeGroup)
+        assertEquals("abc", source.videoHash)
     }
 
     private class RecordingResolver : DebridManualResolver {

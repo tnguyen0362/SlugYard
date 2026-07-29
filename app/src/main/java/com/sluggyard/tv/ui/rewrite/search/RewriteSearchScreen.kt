@@ -1,29 +1,23 @@
-package com.sluggyard.tv.ui.rewrite.search
+﻿package com.sluggyard.tv.ui.rewrite.search
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.itemsIndexed
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -33,35 +27,40 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.shape.RoundedCornerShape
 import com.sluggyard.tv.ui.design.SlugYardPalette
 import com.sluggyard.tv.ui.design.SlugYardTvMetrics
 import com.sluggyard.tv.ui.rewrite.home.RewriteHomePoster
 import com.sluggyard.tv.ui.rewrite.home.RewritePosterCard
 import com.sluggyard.tv.ui.rewrite.requestFocusReliably
-import kotlinx.coroutines.delay
+import com.sluggyard.tv.ui.rewrite.rewriteIsMovieType
+import com.sluggyard.tv.ui.rewrite.rewriteIsSeriesType
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
-/** How long to let typing settle before firing a query, so every keystroke doesn't fan out a
- * request across every enabled addon's search catalog. */
+/** How long to let typing settle before firing a query, so every keystroke does not fan out a
+ * request across every enabled addon search catalog. */
 private const val SEARCH_DEBOUNCE_MS = 450L
+
+private val SearchPosterWidth = 152.dp
+private val SearchPosterHeight = 228.dp
 
 sealed interface RewriteSearchResultState {
     data object Idle : RewriteSearchResultState
@@ -74,12 +73,6 @@ sealed interface RewriteSearchResultState {
 fun RewriteSearchScreen(
     search: suspend (String) -> List<RewriteHomePoster>,
     onPosterSelected: (RewriteHomePoster) -> Unit,
-    // These navigate to a real filtered catalog (the same Browse screen used elsewhere), unlike
-    // the old behavior where "Trending Shows" etc. literally typed that phrase into the text
-    // search field and full-text-searched it -- returning unrelated junk that happened to match
-    // those words (e.g. wrestling videos, comedy specials).
-    onBrowseMovies: () -> Unit,
-    onBrowseShows: () -> Unit,
     contentFocusRequester: FocusRequester? = null,
     headerFocusRequester: FocusRequester? = null,
     onBack: () -> Unit,
@@ -89,10 +82,10 @@ fun RewriteSearchScreen(
     var resultState: RewriteSearchResultState by remember { mutableStateOf(RewriteSearchResultState.Idle) }
     var retryNonce by remember { mutableStateOf(0) }
     val fieldFocusRequester = remember { FocusRequester() }
-    val browseMoviesFocusRequester = remember { FocusRequester() }
-    val browseShowsFocusRequester = remember { FocusRequester() }
     val firstResultFocusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val focusScope = rememberCoroutineScope()
     val initialFocusRequester = contentFocusRequester ?: fieldFocusRequester
 
     LaunchedEffect(initialFocusRequester) {
@@ -120,35 +113,43 @@ fun RewriteSearchScreen(
         modifier = modifier
             .fillMaxSize()
             .background(SlugYardPalette.Canvas)
-            .padding(horizontal = SlugYardTvMetrics.ScreenHorizontalInset, vertical = 22.dp),
-        verticalArrangement = Arrangement.spacedBy(18.dp),
+            .padding(top = 8.dp, bottom = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         OutlinedTextField(
             value = query,
             onValueChange = { query = it },
             modifier = Modifier
                 .fillMaxWidth()
-                .height(68.dp)
+                .padding(horizontal = SlugYardTvMetrics.ScreenHorizontalInset)
+                .height(52.dp)
                 .focusRequester(initialFocusRequester)
+                .onFocusChanged { state ->
+                    // Android TV should not keep a soft keyboard owning DPAD; hide as soon as
+                    // the field focuses so Down can reach Movies/TV results.
+                    if (state.isFocused) keyboardController?.hide()
+                }
                 .then(
                     headerFocusRequester?.let { requester ->
                         Modifier.focusProperties { up = requester }
                     } ?: Modifier,
                 )
-                // Keep vertical D-pad movement deterministic while the text field owns typing.
                 .onPreviewKeyEvent { event ->
                     if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                     when (event.key) {
                         Key.DirectionDown -> {
-                            when {
-                                query.isBlank() -> browseMoviesFocusRequester.requestFocus()
-                                resultState is RewriteSearchResultState.Loaded &&
-                                    (resultState as RewriteSearchResultState.Loaded).posters.isNotEmpty() -> {
-                                    firstResultFocusRequester.requestFocus()
+                            val loaded = resultState as? RewriteSearchResultState.Loaded
+                            if (loaded == null || loaded.posters.isEmpty()) {
+                                false
+                            } else {
+                                // Soft keyboard on emulators/phones can swallow geometric Down;
+                                // hide it and hand focus to the first result poster explicitly.
+                                keyboardController?.hide()
+                                focusScope.launch {
+                                    firstResultFocusRequester.requestFocusReliably(retries = 8)
                                 }
-                                else -> browseMoviesFocusRequester.requestFocus()
+                                true
                             }
-                            true
                         }
                         Key.DirectionUp -> {
                             if (headerFocusRequester != null) {
@@ -166,6 +167,7 @@ fun RewriteSearchScreen(
                     }
                 },
             singleLine = true,
+            textStyle = MaterialTheme.typography.titleMedium,
             placeholder = { Text("Search movies & TV") },
             leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
             shape = RoundedCornerShape(5.dp),
@@ -177,32 +179,20 @@ fun RewriteSearchScreen(
             ),
         )
 
-        Row(
-            modifier = Modifier.fillMaxSize(),
-            horizontalArrangement = Arrangement.spacedBy(22.dp),
-        ) {
-            SearchCategoryRail(
-                onBrowseMovies = onBrowseMovies,
-                onBrowseShows = onBrowseShows,
-                moviesFocusRequester = browseMoviesFocusRequester,
-                showsFocusRequester = browseShowsFocusRequester,
-                upFocusRequester = initialFocusRequester,
-                modifier = Modifier.width(240.dp),
-            )
-            Box(modifier = Modifier.weight(1f).fillMaxSize()) {
-                when (val state = resultState) {
-                    is RewriteSearchResultState.Idle -> SearchHint()
-                    is RewriteSearchResultState.Loading -> SearchLoading()
-                    is RewriteSearchResultState.Error -> SearchError(state.message) { retryNonce++ }
-                    is RewriteSearchResultState.Loaded -> if (state.posters.isEmpty()) {
-                        SearchEmpty(query)
-                    } else {
-                        SearchResultsGrid(
-                            posters = state.posters,
-                            onPosterSelected = onPosterSelected,
-                            firstFocusRequester = firstResultFocusRequester,
-                        )
-                    }
+        Box(modifier = Modifier.fillMaxSize()) {
+            when (val state = resultState) {
+                is RewriteSearchResultState.Idle -> SearchHint()
+                is RewriteSearchResultState.Loading -> SearchLoading()
+                is RewriteSearchResultState.Error -> SearchError(state.message) { retryNonce++ }
+                is RewriteSearchResultState.Loaded -> if (state.posters.isEmpty()) {
+                    SearchEmpty(query)
+                } else {
+                    SearchResultsSections(
+                        posters = state.posters,
+                        onPosterSelected = onPosterSelected,
+                        firstFocusRequester = firstResultFocusRequester,
+                        queryFieldFocusRequester = initialFocusRequester,
+                    )
                 }
             }
         }
@@ -210,115 +200,134 @@ fun RewriteSearchScreen(
 }
 
 @Composable
-private fun SearchCategoryRail(
-    onBrowseMovies: () -> Unit,
-    onBrowseShows: () -> Unit,
-    moviesFocusRequester: FocusRequester,
-    showsFocusRequester: FocusRequester,
-    upFocusRequester: FocusRequester,
-    modifier: Modifier = Modifier,
-) {
-    val browseItems = listOf(
-        Triple("Movies", onBrowseMovies, moviesFocusRequester),
-        Triple("TV Shows", onBrowseShows, showsFocusRequester),
-    )
-    LazyColumn(
-        modifier = modifier
-            .fillMaxSize()
-            .clip(RoundedCornerShape(5.dp))
-            .background(SlugYardPalette.Surface),
-        contentPadding = PaddingValues(vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
-    ) {
-        item {
-            Text(
-                "Browse",
-                modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
-                color = SlugYardPalette.OnCanvasMuted,
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.Medium,
-            )
-        }
-        items(browseItems.size, key = { browseItems[it].first }) { index ->
-            val (label, onSelect, focusRequester) = browseItems[index]
-            SearchBrowseRailItem(
-                label = label,
-                onClick = onSelect,
-                focusRequester = focusRequester,
-                upFocusRequester = if (index == 0) upFocusRequester else browseItems[index - 1].third,
-                downFocusRequester = if (index == browseItems.lastIndex) null else browseItems[index + 1].third,
-            )
-        }
-    }
-}
-
-@Composable
-private fun SearchBrowseRailItem(
-    label: String,
-    onClick: () -> Unit,
-    focusRequester: FocusRequester,
-    upFocusRequester: FocusRequester,
-    downFocusRequester: FocusRequester?,
-) {
-    val interaction = remember { MutableInteractionSource() }
-    val focused by interaction.collectIsFocusedAsState()
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 8.dp)
-            .graphicsLayer {
-                scaleX = if (focused) 1.03f else 1f
-                scaleY = if (focused) 1.03f else 1f
-            }
-            .clip(RoundedCornerShape(6.dp))
-            .focusRequester(focusRequester)
-            .focusProperties {
-                up = upFocusRequester
-                downFocusRequester?.let { down = it }
-            }
-            .background(if (focused) SlugYardPalette.SurfaceElevated else Color.Transparent)
-            .then(
-                if (focused) {
-                    Modifier.border(2.dp, SlugYardPalette.Accent, RoundedCornerShape(6.dp))
-                } else {
-                    Modifier
-                },
-            )
-            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 14.dp),
-    ) {
-        Text(
-            text = label,
-            color = if (focused) SlugYardPalette.OnCanvas else SlugYardPalette.OnCanvasMuted,
-            style = MaterialTheme.typography.bodyLarge,
-            fontWeight = FontWeight.Medium,
-        )
-    }
-}
-
-@Composable
-private fun SearchResultsGrid(
+private fun SearchResultsSections(
     posters: List<RewriteHomePoster>,
     onPosterSelected: (RewriteHomePoster) -> Unit,
     firstFocusRequester: FocusRequester,
+    queryFieldFocusRequester: FocusRequester,
 ) {
-    LazyVerticalGrid(
-        columns = GridCells.Fixed(4),
+    val movies = remember(posters) {
+        posters.filter { rewriteIsMovieType(it.contentType) || !rewriteIsSeriesType(it.contentType) }
+    }
+    val shows = remember(posters) {
+        posters.filter { rewriteIsSeriesType(it.contentType) }
+    }
+    val showBothSections = movies.isNotEmpty() && shows.isNotEmpty()
+    // The query field's DPAD_DOWN lands on whichever section renders first; the second section
+    // needs its own entry requester so Movies -> TV Shows is reachable at all.
+    val moviesEntryFocusRequester = remember { FocusRequester() }
+    val showsEntryFocusRequester = remember { FocusRequester() }
+    val moviesEntry = if (movies.isNotEmpty()) firstFocusRequester else moviesEntryFocusRequester
+    val showsEntry = if (movies.isEmpty()) firstFocusRequester else showsEntryFocusRequester
+    val listState = rememberLazyListState()
+    val focusScope = rememberCoroutineScope()
+    val showsRowItemIndex = if (movies.isEmpty()) 0 else 2
+
+    LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(top = 4.dp, bottom = 28.dp),
+        verticalArrangement = Arrangement.spacedBy(if (showBothSections) 6.dp else 12.dp),
+    ) {
+        if (movies.isNotEmpty()) {
+            item(key = "section_movies_header") {
+                Text(
+                    "Movies",
+                    modifier = Modifier.padding(horizontal = SlugYardTvMetrics.ScreenHorizontalInset),
+                    style = MaterialTheme.typography.titleLarge,
+                    color = SlugYardPalette.OnCanvas,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+            item(key = "section_movies_row") {
+                SearchPosterRow(
+                    posters = movies,
+                    sectionKey = "movie",
+                    onPosterSelected = onPosterSelected,
+                    firstFocusRequester = moviesEntry,
+                    upFocusRequester = queryFieldFocusRequester,
+                    onFocusDown = if (shows.isEmpty()) {
+                        null
+                    } else {
+                        {
+                            focusScope.launch {
+                                listState.scrollToItem(showsRowItemIndex)
+                                showsEntry.requestFocusReliably(retries = 8)
+                            }
+                            Unit
+                        }
+                    },
+                    compactVerticalPadding = showBothSections,
+                )
+            }
+        }
+        if (shows.isNotEmpty()) {
+            item(key = "section_shows_header") {
+                Text(
+                    "TV Shows",
+                    modifier = Modifier.padding(horizontal = SlugYardTvMetrics.ScreenHorizontalInset),
+                    style = MaterialTheme.typography.titleLarge,
+                    color = SlugYardPalette.OnCanvas,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+            item(key = "section_shows_row") {
+                SearchPosterRow(
+                    posters = shows,
+                    sectionKey = "show",
+                    onPosterSelected = onPosterSelected,
+                    firstFocusRequester = showsEntry,
+                    onFocusUp = if (movies.isEmpty()) {
+                        null
+                    } else {
+                        {
+                            focusScope.launch {
+                                listState.scrollToItem(0)
+                                moviesEntry.requestFocusReliably(retries = 8)
+                            }
+                            Unit
+                        }
+                    },
+                    upFocusRequester = if (movies.isEmpty()) queryFieldFocusRequester else null,
+                    compactVerticalPadding = showBothSections,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SearchPosterRow(
+    posters: List<RewriteHomePoster>,
+    sectionKey: String,
+    onPosterSelected: (RewriteHomePoster) -> Unit,
+    firstFocusRequester: FocusRequester?,
+    upFocusRequester: FocusRequester? = null,
+    onFocusUp: (() -> Unit)? = null,
+    onFocusDown: (() -> Unit)? = null,
+    compactVerticalPadding: Boolean = false,
+) {
+    LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(SlugYardTvMetrics.RowGap),
         contentPadding = PaddingValues(
             horizontal = SlugYardTvMetrics.ScreenHorizontalInset,
-            vertical = 4.dp,
+            vertical = if (compactVerticalPadding) 10.dp else 14.dp,
         ),
-        horizontalArrangement = Arrangement.spacedBy(SlugYardTvMetrics.RowGap),
-        verticalArrangement = Arrangement.spacedBy(SlugYardTvMetrics.RowGap),
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxWidth(),
     ) {
-        itemsIndexed(posters, key = { _, poster -> "${poster.contentType.orEmpty()}:${poster.id}" }) { index, poster ->
+        itemsIndexed(posters, key = { _, poster -> "$sectionKey:${poster.id}" }) { index, poster ->
             RewritePosterCard(
                 poster = poster,
-                smoothFocusMovement = true,
+                smoothFocusMovement = false,
                 onClick = { onPosterSelected(poster) },
-                showTypeBadge = true,
+                showTypeBadge = false,
+                expandOnFocus = false,
+                cardWidth = SearchPosterWidth,
+                cardHeight = SearchPosterHeight,
                 focusRequester = if (index == 0) firstFocusRequester else null,
+                upFocusRequester = upFocusRequester,
+                onFocusUp = onFocusUp,
+                onFocusDown = onFocusDown,
             )
         }
     }

@@ -36,7 +36,7 @@ class DataStoreRewritePlaybackProgressSyncBridge(
                 ?: return@mapNotNull null
             val encoded = value as? String ?: return@mapNotNull null
             RewritePlaybackProgressCodec.decode(encoded)
-                .filter { WatchStatePolicy.isStartedButIncomplete(it.progressFraction) }
+                .filter(RewritePlaybackCheckpoint::isResumable)
                 .map { it.toCloudProgress(profileId) }
         }
         .flatten()
@@ -46,10 +46,7 @@ class DataStoreRewritePlaybackProgressSyncBridge(
             it.first to rewriteProgressKey(it.second.contentId, it.second.season, it.second.episode)
         }
         val grouped = progress
-            .filter {
-                it.duration > 0L &&
-                    WatchStatePolicy.isStartedButIncomplete(it.position.toDouble() / it.duration)
-            }
+            .filter { WatchStatePolicy.isStartedButIncomplete(it.position, it.duration) }
             .groupBy(CloudWatchProgress::profileId)
 
         dataStore.edit { preferences ->
@@ -88,6 +85,8 @@ class DataStoreRewritePlaybackProgressSyncBridge(
                             updatedAtEpochMs = remote.lastWatched,
                             season = remote.season,
                             episode = remote.episode,
+                            contentGenres = local?.second?.contentGenres,
+                            contentLanguage = local?.second?.contentLanguage,
                         )
                     }
                     .plus(
@@ -228,5 +227,4 @@ private fun RewritePlaybackCheckpoint.isSyncPersistable(): Boolean =
     contentId.isNotBlank() &&
         contentType.isNotBlank() &&
         positionMs > 0L &&
-        durationMs > 0L &&
-        WatchStatePolicy.isStartedButIncomplete(progressFraction)
+        isResumable

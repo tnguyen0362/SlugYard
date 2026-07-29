@@ -31,7 +31,8 @@ internal fun PlayerRuntimeController.attachMpvView(view: MpvPlayerSurfaceView?) 
         view.applyAudioLanguagePreferences(mpvPreferredAudioLanguages)
         view.applySubtitleLanguagePreferences(
             preferred = _uiState.value.subtitleStyle.preferredLanguage,
-            secondary = _uiState.value.subtitleStyle.secondaryPreferredLanguage
+            secondary = _uiState.value.subtitleStyle.secondaryPreferredLanguage,
+            preferAss = shouldPreferAssSubtitles(),
         )
         view.applySubtitleStyle(_uiState.value.subtitleStyle)
         view.setSubtitleDelayMs(_uiState.value.subtitleDelayMs)
@@ -125,7 +126,8 @@ internal fun PlayerRuntimeController.initializeMpvPlayer(
         view.applyAudioLanguagePreferences(mpvPreferredAudioLanguages)
         view.applySubtitleLanguagePreferences(
             preferred = _uiState.value.subtitleStyle.preferredLanguage,
-            secondary = _uiState.value.subtitleStyle.secondaryPreferredLanguage
+            secondary = _uiState.value.subtitleStyle.secondaryPreferredLanguage,
+            preferAss = shouldPreferAssSubtitles(),
         )
         view.applySubtitleStyle(_uiState.value.subtitleStyle)
         view.setSubtitleDelayMs(_uiState.value.subtitleDelayMs)
@@ -311,7 +313,8 @@ private fun PlayerRuntimeController.applyMpvTrackSnapshot(snapshot: MpvTrackSnap
                 name = track.name,
                 language = track.language,
                 trackId = track.id.toString(),
-                codec = track.codec,
+                codec = CustomDefaultTrackNameProvider.formatNameFromMime(track.codec)
+                    ?: track.codec,
                 isForced = track.isForced,
                 isSelected = track.isSelected
             )

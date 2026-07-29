@@ -189,6 +189,10 @@ class PlayerViewModel @Inject constructor(
         controller.configureRewriteLaunch(source)
     }
 
+    fun rewriteContentGenres(): String? = controller.effectiveContentGenres()
+
+    fun rewriteContentLanguage(): String? = controller.contentLanguage
+
     fun setRewriteAddonSubtitles(subtitles: List<Subtitle>) {
         controller.setRewriteAddonSubtitles(subtitles)
     }

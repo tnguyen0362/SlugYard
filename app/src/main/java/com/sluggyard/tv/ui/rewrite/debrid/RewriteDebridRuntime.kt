@@ -75,6 +75,16 @@ class RewriteDebridRuntime(
         val key = credentials.keyForActiveProfile(service).takeIf(String::isNotBlank) ?: return null
         return addonConfigurator.configure(service, key)
     }
+
+    /** Lists TorBox cloud torrents for the active profile. Empty when TorBox is not connected. */
+    suspend fun listTorboxCloudFiles(): List<RewriteTorboxCloudItem> {
+        val key = credentials.keyForActiveProfile(DebridService.TORBOX).takeIf(String::isNotBlank)
+            ?: return emptyList()
+        return when (val result = torbox.listCloudTorrents(key)) {
+            is RewriteTorboxResult.Success -> result.value
+            else -> emptyList()
+        }
+    }
 }
 
 private class TorboxManualResolver(
@@ -88,14 +98,16 @@ private class TorboxManualResolver(
 
     override suspend fun resolve(infoHash: String, fileIndex: Int?, season: Int?, episode: Int?): ResolvedPlaybackSource {
         val key = credentials.requiredKey(service)
-        val torrentId = transport.createCachedTorrent(key, infoHash).orUnavailable("This torrent is not cached in Torbox")
+        val torrentId = transport.createCachedTorrent(key, infoHash).orUnavailable(
+            "This torrent is not cached on TorBox. Pick a source marked Instant/Cached.",
+        )
         val selected = fileSelector.selectFile(
             transport.torrentFiles(key, torrentId).orUnavailable("Torbox could not prepare this stream")
                 .map { TorboxTorrentFileDto(it.id, it.name, null, null, it.mimeType, it.sizeBytes) },
                 resolveFor(infoHash, fileIndex), season, episode,
         ) ?: throw RewriteDebridUnavailableException("Torbox did not return a playable file")
         val url = transport.downloadUrl(key, torrentId, selected.id ?: throw RewriteDebridUnavailableException("Torbox did not return a playable file"))
-            .orUnavailable("Torbox could not resolve this stream")
+        .orUnavailable("TorBox did not return a download URL for this file. Try another Instant/Cached source.")
         return ResolvedPlaybackSource(url, infoHash)
     }
 }

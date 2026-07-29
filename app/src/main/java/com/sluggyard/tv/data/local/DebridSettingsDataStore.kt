@@ -83,7 +83,7 @@ class DebridSettingsDataStore @Inject constructor(
             DebridSettings(
                 enabled = prefs[enabledKey] ?: false,
                 cloudLibraryEnabled = prefs[cloudLibraryEnabledKey] ?: true,
-                communityAddonEnabled = prefs[communityAddonEnabledKey] ?: false,
+                communityAddonEnabled = prefs[communityAddonEnabledKey] ?: true,
                 torboxApiKey = readApiKey(prefs[torboxApiKeyKey], DebridProviders.TORBOX_ID),
                 premiumizeApiKey = readApiKey(prefs[premiumizeApiKeyKey], DebridProviders.PREMIUMIZE_ID),
                 realDebridApiKey = readApiKey(prefs[realDebridApiKeyKey], DebridProviders.REAL_DEBRID_ID),

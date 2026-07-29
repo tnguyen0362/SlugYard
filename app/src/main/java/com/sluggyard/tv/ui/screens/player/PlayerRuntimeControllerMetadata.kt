@@ -33,6 +33,11 @@ internal fun PlayerRuntimeController.applyMetaDetails(meta: Meta) {
     metaVideos = meta.videos
     metaGenres = meta.genres
     metaCountry = meta.country
+    // Feed AUTO engine classification: rewrite launches often omit genres/language,
+    // so meta is the authoritative signal for anime → MPV.
+    if (contentGenres.isNullOrBlank() && meta.genres.isNotEmpty()) {
+        contentGenres = meta.genres.joinToString(",")
+    }
     // Adopt the meta-derived content language only if navigation args didn't supply one.
     if (contentLanguage == null) {
         contentLanguage = meta.resolveContentLanguage()
@@ -42,10 +47,12 @@ internal fun PlayerRuntimeController.applyMetaDetails(meta: Meta) {
     _uiState.update { state ->
         state.copy(
             description = description ?: state.description,
+            imdbRating = meta.imdbRating ?: state.imdbRating,
             castMembers = if (meta.castMembers.isNotEmpty()) meta.castMembers else state.castMembers
         )
     }
     recomputeNextEpisode(resetVisibility = false)
+    maybeReselectAutoEngineForContentClassification()
 }
 
 internal fun PlayerRuntimeController.resolveDescription(meta: Meta): String? {
@@ -112,6 +119,11 @@ private suspend fun PlayerRuntimeController.enrichDescriptionFromTmdb(id: String
     val tmdbDescription = episodeEnrichment?.overview ?: enrichment.description
     if (settings.useBasicInfo && !tmdbDescription.isNullOrBlank()) {
         _uiState.update { it.copy(description = tmdbDescription) }
+    }
+
+    // TMDB score for the pause overlay when the addon meta carried no IMDb rating.
+    enrichment.rating?.takeIf { it > 0.0 }?.let { rating ->
+        _uiState.update { it.copy(tmdbVoteAverage = rating) }
     }
 
     // Localized title from TMDB.

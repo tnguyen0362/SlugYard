@@ -48,7 +48,10 @@ fun loadRewriteHomeCatalogs(
     maxConcurrent: Int = DEFAULT_ADDON_CONCURRENCY,
 ): Flow<RewriteHomeCatalogState> = flow {
     val byKey = requestsInDefaultOrder.associateBy(RewriteCatalogRequest::key)
-    val orderedKeys = orderedHomeCatalogs(requestsInDefaultOrder.map(RewriteCatalogRequest::key), savedOrder)
+    val orderedKeys = pinHomeCatalogDisplayOrder(
+        orderedKeys = orderedHomeCatalogs(requestsInDefaultOrder.map(RewriteCatalogRequest::key), savedOrder),
+        titleFor = { key -> byKey[key]?.title },
+    )
     val rows = orderedKeys.mapNotNull { key ->
         byKey[key]?.let { request ->
             RewriteCatalogRowState(key, request.title, RewriteCatalogLoadState.Loading)

@@ -1,38 +1,26 @@
-package com.sluggyard.tv.ui.rewrite.details
+﻿package com.sluggyard.tv.ui.rewrite.details
 
 import com.sluggyard.tv.ui.rewrite.requestFocusReliably
-import com.sluggyard.tv.ui.rewrite.seasonDisplayLabel
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.relocation.BringIntoViewRequester
-import androidx.compose.foundation.relocation.bringIntoViewRequester
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -41,25 +29,22 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.role
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import coil3.compose.AsyncImage
 import com.sluggyard.tv.ui.design.SlugYardPalette
 import com.sluggyard.tv.ui.design.SlugYardTvMetrics
+import com.sluggyard.tv.ui.rewrite.preferLargePosterUrl
+import com.sluggyard.tv.ui.rewrite.preferTvBackdropUrl
 import kotlinx.coroutines.launch
 
 data class RewriteDetailsEpisode(
@@ -75,6 +60,7 @@ data class RewriteDetailsEpisode(
     // 1-based position within this episode's season, used for the on-screen "N. Title" label so
     // a season's first episode always reads "1." regardless of what the addon's raw number is.
     val displayNumber: Int = number,
+    val description: String? = null,
 )
 
 data class RewriteDetailsSeason(
@@ -92,13 +78,30 @@ data class RewriteDetailsState(
     val description: String,
     val genres: List<String>,
     val cast: List<String> = emptyList(),
+    val directors: List<String> = emptyList(),
+    val imdbRating: String? = null,
+    /** WatchHub (and similar) "where to stream" labels — informational only. */
+    val availability: List<String> = emptyList(),
     val inLibrary: Boolean,
     val isSeries: Boolean,
     val seasons: List<RewriteDetailsSeason> = emptyList(),
     val selectedSeason: Int? = null,
+    val contentLanguage: String? = null,
+    val country: String? = null,
 )
 
-/** A TV details screen with explicit actions, suitable for a unidirectional state holder. */
+data class RewriteDetailsRelatedPoster(
+    val id: String,
+    val title: String,
+    val imageUrl: String?,
+    val contentType: String?,
+    val addonId: String?,
+)
+
+/**
+ * TV details: hero stays fixed. Episodes / More Like This open as translucent overlays
+ * matching the player secondary panel (scrim + left panel). Back closes the overlay only.
+ */
 @Composable
 fun RewriteDetailsScreen(
     state: RewriteDetailsState,
@@ -108,96 +111,70 @@ fun RewriteDetailsScreen(
     onMarkSeasonWatched: (Int) -> Unit,
     onEpisodeSelected: (Int, RewriteDetailsEpisode) -> Unit,
     onEpisodeWatchedChanged: (RewriteDetailsEpisode, Boolean) -> Unit,
+    related: List<RewriteDetailsRelatedPoster> = emptyList(),
+    relatedLoading: Boolean = false,
+    onRelatedSelected: (RewriteDetailsRelatedPoster) -> Unit = {},
     contentFocusRequester: FocusRequester? = null,
     modifier: Modifier = Modifier,
 ) {
     val selectedSeason = state.seasons.firstOrNull { it.number == state.selectedSeason }
         ?: state.seasons.firstOrNull()
-    val detailsListState = rememberLazyListState()
-    val selectedSeasonFocusRequester = remember(selectedSeason?.number) { FocusRequester() }
-    var lastFocusedSeason by remember(state.id) { mutableStateOf(selectedSeason?.number) }
-    val episodeFocusRequesters = remember(selectedSeason?.number, selectedSeason?.episodes?.size) {
-        List(selectedSeason?.episodes?.size ?: 0) { FocusRequester() }
-    }
-    LaunchedEffect(selectedSeason?.number) {
-        if (selectedSeason != null && selectedSeason.number != lastFocusedSeason) {
-            detailsListState.scrollToItem(1)
-            selectedSeasonFocusRequester.requestFocusReliably(retries = 8)
-        }
-        lastFocusedSeason = selectedSeason?.number
-    }
-    LazyColumn(
-        state = detailsListState,
+    var overlay by remember(state.id) { mutableStateOf(RewriteDetailsOverlay.None) }
+    val playFocusRequester = remember(state.id) { FocusRequester() }
+    val focusScope = rememberCoroutineScope()
+
+    Box(
         modifier = modifier
             .fillMaxSize()
             .background(SlugYardPalette.Canvas),
-        verticalArrangement = Arrangement.spacedBy(24.dp),
     ) {
-        item(key = "details_header") {
-            DetailsHeader(
-                state = state,
-                onPlay = onPlay,
-                onLibraryChanged = onLibraryChanged,
-                contentFocusRequester = contentFocusRequester,
+        DetailsHeader(
+            state = state,
+            onPlay = onPlay,
+            onLibraryChanged = onLibraryChanged,
+            contentFocusRequester = contentFocusRequester ?: playFocusRequester,
+            activeOverlay = overlay,
+            onEpisodes = if (state.isSeries && selectedSeason != null) {
+                { overlay = RewriteDetailsOverlay.Episodes }
+            } else {
+                null
+            },
+            onMoreLikeThis = { overlay = RewriteDetailsOverlay.Related },
+            moreLikeThisLoading = relatedLoading && related.isEmpty(),
+        )
+        if (state.isSeries && state.seasons.isEmpty() && overlay == RewriteDetailsOverlay.None) {
+            Text(
+                "No episodes are available for this title.",
+                modifier = Modifier
+                    .align(androidx.compose.ui.Alignment.BottomStart)
+                    .padding(SlugYardTvMetrics.ScreenHorizontalInset)
+                    .padding(bottom = 28.dp),
+                style = MaterialTheme.typography.bodyLarge,
+                color = SlugYardPalette.OnCanvasMuted,
             )
         }
-        if (state.isSeries && selectedSeason != null) {
-            item(key = "season_selector") {
-                SeasonSelector(
-                    seasons = state.seasons,
-                    selectedSeason = selectedSeason.number,
-                    selectedFocusRequester = selectedSeasonFocusRequester,
-                    downFocusRequester = episodeFocusRequesters.firstOrNull(),
-                    onSeasonSelected = onSeasonSelected,
-                )
-            }
-            item(key = "season_${selectedSeason.number}_heading") {
-                Row(
-                    modifier = Modifier.padding(horizontal = SlugYardTvMetrics.ScreenHorizontalInset),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(seasonDisplayLabel(selectedSeason.number), style = MaterialTheme.typography.headlineLarge)
-                    Spacer(Modifier.weight(1f))
-                    OutlinedButton(
-                        onClick = { onMarkSeasonWatched(selectedSeason.number) },
-                        enabled = !selectedSeason.fullyWatched,
-                    ) {
-                        Text(if (selectedSeason.fullyWatched) "Watched" else "Mark season watched")
+        if (overlay != RewriteDetailsOverlay.None) {
+            RewriteDetailsSecondaryOverlay(
+                overlay = overlay,
+                state = state,
+                related = related,
+                relatedLoading = relatedLoading,
+                onDismiss = {
+                    overlay = RewriteDetailsOverlay.None
+                    focusScope.launch {
+                        (contentFocusRequester ?: playFocusRequester).requestFocusReliably(retries = 8)
                     }
-                }
-            }
-            item(key = "watched_hint") {
-                Text(
-                    "Hold OK on an episode to mark it watched or unwatched.",
-                    modifier = Modifier.padding(horizontal = SlugYardTvMetrics.ScreenHorizontalInset),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = SlugYardPalette.OnCanvasMuted,
-                )
-            }
-            itemsIndexed(
-                items = selectedSeason.episodes,
-                key = { index, episode -> "$index:${episode.id}" },
-            ) { index, episode ->
-                EpisodeRow(
-                    episode = episode,
-                    onOpen = { onEpisodeSelected(selectedSeason.number, episode) },
-                    onWatchedChanged = { watched -> onEpisodeWatchedChanged(episode, watched) },
-                    focusRequester = episodeFocusRequesters[index],
-                    upFocusRequester = episodeFocusRequesters.getOrNull(index - 1),
-                    downFocusRequester = episodeFocusRequesters.getOrNull(index + 1),
-                )
-            }
-        } else if (state.isSeries) {
-            item(key = "no_episodes") {
-                Text(
-                    "No episodes are available for this title.",
-                    modifier = Modifier.padding(horizontal = SlugYardTvMetrics.ScreenHorizontalInset),
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = SlugYardPalette.OnCanvasMuted,
-                )
-            }
+                },
+                onSeasonSelected = onSeasonSelected,
+                onMarkSeasonWatched = onMarkSeasonWatched,
+                onEpisodeSelected = onEpisodeSelected,
+                onEpisodeWatchedChanged = onEpisodeWatchedChanged,
+                onRelatedSelected = onRelatedSelected,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .zIndex(6f),
+            )
         }
-        item(key = "details_footer") { Spacer(Modifier.height(56.dp)) }
     }
 }
 
@@ -206,84 +183,136 @@ private fun DetailsHeader(
     state: RewriteDetailsState,
     onPlay: () -> Unit,
     onLibraryChanged: (Boolean) -> Unit,
-    contentFocusRequester: FocusRequester? = null,
+    contentFocusRequester: FocusRequester,
+    activeOverlay: RewriteDetailsOverlay = RewriteDetailsOverlay.None,
+    onEpisodes: (() -> Unit)? = null,
+    onMoreLikeThis: (() -> Unit)? = null,
+    moreLikeThisLoading: Boolean = false,
 ) {
-    val playFocusRequester = remember(state.id) { FocusRequester() }
     LaunchedEffect(state.id) {
-        (contentFocusRequester ?: playFocusRequester).requestFocusReliably(retries = 10)
+        contentFocusRequester.requestFocusReliably(retries = 10)
     }
-    Box(modifier = Modifier.fillMaxWidth().height(410.dp).background(SlugYardPalette.Surface)) {
+    val metadataInline = buildList {
+        state.metadata
+            .replace(Regex("""★\s*[\d.]+\s*IMDb"""), "")
+            .replace(Regex("""\s*·\s*"""), " · ")
+            .trim(' ', '·')
+            .takeIf { it.isNotBlank() }
+            ?.let(::add)
+        state.genres.take(3).forEach(::add)
+    }.joinToString("  •  ")
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(SlugYardPalette.Surface),
+    ) {
         AsyncImage(
-            model = state.backdropUrl ?: state.posterUrl,
+            model = preferTvBackdropUrl(state.backdropUrl) ?: preferLargePosterUrl(state.posterUrl),
             contentDescription = null,
             modifier = Modifier.fillMaxSize(),
             contentScale = ContentScale.Crop,
-            alpha = if (state.backdropUrl != null) 0.48f else 0.20f,
+            alpha = if (state.backdropUrl != null) 0.88f else 0.38f,
         )
         Box(
             modifier = Modifier.fillMaxSize().background(
                 Brush.horizontalGradient(
                     colorStops = arrayOf(
-                        0.10f to SlugYardPalette.Canvas.copy(alpha = 0.10f),
-                        0.62f to SlugYardPalette.Canvas.copy(alpha = 0.84f),
+                        0.0f to SlugYardPalette.Canvas.copy(alpha = 0.94f),
+                        0.42f to SlugYardPalette.Canvas.copy(alpha = 0.72f),
+                        0.68f to SlugYardPalette.Canvas.copy(alpha = 0.22f),
+                        1.0f to Color.Transparent,
+                    ),
+                ),
+            ),
+        )
+        Box(
+            modifier = Modifier.fillMaxSize().background(
+                Brush.verticalGradient(
+                    colorStops = arrayOf(
+                        0.0f to Color.Transparent,
+                        0.35f to SlugYardPalette.Canvas.copy(alpha = 0.22f),
+                        0.72f to SlugYardPalette.Canvas.copy(alpha = 0.82f),
                         1.0f to SlugYardPalette.Canvas,
                     ),
                 ),
             ),
         )
-        Row(
+        Column(
             modifier = Modifier
-                .align(Alignment.CenterStart)
                 .fillMaxWidth()
-                .padding(horizontal = SlugYardTvMetrics.ScreenHorizontalInset),
-            horizontalArrangement = Arrangement.spacedBy(28.dp),
-            verticalAlignment = Alignment.CenterVertically,
+                .padding(
+                    start = SlugYardTvMetrics.ScreenHorizontalInset,
+                    end = SlugYardTvMetrics.ScreenHorizontalInset,
+                    top = 72.dp,
+                    bottom = 28.dp,
+                ),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            state.posterUrl?.let { posterUrl ->
-                AsyncImage(
-                    model = posterUrl,
-                    contentDescription = "${state.title} poster",
-                    modifier = Modifier
-                        .width(176.dp)
-                        .height(264.dp)
-                        .clip(RoundedCornerShape(6.dp)),
-                    contentScale = ContentScale.Crop,
-                )
-            }
             Column(
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.fillMaxWidth(0.48f),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Text(state.title, style = MaterialTheme.typography.displayMedium, maxLines = 2)
-                Text(state.metadata, style = MaterialTheme.typography.bodyMedium, color = SlugYardPalette.OnCanvasMuted)
-                if (state.genres.isNotEmpty()) {
-                    Text(state.genres.joinToString("  •  "), style = MaterialTheme.typography.bodyMedium)
-                }
-                 Text(state.description, style = MaterialTheme.typography.bodyLarge, maxLines = 5)
-                if (state.cast.isNotEmpty()) {
+                Text(
+                    state.title,
+                    style = MaterialTheme.typography.displayLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (metadataInline.isNotBlank()) {
                     Text(
-                        "Cast: ${state.cast.take(4).joinToString(", ")}",
+                        metadataInline,
                         style = MaterialTheme.typography.bodyMedium,
                         color = SlugYardPalette.OnCanvasMuted,
                         maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Button(
+                if (state.description.isNotBlank()) {
+                    Text(
+                        state.description,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = SlugYardPalette.OnCanvas.copy(alpha = 0.94f),
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                // Vertical stacked filled actions — not an outlined pill row.
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    DetailsFilledButton(
+                        label = "Play",
                         onClick = onPlay,
+                        primary = true,
+                        leadingIcon = true,
                         modifier = Modifier
-                            .focusRequester(contentFocusRequester ?: playFocusRequester),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = SlugYardPalette.OnCanvas,
-                            contentColor = SlugYardPalette.Canvas,
-                        ),
-                    ) {
-                        androidx.compose.material3.Icon(Icons.Default.PlayArrow, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Play")
+                            .fillMaxWidth()
+                            .focusRequester(contentFocusRequester),
+                    )
+                    DetailsFilledButton(
+                        label = if (state.inLibrary) "In My List" else "My List",
+                        onClick = { onLibraryChanged(!state.inLibrary) },
+                        primary = false,
+                        selected = state.inLibrary,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    if (onEpisodes != null) {
+                        DetailsFilledButton(
+                            label = "Episodes",
+                            onClick = onEpisodes,
+                            primary = false,
+                            selected = activeOverlay == RewriteDetailsOverlay.Episodes,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
                     }
-                    OutlinedButton(onClick = { onLibraryChanged(!state.inLibrary) }) {
-                         Text(if (state.inLibrary) "Remove from Watchlist" else "Add to Watchlist")
+                    if (onMoreLikeThis != null) {
+                        DetailsFilledButton(
+                            label = if (moreLikeThisLoading) "More Like This…" else "More Like This",
+                            onClick = onMoreLikeThis,
+                            primary = false,
+                            selected = activeOverlay == RewriteDetailsOverlay.Related,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
                     }
                 }
             }
@@ -292,81 +321,50 @@ private fun DetailsHeader(
 }
 
 @Composable
-private fun SeasonSelector(
-    seasons: List<RewriteDetailsSeason>,
-    selectedSeason: Int,
-    selectedFocusRequester: FocusRequester,
-    downFocusRequester: FocusRequester?,
-    onSeasonSelected: (Int) -> Unit,
+private fun DetailsFilledButton(
+    label: String,
+    onClick: () -> Unit,
+    primary: Boolean,
+    leadingIcon: Boolean = false,
+    selected: Boolean = false,
+    modifier: Modifier = Modifier,
 ) {
-    LazyRow(
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = SlugYardTvMetrics.ScreenHorizontalInset),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        items(seasons, key = RewriteDetailsSeason::number) { season ->
-            FilterChip(
-                modifier = Modifier
-                    .then(if (season.number == selectedSeason) Modifier.focusRequester(selectedFocusRequester) else Modifier)
-                    .focusProperties { downFocusRequester?.let { down = it } },
-                selected = season.number == selectedSeason,
-                onClick = { onSeasonSelected(season.number) },
-                label = { Text(seasonDisplayLabel(season.number)) },
-            )
-        }
+    var focused by remember { mutableStateOf(false) }
+    val shape = RoundedCornerShape(6.dp)
+    val filled = primary || selected
+    val container = when {
+        focused -> SlugYardPalette.Accent
+        filled -> SlugYardPalette.OnCanvas
+        else -> SlugYardPalette.SurfaceElevated
     }
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun EpisodeRow(
-    episode: RewriteDetailsEpisode,
-    onOpen: () -> Unit,
-    onWatchedChanged: (Boolean) -> Unit,
-    focusRequester: FocusRequester,
-    upFocusRequester: FocusRequester?,
-    downFocusRequester: FocusRequester?,
-) {
-    val bringIntoViewRequester = remember { BringIntoViewRequester() }
-    val scope = rememberCoroutineScope()
-    Row(
-        modifier = Modifier
-            .padding(horizontal = SlugYardTvMetrics.ScreenHorizontalInset)
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .focusRequester(focusRequester)
-            .focusProperties {
-                upFocusRequester?.let { up = it }
-                downFocusRequester?.let { down = it }
-            }
-            .bringIntoViewRequester(bringIntoViewRequester)
-            .onFocusChanged { focusState ->
-                if (focusState.isFocused) scope.launch { bringIntoViewRequester.bringIntoView() }
-            }
-            .semantics {
-                contentDescription = "Episode ${episode.displayNumber}: ${episode.title}. " +
-                    if (episode.watched) "Watched. Hold OK to mark unwatched." else "Not watched. Hold OK to mark watched."
-                role = Role.Button
-            }
-            .combinedClickable(onClick = onOpen, onLongClick = { onWatchedChanged(!episode.watched) })
-            .background(SlugYardPalette.Surface)
-            .padding(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    val content = when {
+        focused -> Color(0xFF181818)
+        filled -> SlugYardPalette.Canvas
+        else -> SlugYardPalette.OnCanvas
+    }
+    Button(
+        onClick = onClick,
+        shape = shape,
+        colors = ButtonDefaults.buttonColors(
+            containerColor = container,
+            contentColor = content,
+        ),
+        contentPadding = PaddingValues(horizontal = 22.dp, vertical = 12.dp),
+        modifier = modifier
+            .heightIn(min = 48.dp)
+            .onFocusChanged { focused = it.isFocused }
+            .then(
+                if (focused) {
+                    Modifier.border(SlugYardTvMetrics.FocusRingWidth, SlugYardPalette.FocusRing, shape)
+                } else {
+                    Modifier
+                },
+            ),
     ) {
-        AsyncImage(
-            model = episode.thumbnailUrl,
-            contentDescription = null,
-            modifier = Modifier.width(180.dp).height(102.dp).clip(RoundedCornerShape(5.dp)).background(SlugYardPalette.SurfaceElevated),
-            contentScale = ContentScale.Crop,
-        )
-        Spacer(Modifier.width(16.dp))
-        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("${episode.displayNumber}. ${episode.title}", style = MaterialTheme.typography.titleMedium, color = SlugYardPalette.OnCanvas)
-            episode.releaseLabel?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = SlugYardPalette.OnCanvasMuted) }
+        if (leadingIcon) {
+            Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(22.dp))
+            Spacer(Modifier.width(8.dp))
         }
-        Icon(
-            imageVector = if (episode.watched) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
-            contentDescription = if (episode.watched) "Watched" else "Not watched",
-            tint = if (episode.watched) SlugYardPalette.Accent else SlugYardPalette.OnCanvasMuted,
-        )
+        Text(label, fontWeight = if (focused || filled) FontWeight.SemiBold else FontWeight.Medium)
     }
 }

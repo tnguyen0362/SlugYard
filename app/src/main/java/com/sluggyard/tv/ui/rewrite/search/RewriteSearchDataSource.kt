@@ -49,6 +49,8 @@ class RewriteSearchDataSource(
                                             imageUrl = item.posterUrl,
                                             addonId = addon.manifest.id,
                                             contentType = item.type,
+                                            summary = item.description?.takeIf { it.isNotBlank() },
+                                            backdropUrl = item.backgroundUrl?.takeIf { it.isNotBlank() },
                                         )
                                     }
                                 else -> emptyList()

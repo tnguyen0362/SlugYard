@@ -33,6 +33,7 @@ class MpvPlayerSurfaceView @JvmOverloads constructor(
     private var pendingInitialMediaUrl: String? = null
     private var pendingInitialStartOption: String? = null
     private var preferredSubtitleLanguages: List<String> = emptyList()
+    private var preferAssSubtitles: Boolean = false
     private var subtitleSelectionRetryCount = 0
 
     private val subtitleSelectionRunnable = object : Runnable {
@@ -45,9 +46,7 @@ class MpvPlayerSurfaceView @JvmOverloads constructor(
             // only until the selected track actually matches the preference.
             if (hasSelectedPreferredSubtitleTrack()) return
             runCatching {
-                mpv.setPropertyString("slang", preferredSubtitleLanguages.joinToString(","))
-                mpv.setPropertyString("sid", "auto")
-                mpv.setPropertyBoolean("sub-visibility", true)
+                selectPreferredSubtitleTrack()
             }.onFailure { Log.w(TAG, "Failed to apply deferred subtitle preference: ${it.message}") }
             subtitleSelectionRetryCount += 1
             if (subtitleSelectionRetryCount < SUBTITLE_SELECTION_RETRY_COUNT) {
@@ -371,8 +370,13 @@ class MpvPlayerSurfaceView @JvmOverloads constructor(
             .getOrDefault(false)
     }
 
-    fun applySubtitleLanguagePreferences(preferred: String, secondary: String?) {
+    fun applySubtitleLanguagePreferences(
+        preferred: String,
+        secondary: String?,
+        preferAss: Boolean = false,
+    ) {
         if (!initialized) return
+        preferAssSubtitles = preferAss
         val languages = listOfNotNull(
             preferred.takeIf { it.isNotBlank() && !it.equals("none", ignoreCase = true) },
             secondary?.takeIf { it.isNotBlank() && !it.equals("none", ignoreCase = true) }
@@ -387,15 +391,60 @@ class MpvPlayerSurfaceView @JvmOverloads constructor(
         subtitleSelectionRetryCount = 0
         removeCallbacks(subtitleSelectionRunnable)
         runCatching {
-            mpv.setPropertyString("slang", languages.joinToString(","))
-            mpv.setPropertyString("sid", "auto")
-            mpv.setPropertyBoolean("sub-visibility", true)
+            selectPreferredSubtitleTrack()
         }.onFailure { Log.w(TAG, "Failed to set subtitle language preference: ${it.message}") }
         postDelayed(subtitleSelectionRunnable, SUBTITLE_SELECTION_RETRY_DELAY_MS)
     }
 
+    private fun selectPreferredSubtitleTrack() {
+        mpv.setPropertyString("slang", preferredSubtitleLanguages.joinToString(","))
+        mpv.setPropertyBoolean("sub-visibility", true)
+        val preferredAss = if (preferAssSubtitles) {
+            pickPreferredAssSubtitleTrackId()
+        } else {
+            null
+        }
+        if (preferredAss != null) {
+            mpv.setPropertyInt("sid", preferredAss)
+        } else {
+            mpv.setPropertyString("sid", "auto")
+        }
+    }
+
+    private fun pickPreferredAssSubtitleTrackId(): Int? {
+        val tracks = readTrackSnapshot().subtitleTracks.filterNot { it.isExternal }
+        if (tracks.isEmpty()) return null
+        fun isAss(track: MpvTrack): Boolean {
+            val haystack = listOfNotNull(track.codec, track.name).joinToString(" ").lowercase(Locale.US)
+            return "ass" in haystack || "ssa" in haystack
+        }
+        fun languageScore(track: MpvTrack): Int {
+            val language = track.language ?: return 0
+            return preferredSubtitleLanguages.indexOfFirst { preferred ->
+                PlayerSubtitleUtils.matchesLanguageCode(language, preferred)
+            }.let { if (it < 0) 100 else it }
+        }
+        val ranked = tracks
+            .filter { isAss(it) && !it.isForced }
+            .sortedWith(compareBy(::languageScore).thenBy { it.id })
+        return ranked.firstOrNull()?.id
+            ?: tracks.filter { isAss(it) }.minByOrNull(::languageScore)?.id
+    }
+
     private fun hasSelectedPreferredSubtitleTrack(): Boolean {
         val selectedTracks = readTrackSnapshot().subtitleTracks.filter { it.isSelected }
+        if (selectedTracks.isEmpty()) return false
+        if (preferAssSubtitles) {
+            val selected = selectedTracks.first()
+            val haystack = listOfNotNull(selected.codec, selected.name).joinToString(" ").lowercase(Locale.US)
+            val isAss = "ass" in haystack || "ssa" in haystack
+            if (!isAss) return false
+            val language = selected.language
+            if (language.isNullOrBlank()) return true
+            return preferredSubtitleLanguages.any { preferred ->
+                PlayerSubtitleUtils.matchesLanguageCode(language, preferred)
+            }
+        }
         val selectedLanguages = selectedTracks.mapNotNull { it.language }
         if (selectedLanguages.isEmpty()) {
             // A selected track without a language tag cannot be evaluated safely,

@@ -81,7 +81,7 @@ data class PlaybackLaunchRequest(
                 contentType = nonEmpty("contentType"),
                 contentName = decode("contentName"),
                 poster = decode("posterUrl") ?: decode("poster"),
-                backdrop = decode("backdrop"),
+                backdrop = decode("backdrop") ?: decode("posterUrl") ?: decode("poster"),
                 logo = decode("logo"),
                 videoId = nonEmpty("videoId"),
                 initialSeason = savedStateHandle.get<String>("season")?.toIntOrNull(),

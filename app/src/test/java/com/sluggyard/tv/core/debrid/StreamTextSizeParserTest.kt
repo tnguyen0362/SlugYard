@@ -18,6 +18,26 @@ class StreamTextSizeParserTest {
     }
 
     @Test
+    fun `parses IEC gibibyte labels and compact forms`() {
+        assertEquals(
+            (102.5 * 1024 * 1024 * 1024).toLong(),
+            StreamTextSizeParser.sizeBytesFromText("102.5 GiB")
+        )
+        assertEquals(
+            102L * 1024 * 1024 * 1024,
+            StreamTextSizeParser.sizeBytesFromText("💾 102GB")
+        )
+        assertEquals(
+            102000L * 1024 * 1024,
+            StreamTextSizeParser.sizeBytesFromText("102000MB")
+        )
+        assertEquals(
+            (45.2 * 1024 * 1024 * 1024).toLong(),
+            StreamTextSizeParser.sizeBytesFromText("45.2GiB")
+        )
+    }
+
+    @Test
     fun `parses plain sizes across units`() {
         assertEquals(700L * 1024 * 1024, StreamTextSizeParser.sizeBytesFromText("700 MB"))
         assertEquals(

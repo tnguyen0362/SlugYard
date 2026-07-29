@@ -5,6 +5,7 @@ import androidx.media3.common.C
 import com.sluggyard.tv.R
 import com.sluggyard.tv.data.local.InternalPlayerEngine
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -152,6 +153,52 @@ internal fun PlayerRuntimeController.clearPendingEngineSwitchTrackPreference() {
         message = "reason=explicit-clear previous=${pendingEngineSwitchTrackPreference != null}"
     )
     pendingEngineSwitchTrackPreference = null
+}
+
+/**
+ * When AUTO initially picked ExoPlayer because genres/language were missing, meta may later
+ * prove the title is anime. Switch to MPV once — that is the real AUTO path catching up,
+ * not a subtitle workaround.
+ */
+internal fun PlayerRuntimeController.maybeReselectAutoEngineForContentClassification() {
+    if (runtimeInternalPlayerEngineOverride != null) return
+    if (currentStreamUrl.isBlank()) return
+    scope.launch {
+        val settings = playerSettingsDataStore.playerSettings.first()
+        if (settings.internalPlayerEngine != InternalPlayerEngine.AUTO) return@launch
+        if (runtimeInternalPlayerEngineOverride != null) return@launch
+        val desired = resolveAutoInternalPlayerEngine()
+        if (desired == currentInternalPlayerEngine) return@launch
+        // Only upgrade Exo → MPV for anime/ASS. Do not bounce MPV → Exo mid-playback here;
+        // DV ownership is decided at the first resolve with stream filename signals.
+        if (desired != InternalPlayerEngine.MVP_PLAYER ||
+            currentInternalPlayerEngine != InternalPlayerEngine.EXOPLAYER
+        ) {
+            return@launch
+        }
+        Log.i(
+            PlayerRuntimeController.TAG,
+            "AUTO content reselect: ExoPlayer → MPV after meta " +
+                "(genres=${effectiveContentGenres()} lang=$contentLanguage type=$contentType)",
+        )
+        beginSwitchTraceSession(reason = "auto-content-reselect", targetEngine = desired)
+        rememberCurrentTrackPreferenceForEngineSwitch()
+        val resumeMs = currentPlaybackPositionMs()?.coerceAtLeast(0L) ?: 0L
+        if (resumeMs > 0L) {
+            pendingResumeProgress = null
+            _uiState.update { it.copy(pendingSeekPosition = resumeMs) }
+        }
+        resolvedAutoPlayerEngine = desired
+        pendingMpvHardRestartOnNextAttach = true
+        delayMpvResumeSeekUntilVideoTrack = true
+        releasePlayer(flushPlaybackState = false)
+        initializePlayer(
+            url = currentStreamUrl,
+            headers = currentHeaders,
+            overrideInternalPlayerEngine = desired,
+            allowEngineFailover = false,
+        )
+    }
 }
 
 /**

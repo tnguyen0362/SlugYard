@@ -26,11 +26,11 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.sluggyard.tv.core.addonprotocol.ManagedAddon
+import com.sluggyard.tv.core.addonprotocol.SlugYardCommunitySourcePolicy
 import com.sluggyard.tv.core.streamresolution.DebridService
 import com.sluggyard.tv.data.local.TraktAuthState
-import com.sluggyard.tv.domain.model.DebridSettings
 import com.sluggyard.tv.domain.model.TmdbSettings
-import com.sluggyard.tv.domain.model.MDBListSettings
 import com.sluggyard.tv.ui.rewrite.debrid.RewriteDebridConnection
 import kotlinx.coroutines.launch
 
@@ -39,24 +39,25 @@ internal fun IntegrationsSettings(
     facade: RewriteSettingsFacade,
     traktAuth: TraktAuthState,
     tmdb: TmdbSettings,
-    mdblist: MDBListSettings,
-    debrid: DebridSettings,
-    openSubtitlesEnabled: Boolean,
-    openSubtitlesKey: String,
-    openSubtitlesAutoDownload: Boolean,
     debridConnection: RewriteDebridConnection,
+    rewriteAddons: List<ManagedAddon>,
+    onInstallCommunityAddons: suspend () -> Unit,
+    onUninstallCommunityAddons: suspend () -> Unit,
     onConnect: suspend (DebridService, String) -> Unit,
     onDisconnect: suspend (DebridService) -> Unit,
-    onDebridEnabledChanged: suspend (Boolean) -> Unit,
     onSelect: suspend (DebridService) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     var selectedService by remember { mutableStateOf<DebridService?>(null) }
     var apiKey by remember { mutableStateOf("") }
-    var credentialTarget by remember { mutableStateOf<String?>(null) }
     var credentialError by remember { mutableStateOf<String?>(null) }
     var traktCode by remember { mutableStateOf<com.sluggyard.tv.data.remote.dto.trakt.TraktDeviceCodeResponseDto?>(null) }
     var traktMessage by remember { mutableStateOf<String?>(null) }
+    var communityBusy by remember { mutableStateOf(false) }
+    var communityMessage by remember { mutableStateOf<String?>(null) }
+    val packInstalled = SlugYardCommunitySourcePolicy.isCommunityPackInstalled(rewriteAddons)
+    val watchHubInstalled = SlugYardCommunitySourcePolicy.isWatchHubInstalled(rewriteAddons)
+    val debridConnected = debridConnection.activeService != null
 
     RewriteSettingsGroup("Trakt") {
         RewriteValueRow("Connection", if (traktAuth.isAuthenticated) "Connected${traktAuth.username?.let { " as $it" } ?: ""}" else "Not connected")
@@ -117,58 +118,106 @@ internal fun IntegrationsSettings(
         traktMessage?.let { RewriteValueRow("Trakt", it) }
         if (traktAuth.isAuthenticated) RewriteActionRow("Disconnect Trakt", "Remove the Trakt token for this profile.") { scope.launch { facade.disconnectTrakt() } }
     }
-    RewriteSettingsGroup("TMDB and ratings") {
-        RewriteValueRow("TMDB", if (tmdb.enabled) "Enabled" else "Disabled")
-        RewriteValueRow("Ratings", "TMDB setting controls player metadata")
-        RewriteActionRow("MDBList credentials", if (mdblist.apiKey.isBlank()) "Not configured" else "Saved securely") {
-            apiKey = ""
-            credentialError = null
-            credentialTarget = "MDBList"
-        }
-        if (mdblist.apiKey.isNotBlank()) {
-            RewriteActionRow("Clear MDBList credentials", "Delete the saved MDBList key for this profile.") {
-                scope.launch { facade.setMdblistApiKey("") }
-            }
-        }
+    RewriteSettingsGroup("TMDB") {
+        RewriteValueRow("Status", if (tmdb.enabled) "Enabled in Content & Discovery" else "Disabled — turn on in Content & Discovery")
     }
-    RewriteSettingsGroup("Debrid") {
-        RewriteToggleRow("Debrid playback", "Use connected debrid services for supported streams.", debrid.enabled) {
-            scope.launch {
-                facade.setDebridEnabled(it)
-                onDebridEnabledChanged(it)
-            }
+    RewriteSettingsGroup("Community addons") {
+        Text(
+            if (debridConnected) {
+                "Installed sources power catalogs, WatchHub, and debrid torrent streams."
+            } else {
+                "Without a debrid key, Play opens WatchHub (where to watch). Connect a provider for torrent streams."
+            },
+            style = androidx.compose.material3.MaterialTheme.typography.bodyMedium,
+            color = com.sluggyard.tv.ui.design.SlugYardPalette.OnCanvasMuted,
+        )
+        RewriteValueRow(
+            title = "Status",
+            value = when {
+                !packInstalled -> "Not installed"
+                debridConnected -> "Installed · debrid ready"
+                watchHubInstalled -> "Installed · WatchHub ready"
+                else -> "Installed"
+            },
+        )
+        RewriteValueRow(
+            title = "WatchHub",
+            value = if (watchHubInstalled) "Ready" else "Not installed",
+        )
+        RewriteActionRow(
+            title = "SlugYard Sources",
+            description = if (packInstalled) {
+                "Reinstall curated catalogs, WatchHub, and stream sources."
+            } else {
+                "Install curated catalogs, WatchHub, and stream sources."
+            },
+            actionLabel = if (packInstalled) "Reinstall" else "Install",
+            onClick = {
+                if (communityBusy) return@RewriteActionRow
+                communityBusy = true
+                communityMessage = null
+                scope.launch {
+                    runCatching { onInstallCommunityAddons() }
+                        .onSuccess {
+                            communityMessage = if (debridConnected) {
+                                "Community addons installed."
+                            } else {
+                                "Community addons installed. WatchHub is ready without debrid."
+                            }
+                        }
+                        .onFailure { communityMessage = it.message ?: "Could not install community addons." }
+                    communityBusy = false
+                }
+            },
+        )
+        if (packInstalled) {
+            RewriteActionRow(
+                title = "Uninstall community addons",
+                description = "Remove curated catalogs, WatchHub, and stream sources.",
+                actionLabel = if (communityBusy) "Working…" else "Uninstall",
+                onClick = {
+                    if (communityBusy) return@RewriteActionRow
+                    communityBusy = true
+                    communityMessage = null
+                    scope.launch {
+                        runCatching { onUninstallCommunityAddons() }
+                            .onSuccess { communityMessage = "Community addons removed." }
+                            .onFailure { communityMessage = it.message ?: "Could not uninstall community addons." }
+                        communityBusy = false
+                    }
+                },
+            )
         }
-            DebridService.entries.forEach { service ->
-                val connected = debridConnection.isConnected(service)
-                RewriteActionRow(service.label, if (connected) "Connected${if (debridConnection.activeService == service) " and active" else ""}" else "Connect encrypted credentials.") {
+        communityMessage?.let { RewriteValueRow("Community addons", it) }
+    }
+    RewriteSettingsGroup("Cloud / Debrid") {
+        Text(
+            "Connecting a provider in Cloud Manager turns debrid playback on automatically.",
+            style = androidx.compose.material3.MaterialTheme.typography.bodyMedium,
+            color = com.sluggyard.tv.ui.design.SlugYardPalette.OnCanvasMuted,
+        )
+        DebridService.entries.forEach { service ->
+            val connected = debridConnection.isConnected(service)
+            RewriteActionRow(
+                service.label,
+                if (connected) {
+                    "Connected${if (debridConnection.activeService == service) " and active" else ""}"
+                } else {
+                    "Connect in Cloud Manager"
+                },
+            ) {
                 if (connected) {
                     scope.launch { onSelect(service) }
                 } else {
                     apiKey = ""
                     credentialError = null
-                        selectedService = service
-                    }
-                }
-                if (connected) {
-                    RewriteActionRow("Remove ${service.label}", "Delete the saved credential for this profile.") {
-                        scope.launch { onDisconnect(service) }
-                    }
+                    selectedService = service
                 }
             }
-    }
-    RewriteSettingsGroup("OpenSubtitles") {
-        RewriteToggleRow("OpenSubtitles", "Enrich subtitle results after playback starts.", openSubtitlesEnabled) { scope.launch { facade.setOpenSubtitlesEnabled(it) } }
-        RewriteActionRow("Credentials", if (openSubtitlesKey.isBlank()) "Not configured" else "Saved securely") {
-            apiKey = ""
-            credentialError = null
-            credentialTarget = "OpenSubtitles"
-        }
-        RewriteToggleRow("Automatic subtitle download", "Download matching subtitles when playback starts.", openSubtitlesAutoDownload) {
-            scope.launch { facade.setOpenSubtitlesAutoDownload(it) }
-        }
-        if (openSubtitlesKey.isNotBlank()) {
-            RewriteActionRow("Clear credentials", "Delete the saved OpenSubtitles key for this profile.") {
-                scope.launch { facade.setOpenSubtitlesApiKey("") }
+            if (connected) {
+                RewriteActionRow("Remove ${service.label}", "Delete the saved credential for this profile.") {
+                    scope.launch { onDisconnect(service) }
+                }
             }
         }
     }
@@ -191,33 +240,6 @@ internal fun IntegrationsSettings(
                 }
             },
             onDismiss = { apiKey = ""; credentialError = null; selectedService = null },
-        )
-    }
-    credentialTarget?.let { target ->
-        RewriteCredentialDialog(
-            title = "$target API key",
-            apiKey = apiKey,
-            errorMessage = credentialError,
-            onApiKeyChanged = { apiKey = it; credentialError = null },
-            onConfirm = {
-                val value = credentialSubmissionValue(apiKey) ?: return@RewriteCredentialDialog
-                val target = credentialTarget
-                scope.launch {
-                    runCatching {
-                        when (target) {
-                            "MDBList" -> facade.setMdblistApiKey(value)
-                            else -> facade.setOpenSubtitlesApiKey(value)
-                        }
-                    }
-                        .onSuccess {
-                            apiKey = ""
-                            credentialError = null
-                            credentialTarget = null
-                        }
-                        .onFailure { error -> credentialError = error.message ?: "Could not save the API key." }
-                }
-            },
-            onDismiss = { apiKey = ""; credentialError = null; credentialTarget = null },
         )
     }
 }

@@ -29,6 +29,12 @@ data class AddonStreamItem(
     val filename: String? = null,
     val videoSizeBytes: Long? = null,
     val seeders: Int? = null,
+    val bingeGroup: String? = null,
+    val videoHash: String? = null,
+    val requestHeaders: Map<String, String> = emptyMap(),
+    val trackers: List<String> = emptyList(),
+    /** Browser / deep-link target (WatchHub "where to watch"). Not a playable in-app stream. */
+    val externalUrl: String? = null,
 )
 
 data class AddonSubtitleTrack(
@@ -73,9 +79,24 @@ object StremioResponseDecoder {
         val objectValue = element as? JsonObject ?: return null
         val directUrl = objectValue.string("url")?.takeIf(String::isNotBlank)
         val infoHash = objectValue.string("infoHash")?.takeIf(String::isNotBlank)
-        if (directUrl == null && infoHash == null) return null
+        val externalUrl = objectValue.string("externalUrl")?.takeIf(String::isNotBlank)
+        // WatchHub (and similar) only supply externalUrl — still a valid stream object for
+        // "where to watch" surfaces, even though it is not playable in-app.
+        if (directUrl == null && infoHash == null && externalUrl == null) return null
         val name = objectValue.string("name")?.takeIf(String::isNotBlank)
         val title = objectValue.string("title")?.takeIf(String::isNotBlank) ?: name ?: "Stream ${index + 1}"
+        val behaviorHints = objectValue.objectValue("behaviorHints")
+        val proxyRequest = behaviorHints
+            ?.objectValue("proxyHeaders")
+            ?.objectValue("request")
+            ?.stringMap()
+            .orEmpty()
+        val sources = objectValue.array("sources").orEmpty().mapNotNull { element ->
+            (element as? JsonPrimitive)?.contentOrNull?.takeIf(String::isNotBlank)
+        }
+        val trackers = sources.mapNotNull { source ->
+            source.removePrefix("tracker:").takeIf { it != source && it.isNotBlank() }
+        }
         return AddonStreamItem(
             id = objectValue.string("id")?.takeIf(String::isNotBlank) ?: "$index:$title",
             title = title,
@@ -84,11 +105,16 @@ object StremioResponseDecoder {
             infoHash = infoHash,
             fileIndex = (objectValue["fileIdx"] as? JsonPrimitive)?.intOrNull,
             description = objectValue.string("description"),
-            filename = objectValue.objectValue("behaviorHints")?.string("filename"),
-            videoSizeBytes = objectValue.objectValue("behaviorHints")?.long("videoSize"),
+            filename = behaviorHints?.string("filename"),
+            videoSizeBytes = behaviorHints?.long("videoSize"),
             seeders = objectValue.int("seeders")
                 ?: objectValue.int("seedCount")
                 ?: objectValue.int("peers"),
+            bingeGroup = behaviorHints?.string("bingeGroup"),
+            videoHash = behaviorHints?.string("videoHash"),
+            requestHeaders = proxyRequest,
+            trackers = trackers,
+            externalUrl = externalUrl,
         )
     }
 
@@ -110,4 +136,7 @@ object StremioResponseDecoder {
     private fun JsonObject.objectValue(name: String): JsonObject? = this[name] as? JsonObject
     private fun JsonObject.int(name: String): Int? = (this[name] as? JsonPrimitive)?.intOrNull
     private fun JsonObject.long(name: String): Long? = (this[name] as? JsonPrimitive)?.longOrNull
+    private fun JsonObject.stringMap(): Map<String, String> = entries.mapNotNull { (key, value) ->
+        (value as? JsonPrimitive)?.contentOrNull?.takeIf(String::isNotBlank)?.let { key to it }
+    }.toMap()
 }

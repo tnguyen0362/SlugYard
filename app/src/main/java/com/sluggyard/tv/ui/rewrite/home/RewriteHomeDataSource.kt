@@ -21,41 +21,47 @@ class RewriteHomeDataSource(
     private val registrySnapshot: suspend () -> AddonRegistryState,
     private val gateway: StremioAddonGateway,
     private val settingsSnapshot: suspend () -> RewriteHomeSettings = { RewriteHomeSettings() },
+    private val tmdbCatalogRequests: suspend () -> List<RewriteCatalogRequest> = { emptyList() },
 ) {
     suspend fun catalogRequests(excludedCatalogIds: Set<String> = emptySet()): List<RewriteCatalogRequest> {
         val settings = settingsSnapshot()
-        return registrySnapshot().enabledAddons.flatMap { addon ->
+        val addonRequests = registrySnapshot().enabledAddons.flatMap { addon ->
             AddonManifestPolicy.homeEligibleCatalogs(addon.manifest, excludedCatalogIds)
                 .filterNot { catalog -> settings.excludes(addon.manifest.id, catalog.id) }
                 .map { catalog ->
-                RewriteCatalogRequest(
-                    key = HomeCatalogKey(addon.manifest.id, catalog.id),
-                    title = catalog.displayName,
-                    load = {
-                        when (val result = gateway.fetchCatalog(
-                            manifestUrl = addon.configuredManifestUrl ?: addon.manifestUrl,
-                            type = catalog.type,
-                            catalogId = catalog.id,
-                        )) {
-                            is AddonTransportResult.Success -> StremioResponseDecoder.catalogItems(result.value)
-                                .filter { item -> ReleaseVisibilityPolicy.isVisible(item.releaseInfo, settings.hideUnreleased) }
-                                .map { item ->
-                                RewriteHomePoster(
-                                    id = item.id,
-                                    title = item.title,
-                                    imageUrl = item.posterUrl,
-                                    addonId = addon.manifest.id,
-                                    contentType = item.type,
-                                )
+                    RewriteCatalogRequest(
+                        key = HomeCatalogKey(addon.manifest.id, catalog.id),
+                        title = catalog.displayName,
+                        load = {
+                            when (val result = gateway.fetchCatalog(
+                                manifestUrl = addon.configuredManifestUrl ?: addon.manifestUrl,
+                                type = catalog.type,
+                                catalogId = catalog.id,
+                            )) {
+                                is AddonTransportResult.Success -> StremioResponseDecoder.catalogItems(result.value)
+                                    .filter { item -> ReleaseVisibilityPolicy.isVisible(item.releaseInfo, settings.hideUnreleased) }
+                                    .map { item ->
+                                        RewriteHomePoster(
+                                            id = item.id,
+                                            title = item.title,
+                                            imageUrl = item.posterUrl,
+                                            addonId = addon.manifest.id,
+                                            contentType = item.type,
+                                            summary = item.description?.takeIf { it.isNotBlank() },
+                                            backdropUrl = item.backgroundUrl?.takeIf { it.isNotBlank() },
+                                        )
+                                    }
+                                else -> throw AddonCatalogLoadException(addon, catalog.id, result)
                             }
-                            else -> throw AddonCatalogLoadException(addon, catalog.id, result)
-                        }
-                    },
-                )
+                        },
+                    )
                 }
-            }
         }
+        val tmdbRequests = runCatching { tmdbCatalogRequests() }.getOrDefault(emptyList())
+        return mergeHomeCatalogRequests(addonRequests, tmdbRequests)
     }
+}
+
 class AddonCatalogLoadException(
     addon: ManagedAddon,
     catalogId: String,

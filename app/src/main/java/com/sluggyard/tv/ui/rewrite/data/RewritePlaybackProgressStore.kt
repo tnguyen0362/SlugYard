@@ -32,9 +32,15 @@ data class RewritePlaybackCheckpoint(
     val updatedAtEpochMs: Long,
     val season: Int? = null,
     val episode: Int? = null,
+    val contentGenres: String? = null,
+    val contentLanguage: String? = null,
 ) {
     val progressFraction: Double?
         get() = durationMs.takeIf { it > 0 }?.let { positionMs.toDouble() / it }
+
+    /** Continue Watching membership: percentage threshold or the absolute ~10s floor. */
+    val isResumable: Boolean
+        get() = WatchStatePolicy.isStartedButIncomplete(positionMs, durationMs)
 }
 
 interface RewritePlaybackProgressRepository {
@@ -56,7 +62,7 @@ class RewritePlaybackProgressStore(
             ?.let(RewritePlaybackProgressCodec::decode)
             .orEmpty()
             .asSequence()
-            .filter { WatchStatePolicy.isStartedButIncomplete(it.progressFraction) }
+            .filter(RewritePlaybackCheckpoint::isResumable)
             .sortedByDescending(RewritePlaybackCheckpoint::updatedAtEpochMs)
             .toList()
     }
@@ -72,7 +78,7 @@ class RewritePlaybackProgressStore(
                 .associateBy { rewriteProgressKey(it.contentId, it.season, it.episode) }
                 .toMutableMap()
             val checkpointKey = rewriteProgressKey(checkpoint.contentId, checkpoint.season, checkpoint.episode)
-            if (!WatchStatePolicy.isStartedButIncomplete(checkpoint.progressFraction)) {
+            if (!checkpoint.isResumable) {
                 existing.remove(checkpointKey)
             } else {
                 existing[checkpointKey] = checkpoint
@@ -86,7 +92,7 @@ class RewritePlaybackProgressStore(
             preferences[key] = RewritePlaybackProgressCodec.encode(retained)
         }
         val numericProfileId = cloudLinkedProfileIdOrNull(profileId) ?: return
-        if (!WatchStatePolicy.isStartedButIncomplete(checkpoint.progressFraction)) {
+        if (!checkpoint.isResumable) {
             syncBridge?.remove(
                 profileId = numericProfileId,
                 progressKey = rewriteProgressKey(checkpoint.contentId, checkpoint.season, checkpoint.episode),
@@ -187,6 +193,8 @@ private data class StoredPlaybackCheckpoint(
     val updatedAtEpochMs: Long,
     val season: Int? = null,
     val episode: Int? = null,
+    val contentGenres: String? = null,
+    val contentLanguage: String? = null,
 ) {
     fun toModel() = RewritePlaybackCheckpoint(
         contentId = contentId,
@@ -201,6 +209,8 @@ private data class StoredPlaybackCheckpoint(
         updatedAtEpochMs = updatedAtEpochMs,
         season = season,
         episode = episode,
+        contentGenres = contentGenres,
+        contentLanguage = contentLanguage,
     )
 
     companion object {
@@ -217,6 +227,8 @@ private data class StoredPlaybackCheckpoint(
             updatedAtEpochMs = model.updatedAtEpochMs,
             season = model.season,
             episode = model.episode,
+            contentGenres = model.contentGenres,
+            contentLanguage = model.contentLanguage,
         )
     }
 }

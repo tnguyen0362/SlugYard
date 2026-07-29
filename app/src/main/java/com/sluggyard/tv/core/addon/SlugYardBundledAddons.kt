@@ -13,6 +13,7 @@ object SlugYardBundledAddons {
     val INFRASTRUCTURE_ADDONS: List<String> = listOf(
         "https://v3-cinemeta.strem.io",
         "https://opensubtitles-v3.strem.io",
+        "https://watchhub.strem.io",
     )
 
     val CONTENT_SOURCE_BASE_URLS: List<String> = listOf(

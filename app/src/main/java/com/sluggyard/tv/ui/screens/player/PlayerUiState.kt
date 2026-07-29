@@ -76,9 +76,15 @@ data class PlayerUiState(
     val currentStreamInfoHash: String? = null, // InfoHash of the currently playing stream (for debrid matching)
     val currentStreamFileIdx: Int? = null, // FileIdx of the currently playing stream (for debrid matching)
     val currentStreamAddonName: String? = null, // Addon name of the currently playing stream
+    /** Portrait art; prepare chrome prefers [backdrop] when present. */
+    val poster: String? = null,
     val backdrop: String? = null,
     val logo: String? = null,
     val description: String? = null,
+    /** Addon-supplied IMDb score (0–10), shown on the pause overlay. */
+    val imdbRating: Float? = null,
+    /** TMDB `vote_average` (0–10); surfaced as a plain rating when IMDb has none. */
+    val tmdbVoteAverage: Double? = null,
     val castMembers: List<MetaCastMember> = emptyList(),
     val showControls: Boolean = true,
     val showSeekOverlay: Boolean = false,

@@ -9,7 +9,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -21,10 +24,14 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import coil3.compose.AsyncImage
 import com.sluggyard.tv.ui.design.SlugYardPalette
 import com.sluggyard.tv.ui.design.SlugYardTvMetrics
 import com.sluggyard.tv.ui.screens.player.PlayerUiState
@@ -47,27 +54,58 @@ fun RewritePlayerPostPlayOverlay(
         LaunchedEffect(episode.videoId, activeMode is PostPlayMode.StillWatching) {
             primaryFocusRequester.requestRewritePlayerFocus()
         }
+        // Landscape banner, bottom-anchored: small enough to keep the closing shot on screen,
+        // wide enough to read the upcoming episode from across the room.
         Box(modifier = modifier.fillMaxSize()) {
-            Column(
+            Row(
                 modifier = Modifier
-                    .align(Alignment.CenterEnd)
-                    .padding(end = SlugYardTvMetrics.ScreenHorizontalInset)
-                    .background(SlugYardPalette.SurfaceElevated, RoundedCornerShape(8.dp))
-                    .padding(28.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+                    .align(Alignment.BottomEnd)
+                    .padding(
+                        end = SlugYardTvMetrics.ScreenHorizontalInset,
+                        bottom = 34.dp,
+                    )
+                    .background(SlugYardPalette.SurfaceElevated.copy(alpha = .94f), RoundedCornerShape(8.dp))
+                    .padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                Text(
-                    if (activeMode is PostPlayMode.StillWatching) "Still watching?" else "Up next",
-                    style = MaterialTheme.typography.titleLarge,
-                    color = SlugYardPalette.OnCanvas,
-                )
-                Text(
-                    "S${episode.season} E${episode.episode}  ${episode.title}",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = SlugYardPalette.OnCanvasMuted,
-                )
-                postPlayStatus(activeMode)?.let { status ->
-                    Text(status, style = MaterialTheme.typography.labelLarge, color = SlugYardPalette.OnCanvasMuted)
+                episode.thumbnail?.takeIf { it.isNotBlank() }?.let { thumbnail ->
+                    AsyncImage(
+                        model = thumbnail,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .width(148.dp)
+                            .height(84.dp)
+                            .clip(RoundedCornerShape(5.dp))
+                            .background(SlugYardPalette.Surface),
+                        contentScale = ContentScale.Crop,
+                    )
+                }
+                Column(
+                    modifier = Modifier.widthIn(max = 320.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        if (activeMode is PostPlayMode.StillWatching) "Still watching?" else "Up next",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = SlugYardPalette.Accent,
+                    )
+                    Text(
+                        "S${episode.season} E${episode.episode}  ${episode.title}",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = SlugYardPalette.OnCanvas,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    postPlayStatus(activeMode)?.let { status ->
+                        Text(
+                            status,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = SlugYardPalette.OnCanvasMuted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Button(

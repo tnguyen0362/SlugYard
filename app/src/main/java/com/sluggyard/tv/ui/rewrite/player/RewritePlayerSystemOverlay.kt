@@ -5,17 +5,13 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.sluggyard.tv.ui.design.SlugYardPalette
@@ -44,45 +40,20 @@ fun RewritePlayerSystemOverlay(
 
 @Composable
 private fun PlayerPreparing(state: PlayerUiState, modifier: Modifier) {
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    listOf(SlugYardPalette.Canvas.copy(alpha = .42f), SlugYardPalette.Canvas.copy(alpha = .94f)),
-                ),
-            ),
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(
-            modifier = Modifier.padding(horizontal = SlugYardTvMetrics.ScreenHorizontalInset),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text(state.contentName ?: state.title ?: "SlugYard", style = MaterialTheme.typography.headlineLarge, color = SlugYardPalette.OnCanvas)
-            Text(
-                state.loadingMessage?.cleanPlayerStatus() ?: "Preparing stream",
-                style = MaterialTheme.typography.bodyLarge,
-                color = SlugYardPalette.OnCanvasMuted,
-            )
-            state.loadingProgress?.let { progress ->
-                LinearProgressIndicator(
-                    progress = { progress.coerceIn(0f, 1f) },
-                    modifier = Modifier.fillMaxWidth(0.38f),
-                    color = SlugYardPalette.Accent,
-                    trackColor = SlugYardPalette.SurfaceElevated,
-                )
-            }
-        }
-    }
+    val title = state.contentName ?: state.title.takeIf { it.isNotBlank() } ?: "SlugYard"
+    val status = state.loadingMessage?.cleanPlayerStatus() ?: "Preparing stream"
+    RewritePlayPreparingSurface(
+        artUrl = rewritePlayPreparingArtUrl(state.backdrop, state.poster),
+        title = title,
+        statusMessage = status,
+        modifier = modifier,
+        loadingProgress = state.loadingProgress,
+    )
 }
 
 @Composable
 private fun PlayerFailure(message: String, onBack: () -> Unit, modifier: Modifier) {
-    Box(
-        modifier = modifier.fillMaxSize().background(SlugYardPalette.Canvas.copy(alpha = .94f)),
-        contentAlignment = Alignment.Center,
-    ) {
+    Box(modifier = modifier.fillMaxSize().background(SlugYardPalette.Canvas.copy(alpha = .94f)), contentAlignment = Alignment.Center) {
         Column(
             modifier = Modifier.padding(horizontal = SlugYardTvMetrics.ScreenHorizontalInset),
             horizontalAlignment = Alignment.CenterHorizontally,

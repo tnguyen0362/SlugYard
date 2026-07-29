@@ -17,6 +17,7 @@ import com.sluggyard.tv.core.streamresolution.DebridService
 import com.sluggyard.tv.core.streamresolution.ManualResolutionResult
 import com.sluggyard.tv.core.streamresolution.ManualStreamResolutionCoordinator
 import com.sluggyard.tv.core.streamresolution.ManualStreamSelection
+import com.sluggyard.tv.ui.rewrite.streams.toManualSelection
 import com.sluggyard.tv.core.streamresolution.RewritePlaybackHandoff
 import com.sluggyard.tv.core.streamresolution.ResolvedPlaybackSource
 import com.sluggyard.tv.ui.rewrite.details.RewriteDetailsDataSource
@@ -40,7 +41,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 
-private const val CHECKPOINT_DISTANCE_MS = 15_000L
+// First periodic checkpoint lands at ~10s so a short sample still reaches Continue Watching,
+// matching WatchStatePolicy.STARTED_MIN_POSITION_MS.
+private const val CHECKPOINT_DISTANCE_MS = 10_000L
 private const val CHECKPOINT_POLL_INTERVAL_MS = 5_000L
 
 private data class RewriteActivePlaybackContext(
@@ -73,6 +76,8 @@ fun RewriteRetainedPlayerHost(
     onBack: () -> Unit,
 ) {
     val viewModel: PlayerViewModel = hiltViewModel()
+    // Must configure before PlayerScreen's startInitialPlayback LaunchedEffect runs — doing this
+    // only inside LaunchedEffect races and can start with an empty stream URL.
     viewModel.configureRewriteLaunch(initialSource)
     viewModel.enableRewriteSubtitleMode()
     val timeline by viewModel.playbackTimeline.collectAsState()
@@ -271,7 +276,7 @@ fun RewriteRetainedPlayerHost(
         )
         secondaryState = secondaryState.copy(
             episodeSourceId = selectedEpisode.id,
-            episodeSourceTitle = "S${selectedSeason}E${selectedEpisode.number} · ${selectedEpisode.title}",
+            episodeSourceTitle = "S${selectedSeason}E${selectedEpisode.displayNumber} · ${selectedEpisode.title}",
             episodeSourceSeason = selectedSeason,
             episodeSourceEpisode = selectedEpisode.number,
             episodeSourceEpisodeTitle = selectedEpisode.title,
@@ -282,13 +287,9 @@ fun RewriteRetainedPlayerHost(
         secondaryState = secondaryState.copy(sourceLoading = true, sourceError = null)
         scope.launch {
             when (val result = manualResolution.prepare(
-                ManualStreamSelection(
-                    candidate.id,
-                    candidate.directUrl,
-                    candidate.infoHash,
-                    candidate.fileIndex,
-                    secondaryState.episodeSourceSeason ?: season,
-                    secondaryState.episodeSourceEpisode ?: episode,
+                candidate.toManualSelection(
+                    season = secondaryState.episodeSourceSeason ?: season,
+                    episode = secondaryState.episodeSourceEpisode ?: episode,
                 ),
                 configuredDebrid(),
             )) {
@@ -357,7 +358,11 @@ fun RewriteRetainedPlayerHost(
                 return@launch
             }
             when (val result = manualResolution.prepare(
-                ManualStreamSelection(candidate.id, candidate.directUrl, candidate.infoHash, candidate.fileIndex, next.season, next.episode),
+                candidate.toManualSelection(
+                    season = next.season,
+                    episode = next.episode,
+                    forceDebridForTorrent = !candidate.infoHash.isNullOrBlank(),
+                ),
                 configuredDebrid(),
             )) {
                 is ManualResolutionResult.Ready -> {
@@ -413,6 +418,8 @@ fun RewriteRetainedPlayerHost(
                         updatedAtEpochMs = System.currentTimeMillis(),
                         season = latestContext.season,
                         episode = latestContext.episode,
+                        contentGenres = viewModel.rewriteContentGenres(),
+                        contentLanguage = viewModel.rewriteContentLanguage(),
                     ),
                 )
                 lastSavedPositionMs = snapshot.currentPosition
@@ -453,6 +460,8 @@ fun RewriteRetainedPlayerHost(
                                 updatedAtEpochMs = System.currentTimeMillis(),
                                 season = contextAtEffectStart.season,
                                 episode = contextAtEffectStart.episode,
+                                contentGenres = viewModel.rewriteContentGenres(),
+                                contentLanguage = viewModel.rewriteContentLanguage(),
                             ),
                         )
                     }
@@ -485,6 +494,8 @@ fun RewriteRetainedPlayerHost(
                             updatedAtEpochMs = System.currentTimeMillis(),
                             season = contextAtExit.season,
                             episode = contextAtExit.episode,
+                            contentGenres = viewModel.rewriteContentGenres(),
+                            contentLanguage = viewModel.rewriteContentLanguage(),
                         ),
                     )
                 }

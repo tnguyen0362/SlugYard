@@ -36,20 +36,18 @@ object SlugYardTvMetrics {
     val ScreenHorizontalInset = 56.dp
     val ScreenVerticalInset = 32.dp
     val CardCornerRadius = 6.dp
+    /** Action buttons, chips, and header tabs — stadium / pill, not squared cards. */
+    val PillCornerRadius = 50.dp
     val FocusRingWidth = 3.dp
     val FocusScale = 1.06f
     val RowGap = 14.dp
 
     /** Height reserved for [RewriteRootNavigation] when it floats over non-hero screens so the
      * first row of content doesn't render underneath it. */
-    val RootNavBarHeight = 64.dp
+    val RootNavBarHeight = 76.dp
 
-    /** Dominant-card focus scale for catalog rows -- deliberately larger than [FocusScale]
-     * so the focused poster reads as the clear center of attention in a row, not a subtle bump.
-     * Kept below 1.15 because rows sit close enough together (see the vertical gaps in
-     * RewriteHomeScreen) that a larger scale grows the card past its row and covers the
-     * neighboring row's title text. */
-    val RowFocusScale = 1.12f
+    /** Unused for shelf cards — focus uses width expansion, not uniform scale. */
+    val RowFocusScale = 1.0f
 }
 
 /** The same rounded Quicksand variable face used by Debrid Streams. */
@@ -186,9 +184,9 @@ fun SlugYardTvTheme(content: @Composable () -> Unit) {
         colorScheme = SlugYardColors,
         typography = SlugYardTypography,
         shapes = androidx.compose.material3.Shapes(
-            extraSmall = RoundedCornerShape(4.dp),
-            small = RoundedCornerShape(SlugYardTvMetrics.CardCornerRadius),
-            medium = RoundedCornerShape(10.dp),
+            extraSmall = RoundedCornerShape(SlugYardTvMetrics.PillCornerRadius),
+            small = RoundedCornerShape(SlugYardTvMetrics.PillCornerRadius),
+            medium = RoundedCornerShape(SlugYardTvMetrics.PillCornerRadius),
             large = RoundedCornerShape(14.dp),
             extraLarge = RoundedCornerShape(20.dp),
         ),

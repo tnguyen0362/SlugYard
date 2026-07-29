@@ -29,11 +29,9 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.AspectRatio
 import androidx.compose.material.icons.filled.Audiotrack
-import androidx.compose.material.icons.filled.Forward10
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Replay10
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.material3.Icon
@@ -53,20 +51,35 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import coil3.compose.AsyncImage
 import com.sluggyard.tv.ui.design.SlugYardPalette
 import com.sluggyard.tv.ui.design.SlugYardTvMetrics
 import com.sluggyard.tv.ui.screens.player.PlayerUiState
 import com.sluggyard.tv.ui.screens.player.RewritePlayerControlActions
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.unit.sp
+import com.sluggyard.tv.ui.util.languageCodeToName
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 /** Rewrite-owned ten-foot control layer; playback and source-selection mechanics stay below it. */
@@ -82,8 +95,6 @@ fun RewritePlayerControls(
 ) {
     val backFocusRequester = remember { FocusRequester() }
     val scrubberFocusRequester = remember { FocusRequester() }
-    val rewindFocusRequester = remember { FocusRequester() }
-    val forwardFocusRequester = remember { FocusRequester() }
     val sourcesFocusRequester = remember { FocusRequester() }
     val audioFocusRequester = remember { FocusRequester() }
     val subtitlesFocusRequester = remember { FocusRequester() }
@@ -92,156 +103,241 @@ fun RewritePlayerControls(
     val episodesFocusRequester = remember { FocusRequester() }
     val hasEpisodes = state.contentType?.lowercase() in setOf("series", "tv")
     val streamLabel = state.currentStreamName?.cleanPlayerStreamLabel()
-    Column(
+    val selectedSubtitleLabel = state.subtitleTracks
+        .firstOrNull { it.index == state.selectedSubtitleTrackIndex || it.isSelected }
+        ?.let { track ->
+            val language = subtitleLanguageNameForControls(track.language, track.name)
+            val format = subtitleCodecTagForControls(track.codec, track.name)
+            listOfNotNull(language, format).joinToString(" ")
+        }
+        ?: state.selectedAddonSubtitle?.getDisplayLanguage()
+        ?: "Off"
+    val selectedAudioLabel = state.audioTracks
+        .firstOrNull { it.index == state.selectedAudioTrackIndex || it.isSelected }
+        ?.name
+        ?.takeIf { it.isNotBlank() }
+        ?: "Audio"
+    val showPausedMeta = !state.isPlaying
+    val clockText = rememberClockText(state.osdClockEnabled)
+    val endsAtText = rememberEndsAtText(
+        enabled = state.osdClockEnabled,
+        currentPositionMs = currentPositionMs,
+        durationMs = durationMs,
+    )
+    Box(
         modifier = modifier
             .fillMaxSize()
             .background(
                 Brush.verticalGradient(
-                    0f to SlugYardPalette.Canvas.copy(alpha = .78f),
-                    0.22f to Color.Transparent,
-                    0.55f to Color.Transparent,
-                    1f to SlugYardPalette.Canvas.copy(alpha = .92f),
+                    0f to SlugYardPalette.Canvas.copy(alpha = .72f),
+                    0.28f to Color.Transparent,
+                    0.58f to Color.Transparent,
+                    1f to SlugYardPalette.Canvas.copy(alpha = .94f),
                 ),
             )
             .padding(
                 horizontal = SlugYardTvMetrics.ScreenHorizontalInset,
                 vertical = SlugYardTvMetrics.ScreenVerticalInset,
             ),
-        verticalArrangement = Arrangement.SpaceBetween,
     ) {
-        // Top row: back action + title. Minimal chrome, no button plate.
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            PlayerIconButton(
-                icon = Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = "Back",
-                onClick = actions.onBack,
-                emphasis = ButtonEmphasis.SECONDARY,
-                focusRequester = backFocusRequester,
-                downFocusRequester = scrubberFocusRequester,
-            )
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(
-                    text = state.contentName ?: state.title,
-                    style = MaterialTheme.typography.displaySmall,
-                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
-                    color = SlugYardPalette.OnCanvas,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+        Row(
+            modifier = Modifier.align(Alignment.TopStart).fillMaxWidth(),
+            verticalAlignment = Alignment.Top,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier.weight(1f),
+            ) {
+                PlayerIconButton(
+                    icon = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Back",
+                    onClick = actions.onBack,
+                    emphasis = ButtonEmphasis.SECONDARY,
+                    focusRequester = backFocusRequester,
+                    downFocusRequester = scrubberFocusRequester,
                 )
-                streamLabel?.let {
-                    Text(
-                        it,
-                        color = SlugYardPalette.OnCanvasMuted,
-                        style = MaterialTheme.typography.bodyMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+                if (!showPausedMeta) {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            text = state.contentName ?: state.title,
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                            color = SlugYardPalette.OnCanvas,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        streamLabel?.let {
+                            Text(
+                                it,
+                                color = SlugYardPalette.OnCanvasMuted,
+                                style = MaterialTheme.typography.bodyMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+            }
+            if (clockText != null) {
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(clockText, style = MaterialTheme.typography.titleMedium, color = Color.White)
+                    endsAtText?.let {
+                        Text(it, style = MaterialTheme.typography.bodyMedium, color = SlugYardPalette.OnCanvasMuted)
+                    }
+                }
+            }
+        }
+
+        if (showPausedMeta) {
+            Column(
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .fillMaxWidth(0.5f)
+                    .padding(bottom = 48.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                val heading = state.contentName ?: state.title
+                val logoUrl = state.logo?.takeIf { it.isNotBlank() }
+                if (logoUrl != null) {
+                    AsyncImage(
+                        model = logoUrl,
+                        contentDescription = heading,
+                        modifier = Modifier
+                            .fillMaxWidth(0.78f)
+                            .heightIn(max = 104.dp),
+                        alignment = Alignment.CenterStart,
+                        contentScale = ContentScale.Fit,
+                    )
+                } else {
+                    OutlinedPlayerText(
+                        text = heading,
+                        style = MaterialTheme.typography.displaySmall.copy(fontWeight = FontWeight.Bold),
+                        maxLines = 2,
+                    )
+                }
+                state.title.takeIf { it.isNotBlank() && it != state.contentName }?.let {
+                    OutlinedPlayerText(
+                        text = it,
+                        style = MaterialTheme.typography.titleMedium,
+                        outlineWidth = 3f,
+                        maxLines = 2,
+                    )
+                }
+                PauseRatingRow(imdbRating = state.imdbRating, tmdbRating = state.tmdbVoteAverage)
+                state.description?.takeIf { it.isNotBlank() }?.let {
+                    OutlinedPlayerText(
+                        text = it,
+                        style = PauseDescriptionTextStyle,
+                        color = Color.White.copy(alpha = 0.94f),
+                        outlineWidth = 3f,
+                        maxLines = 4,
                     )
                 }
             }
         }
 
-        // Bottom chrome: scrubber and one compact, explicitly traversable control rail.
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            PlayerScrubber(
-                currentPositionMs = currentPositionMs,
-                durationMs = durationMs,
-                bufferedPositionMs = bufferedPositionMs,
-                previewPositionMs = state.pendingPreviewSeekPosition,
-                onSeekPreview = actions.onSeekPreview,
-                onSeekCommit = actions.onSeekCommit,
-                focusRequester = scrubberFocusRequester,
-                upFocusRequester = backFocusRequester,
-                 downFocusRequester = rewindFocusRequester,
-             )
-             Row(
-                 modifier = Modifier.fillMaxWidth(),
-                 horizontalArrangement = Arrangement.spacedBy(10.dp, alignment = Alignment.CenterHorizontally),
-                 verticalAlignment = Alignment.CenterVertically,
-             ) {
-                 PlayerLabeledIconButton(
-                     icon = Icons.Filled.Replay10,
-                     label = "Rewind 10 seconds",
-                     onClick = actions.onSeekBackward,
-                     focusRequester = rewindFocusRequester,
-                     upFocusRequester = scrubberFocusRequester,
-                     rightFocusRequester = playPauseFocusRequester,
-                 )
-                 PlayerIconButton(
-                     icon = if (state.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                     contentDescription = if (state.isPlaying) "Pause" else "Play",
-                     onClick = actions.onPlayPause,
-                     emphasis = ButtonEmphasis.PRIMARY,
-                     focusRequester = playPauseFocusRequester,
-                     upFocusRequester = scrubberFocusRequester,
-                     leftFocusRequester = rewindFocusRequester,
-                     rightFocusRequester = forwardFocusRequester,
-                 )
-                 PlayerLabeledIconButton(
-                     icon = Icons.Filled.Forward10,
-                     label = "Forward 10 seconds",
-                     onClick = actions.onSeekForward,
-                     focusRequester = forwardFocusRequester,
-                     upFocusRequester = scrubberFocusRequester,
-                     leftFocusRequester = playPauseFocusRequester,
-                     rightFocusRequester = sourcesFocusRequester,
-                 )
-                 PlayerLabeledIconButton(
-                     icon = Icons.Filled.Layers,
-                     label = "Sources",
-                     onClick = actions.onSources,
-                     focusRequester = sourcesFocusRequester,
-                     upFocusRequester = scrubberFocusRequester,
-                     leftFocusRequester = forwardFocusRequester,
-                     rightFocusRequester = audioFocusRequester,
-                 )
-                 PlayerLabeledIconButton(
-                    icon = Icons.Filled.Audiotrack,
-                     label = "Audio",
-                     onClick = actions.onAudio,
-                     focusRequester = audioFocusRequester,
-                     upFocusRequester = scrubberFocusRequester,
-                     leftFocusRequester = sourcesFocusRequester,
-                     rightFocusRequester = subtitlesFocusRequester,
+        Column(
+            modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                PlayerIconButton(
+                    icon = if (state.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                    contentDescription = if (state.isPlaying) "Pause" else "Play",
+                    onClick = actions.onPlayPause,
+                    emphasis = ButtonEmphasis.PRIMARY,
+                    focusRequester = playPauseFocusRequester,
+                    upFocusRequester = backFocusRequester,
+                    downFocusRequester = subtitlesFocusRequester,
+                    rightFocusRequester = scrubberFocusRequester,
                 )
-                PlayerLabeledIconButton(
-                    icon = Icons.Filled.Subtitles,
-                     label = "Subtitles",
-                     onClick = actions.onSubtitles,
-                     focusRequester = subtitlesFocusRequester,
-                     upFocusRequester = scrubberFocusRequester,
-                     leftFocusRequester = audioFocusRequester,
-                     rightFocusRequester = speedFocusRequester,
+                PlayerScrubber(
+                    currentPositionMs = currentPositionMs,
+                    durationMs = durationMs,
+                    bufferedPositionMs = bufferedPositionMs,
+                    previewPositionMs = state.pendingPreviewSeekPosition,
+                    onSeekPreview = actions.onSeekPreview,
+                    onSeekCommit = actions.onSeekCommit,
+                    focusRequester = scrubberFocusRequester,
+                    upFocusRequester = backFocusRequester,
+                    downFocusRequester = subtitlesFocusRequester,
+                    leftFocusRequester = playPauseFocusRequester,
+                    modifier = Modifier.weight(1f),
                 )
-                PlayerLabeledIconButton(
-                    icon = Icons.Filled.Speed,
-                     label = "Speed",
-                     onClick = actions.onSpeed,
-                     focusRequester = speedFocusRequester,
-                     upFocusRequester = scrubberFocusRequester,
-                     leftFocusRequester = subtitlesFocusRequester,
-                     rightFocusRequester = aspectRatioFocusRequester,
-                )
-                PlayerLabeledIconButton(
-                    icon = Icons.Filled.AspectRatio,
-                     label = stringResource(state.aspectMode.labelResId),
-                     onClick = actions.onToggleAspectRatio,
-                     focusRequester = aspectRatioFocusRequester,
-                     upFocusRequester = scrubberFocusRequester,
-                     leftFocusRequester = speedFocusRequester,
-                     rightFocusRequester = if (hasEpisodes) episodesFocusRequester else null,
-                )
-                if (hasEpisodes) {
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(26.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     PlayerLabeledIconButton(
-                        icon = Icons.AutoMirrored.Filled.PlaylistPlay,
-                         label = "Episodes",
-                         onClick = actions.onEpisodes,
-                         focusRequester = episodesFocusRequester,
-                         upFocusRequester = scrubberFocusRequester,
-                         leftFocusRequester = aspectRatioFocusRequester,
-                     )
-                 }
-             }
-         }
+                        icon = Icons.Filled.Subtitles,
+                        label = selectedSubtitleLabel,
+                        onClick = actions.onSubtitles,
+                        focusRequester = subtitlesFocusRequester,
+                        upFocusRequester = scrubberFocusRequester,
+                        leftFocusRequester = playPauseFocusRequester,
+                        rightFocusRequester = audioFocusRequester,
+                    )
+                    PlayerLabeledIconButton(
+                        icon = Icons.Filled.Audiotrack,
+                        label = selectedAudioLabel,
+                        onClick = actions.onAudio,
+                        focusRequester = audioFocusRequester,
+                        upFocusRequester = scrubberFocusRequester,
+                        leftFocusRequester = subtitlesFocusRequester,
+                        rightFocusRequester = if (hasEpisodes) episodesFocusRequester else sourcesFocusRequester,
+                    )
+                    if (hasEpisodes) {
+                        PlayerLabeledIconButton(
+                            icon = Icons.AutoMirrored.Filled.PlaylistPlay,
+                            label = "Episodes",
+                            onClick = actions.onEpisodes,
+                            focusRequester = episodesFocusRequester,
+                            upFocusRequester = scrubberFocusRequester,
+                            leftFocusRequester = audioFocusRequester,
+                            rightFocusRequester = sourcesFocusRequester,
+                        )
+                    }
+                    PlayerLabeledIconButton(
+                        icon = Icons.Filled.Layers,
+                        label = "Sources",
+                        onClick = actions.onSources,
+                        focusRequester = sourcesFocusRequester,
+                        upFocusRequester = scrubberFocusRequester,
+                        leftFocusRequester = if (hasEpisodes) episodesFocusRequester else audioFocusRequester,
+                        rightFocusRequester = aspectRatioFocusRequester,
+                    )
+                    PlayerLabeledIconButton(
+                        icon = Icons.Filled.AspectRatio,
+                        label = stringResource(state.aspectMode.labelResId),
+                        onClick = actions.onToggleAspectRatio,
+                        focusRequester = aspectRatioFocusRequester,
+                        upFocusRequester = scrubberFocusRequester,
+                        leftFocusRequester = sourcesFocusRequester,
+                        rightFocusRequester = speedFocusRequester,
+                    )
+                    PlayerLabeledIconButton(
+                        icon = Icons.Filled.Speed,
+                        label = "${state.playbackSpeed}×",
+                        onClick = actions.onSpeed,
+                        focusRequester = speedFocusRequester,
+                        upFocusRequester = scrubberFocusRequester,
+                        leftFocusRequester = aspectRatioFocusRequester,
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -262,6 +358,8 @@ private fun PlayerScrubber(
     focusRequester: FocusRequester,
     upFocusRequester: FocusRequester? = null,
     downFocusRequester: FocusRequester? = null,
+    leftFocusRequester: FocusRequester? = null,
+    modifier: Modifier = Modifier,
 ) {
     var isFocused by remember { mutableStateOf(false) }
     val displayPositionMs = previewPositionMs ?: currentPositionMs
@@ -277,17 +375,21 @@ private fun PlayerScrubber(
     )
     val trackHeight = if (isFocused) 8.dp else 4.dp
 
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(16.dp)
                 .focusRequester(focusRequester)
                 .then(
-                    if (upFocusRequester != null || downFocusRequester != null) {
+                    if (upFocusRequester != null || downFocusRequester != null || leftFocusRequester != null) {
                         Modifier.focusProperties {
                             upFocusRequester?.let { up = it }
                             downFocusRequester?.let { down = it }
+                            leftFocusRequester?.let { left = it }
                         }
                     } else Modifier
                 )
@@ -375,6 +477,87 @@ private fun PlayerScrubber(
         }
     }
 }
+
+/**
+ * Pause-overlay synopsis face. A serif voice reads as editorial next to the sans-serif transport
+ * chrome, and the generous line height keeps it legible from a couch.
+ */
+private val PauseDescriptionTextStyle = TextStyle(
+    fontFamily = FontFamily.Serif,
+    fontWeight = FontWeight.Normal,
+    fontSize = 17.sp,
+    lineHeight = 25.sp,
+    letterSpacing = 0.15.sp,
+)
+
+/**
+ * Paused chrome sits directly on video frames of unknown brightness, so every line gets a real
+ * black stroke behind the fill rather than a drop shadow.
+ */
+@Composable
+private fun OutlinedPlayerText(
+    text: String,
+    style: TextStyle,
+    modifier: Modifier = Modifier,
+    color: Color = Color.White,
+    outlineWidth: Float = 4.5f,
+    maxLines: Int = Int.MAX_VALUE,
+) {
+    Box(modifier = modifier) {
+        Text(
+            text = text,
+            style = style.copy(
+                color = Color.Black,
+                drawStyle = Stroke(width = outlineWidth, join = StrokeJoin.Round, cap = StrokeCap.Round),
+            ),
+            maxLines = maxLines,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = text,
+            style = style,
+            color = color,
+            maxLines = maxLines,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun PauseRatingRow(imdbRating: Float?, tmdbRating: Double?) {
+    val badges = buildList {
+        imdbRating?.takeIf { it > 0f }?.let { add("IMDb" to formatPlayerRating(it.toDouble())) }
+        tmdbRating?.takeIf { it > 0.0 }?.let { add("TMDB" to formatPlayerRating(it)) }
+    }
+    if (badges.isEmpty()) return
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        badges.forEach { (source, value) ->
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(Color.Black.copy(alpha = .58f))
+                    .padding(horizontal = 9.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                Text(
+                    source,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = SlugYardPalette.Accent,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    "★ $value",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = Color.White,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        }
+    }
+}
+
+private fun formatPlayerRating(value: Double): String = String.format(Locale.US, "%.1f", value)
 
 private enum class ButtonEmphasis { PRIMARY, SECONDARY, SUBORDINATE }
 
@@ -466,9 +649,12 @@ private fun PlayerLabeledIconButton(
 ) {
     val interactions = remember { MutableInteractionSource() }
     val focused by interactions.collectIsFocusedAsState()
-    val scale by animateFloatAsState(if (focused) 1.03f else 1f, animationSpec = tween(180), label = "$label focus scale")
+    val scale by animateFloatAsState(if (focused) 1.04f else 1f, animationSpec = tween(160), label = "$label focus scale")
+    val shortLabel = label.take(18)
 
-    Box(
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
         modifier = Modifier
             .then(focusRequester?.let { Modifier.focusRequester(it) } ?: Modifier)
             .then(
@@ -482,27 +668,80 @@ private fun PlayerLabeledIconButton(
                 } else Modifier
             )
             .graphicsLayer { scaleX = scale; scaleY = scale }
-            .size(32.dp)
-            .clip(CircleShape)
-            .background(if (focused) SlugYardPalette.SurfaceElevated else SlugYardPalette.Surface.copy(alpha = .55f), CircleShape)
-            .border(2.dp, if (focused) SlugYardPalette.Accent else Color.Transparent, CircleShape)
             .clickable(
                 interactionSource = interactions,
                 indication = null,
                 onClick = onClick,
             )
-            // Icon-only by design: with six actions on this row (Sources/Audio/Subtitles/
-            // Speed/Aspect ratio/Episodes), visible captions made the row read as cluttered
-            // and pushed its total width unpredictably close to the screen edge. The label is
-            // kept as the accessibility contentDescription only.
-            .semantics { contentDescription = label; role = Role.Button },
-        contentAlignment = Alignment.Center,
+            .semantics { contentDescription = label; role = Role.Button }
+            .padding(horizontal = 4.dp, vertical = 2.dp),
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = if (focused) SlugYardPalette.OnCanvas else SlugYardPalette.OnCanvasMuted,
-            modifier = Modifier.size(16.dp),
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(if (focused) Color.White else SlugYardPalette.Surface.copy(alpha = .55f), CircleShape)
+                .border(2.dp, if (focused) Color.White else Color.Transparent, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = if (focused) Color(0xFF181818) else SlugYardPalette.OnCanvas,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+        Text(
+            shortLabel,
+            style = MaterialTheme.typography.labelMedium,
+            color = if (focused) Color.White else SlugYardPalette.OnCanvasMuted,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
+    }
+}
+
+@Composable
+private fun rememberClockText(enabled: Boolean): String? {
+    if (!enabled) return null
+    var now by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            now = System.currentTimeMillis()
+            kotlinx.coroutines.delay(30_000)
+        }
+    }
+    return SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(now))
+}
+
+@Composable
+private fun rememberEndsAtText(enabled: Boolean, currentPositionMs: Long, durationMs: Long): String? {
+    if (!enabled || durationMs <= 0L) return null
+    val remaining = (durationMs - currentPositionMs).coerceAtLeast(0L)
+    val end = Calendar.getInstance().apply { timeInMillis = System.currentTimeMillis() + remaining }
+    val formatted = SimpleDateFormat("h:mm a", Locale.getDefault()).format(end.time)
+    return "Ends at $formatted"
+}
+
+private fun subtitleLanguageNameForControls(language: String?, fallback: String): String {
+    language?.takeIf(String::isNotBlank)?.let { return languageCodeToName(it) }
+    return if (fallback.matches(Regex("[A-Za-z]{2,3}([_-][A-Za-z0-9]{2,4})?"))) {
+        languageCodeToName(fallback)
+    } else {
+        fallback
+    }
+}
+
+private fun subtitleCodecTagForControls(codec: String?, name: String?): String? {
+    val haystack = listOfNotNull(codec, name).joinToString(" ").lowercase(Locale.US)
+    return when {
+        "pgs" in haystack || "sup" in haystack || "hdmv" in haystack -> "PGS"
+        "ass" in haystack || "ssa" in haystack -> "ASS"
+        "srt" in haystack || "subrip" in haystack -> "SRT"
+        "vtt" in haystack || "webvtt" in haystack -> "VTT"
+        "ttml" in haystack -> "TTML"
+        "dvb" in haystack -> "DVB"
+        codec.isNullOrBlank() -> null
+        else -> codec.substringAfterLast('/').uppercase(Locale.US).take(8)
     }
 }

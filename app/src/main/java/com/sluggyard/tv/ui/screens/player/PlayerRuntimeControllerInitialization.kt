@@ -2010,14 +2010,23 @@ internal fun PlayerRuntimeController.resolveAutoInternalPlayerEngine(): Internal
         """(?i)(\bDV[\.\-_ ]|\bDoVi\b|\bDolby[\.\-_ ]?Vision\b|\bProfile[\.\-_ ]?7\b|\bP7\b)"""
     ).containsMatchIn(streamMetadataText)
 
-    // AUTO is deliberately selective: ExoPlayer is the fast, stable default on
-    // Android TV and always owns the DV7 pipeline. MPV is reserved for non-Dolby
-    // anime/ASS cases where its subtitle renderer improves playback.
-    val isAnime = isAnimePlaybackHint(
+    // Match proven origin/main AUTO: anime genre, Animation+Japan, or anime catalog IDs
+    // (kitsu/mal/anilist) — then fall back to the series+Animation rewrite hint.
+    val hasAnimeGenre = metaGenres.any { it.equals("anime", ignoreCase = true) } ||
+        effectiveContentGenres().orEmpty().split(',').any { it.trim().equals("anime", ignoreCase = true) }
+    val isAnimationFromJapan = (
+        metaGenres.any { it.equals("animation", ignoreCase = true) } ||
+            effectiveContentGenres().orEmpty().contains("animation", ignoreCase = true)
+        ) && metaCountry?.contains("Japan", ignoreCase = true) == true
+    val videoId = currentVideoId ?: contentId
+    val hasAnimeId = videoId?.startsWith("kitsu:", ignoreCase = true) == true ||
+        videoId?.startsWith("mal:", ignoreCase = true) == true ||
+        videoId?.startsWith("anilist:", ignoreCase = true) == true
+    val isAnime = hasAnimeGenre || hasAnimeId || isAnimationFromJapan || isAnimePlaybackHint(
         contentType = contentType,
-        contentGenres = contentGenres,
+        contentGenres = effectiveContentGenres(),
         contentLanguage = contentLanguage,
-        title = title
+        title = title,
     )
     val needsAssRenderer = Regex("""(?i)\b(ass|ssa)\b""").containsMatchIn(streamMetadataText)
     return if (!isDolbyVision && (isAnime || needsAssRenderer)) {
@@ -2025,6 +2034,12 @@ internal fun PlayerRuntimeController.resolveAutoInternalPlayerEngine(): Internal
     } else {
         InternalPlayerEngine.EXOPLAYER
     }
+}
+
+/** Launch genres, else meta genres once [applyMetaDetails] has run. */
+internal fun PlayerRuntimeController.effectiveContentGenres(): String? {
+    contentGenres?.takeIf { it.isNotBlank() }?.let { return it }
+    return metaGenres.takeIf { it.isNotEmpty() }?.joinToString(",")
 }
 
 /**
@@ -2056,7 +2071,26 @@ internal fun isAnimePlaybackHint(
     }
     val normalizedGenres = contentGenres.orEmpty().lowercase()
     val hasAnimationGenre = normalizedGenres.contains("animation") || normalizedGenres.contains("anime")
+    // Series + Animation is enough for MPV/libass. Do not require Asian language —
+    // Cinemeta often tags JJK etc. as Animation without ja original-language metadata
+    // at the moment AUTO first runs.
     return contentType.equals("series", ignoreCase = true) && hasAnimationGenre
+}
+
+internal fun PlayerRuntimeController.shouldPreferAssSubtitles(): Boolean {
+    if (!isUsingMpvEngine()) return false
+    return isAnimePlaybackHint(
+        contentType = contentType,
+        contentGenres = effectiveContentGenres(),
+        contentLanguage = contentLanguage,
+        title = title,
+    ) || Regex("""(?i)\b(ass|ssa)\b""").containsMatchIn(
+        buildString {
+            currentFilename?.let { appendLine(it) }
+            streamName?.let { appendLine(it) }
+            currentStreamDescription?.let { appendLine(it) }
+        },
+    )
 }
 
 /**

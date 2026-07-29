@@ -10,6 +10,7 @@ import com.sluggyard.tv.core.aggregation.AddonFanoutResult
 import com.sluggyard.tv.core.aggregation.AddonFanoutTask
 import com.sluggyard.tv.core.aggregation.DEFAULT_ADDON_CONCURRENCY
 import com.sluggyard.tv.core.aggregation.boundedAddonFanout
+import com.sluggyard.tv.core.debrid.StreamTextSizeParser
 import com.sluggyard.tv.core.streamresolution.DebridService
 import com.sluggyard.tv.core.streamresolution.StreamCachePolicy
 import com.sluggyard.tv.core.streamresolution.StreamCacheState
@@ -39,7 +40,11 @@ class RewriteStreamsDataSource(
         configuredDebrid: DebridService?,
         maxConcurrent: Int = DEFAULT_ADDON_CONCURRENCY,
     ): Flow<List<RewriteStreamGroup>> = channelFlow {
-        val addons = registrySnapshot().enabledAddons.filter { AddonResource.STREAM in it.manifest.resources }
+        val addons = registrySnapshot().enabledAddons.filter { addon ->
+            AddonResource.STREAM in addon.manifest.resources &&
+                // WatchHub is availability metadata for Details, not a playable torrent source.
+                !addon.isWatchHubSource()
+        }
         val groups = addons.map { addon ->
             RewriteStreamGroup(addon.manifest.id, addon.manifest.name, RewriteStreamGroupState.Loading)
         }.toMutableList()
@@ -67,6 +72,7 @@ class RewriteStreamsDataSource(
             val state = when (result) {
                 is AddonFanoutResult.Success -> {
                     val streams = result.value.map { stream ->
+                        val normalized = normalizeAddonStreamSource(stream.directUrl, stream.infoHash)
                         RewriteStreamCandidate(
                             id = stream.id,
                             title = stream.title.cleanStreamPresentation(),
@@ -77,11 +83,11 @@ class RewriteStreamsDataSource(
                                 ?.cleanStreamPresentation()
                                 ?.takeIf { it != stream.title.cleanStreamPresentation() },
                             cacheState = StreamCachePolicy.initialState(
-                                isTorrent = stream.infoHash != null,
+                                isTorrent = normalized.isTorrentOrDebridProxy,
                                 configuredService = configuredDebrid,
                             ),
-                            directUrl = stream.directUrl,
-                            infoHash = stream.infoHash,
+                            directUrl = normalized.playableDirectUrl,
+                            infoHash = normalized.infoHash,
                             fileIndex = stream.fileIndex,
                             metadataText = listOfNotNull(
                                 stream.title,
@@ -89,8 +95,18 @@ class RewriteStreamsDataSource(
                                 stream.description,
                                 stream.filename,
                             ).joinToString(" "),
-                            videoSizeBytes = stream.videoSizeBytes,
+                            videoSizeBytes = stream.videoSizeBytes
+                                ?: StreamTextSizeParser.sizeBytesFromText(stream.description)
+                                ?: StreamTextSizeParser.sizeBytesFromText(stream.title)
+                                ?: StreamTextSizeParser.sizeBytesFromText(stream.sourceName)
+                                ?: StreamTextSizeParser.sizeBytesFromText(stream.filename),
                             seeders = stream.seeders,
+                            filename = stream.filename,
+                            streamDescription = stream.description,
+                            bingeGroup = stream.bingeGroup,
+                            videoHash = stream.videoHash,
+                            requestHeaders = stream.requestHeaders,
+                            trackers = stream.trackers,
                         )
                     }
                     if (streams.isEmpty()) RewriteStreamGroupState.Empty else RewriteStreamGroupState.Content(streams)
@@ -174,3 +190,10 @@ private fun String.cleanStreamPresentation(): String =
         .trim()
         .take(120)
         .ifBlank { "Available stream" }
+
+private fun ManagedAddon.isWatchHubSource(): Boolean {
+    val haystack = listOf(manifest.id, manifest.name, manifestUrl, configuredManifestUrl.orEmpty())
+        .joinToString(" ")
+        .lowercase()
+    return "watchhub" in haystack
+}

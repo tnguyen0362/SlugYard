@@ -915,7 +915,8 @@ internal fun PlayerRuntimeController.schedulePauseOverlay() {
             s.showSourcesPanel || s.showAudioOverlay || s.showStreamInfoOverlay ||
             s.showSubtitleTimingDialog
         if (!s.isPlaying && s.pauseOverlayEnabled && s.error == null && !anyPanelOpen) {
-            _uiState.update { it.copy(showPauseOverlay = true, showControls = false) }
+            // Keep transport/paused meta visible — blanking controls after 5s looks broken in rewrite.
+            _uiState.update { it.copy(showPauseOverlay = false, showControls = true) }
         }
     }
 }
@@ -1094,6 +1095,7 @@ private fun PlayerRuntimeController.handleExoPlayPause() {
 
 private fun PlayerRuntimeController.handleSeekBy(deltaMs: Long) {
     pendingPreviewSeekPosition = null
+    _uiState.update { it.copy(pendingPreviewSeekPosition = null) }
     val current = currentPlaybackPositionMs() ?: 0L
     val maxDuration = currentPlaybackDurationMs().takeIf { it >= 0 } ?: Long.MAX_VALUE
     val target = (current + deltaMs).coerceAtLeast(0L).coerceAtMost(maxDuration)
@@ -1109,6 +1111,7 @@ private fun PlayerRuntimeController.handlePreviewSeekBy(deltaMs: Long) {
     val basePosition = pendingPreviewSeekPosition ?: currentPlaybackPositionMs()?.coerceAtLeast(0L) ?: 0L
     val target = (basePosition + deltaMs).coerceAtLeast(0L).coerceAtMost(maxDuration)
     pendingPreviewSeekPosition = target
+    _uiState.update { it.copy(pendingPreviewSeekPosition = target) }
     updatePlaybackTimeline(currentPosition = target)
     if (_uiState.value.showControls) showControlsTemporarily() else showSeekOverlayTemporarily()
 }
@@ -1118,12 +1121,14 @@ private fun PlayerRuntimeController.handleCommitPreviewSeek() {
     seekPlaybackTo(target, SeekParameters.CLOSEST_SYNC)
     updatePlaybackTimeline(currentPosition = target)
     pendingPreviewSeekPosition = null
+    _uiState.update { it.copy(pendingPreviewSeekPosition = null) }
     scheduleProgressSyncAfterSeek()
     if (_uiState.value.showControls) showControlsTemporarily() else showSeekOverlayTemporarily()
 }
 
 private fun PlayerRuntimeController.handleSeekTo(position: Long) {
     pendingPreviewSeekPosition = null
+    _uiState.update { it.copy(pendingPreviewSeekPosition = null) }
     seekPlaybackTo(position, SeekParameters.CLOSEST_SYNC)
     updatePlaybackTimeline(currentPosition = position)
     scheduleProgressSyncAfterSeek()

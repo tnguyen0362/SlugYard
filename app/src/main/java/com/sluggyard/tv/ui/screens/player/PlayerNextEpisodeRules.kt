@@ -112,7 +112,7 @@ object PlayerNextEpisodeRules {
         durationMs: Long
     ): Long = when (mode) {
         NextEpisodeThresholdMode.PERCENTAGE -> {
-            val clamped = percent.coerceIn(97f, 100f)
+            val clamped = percent.coerceIn(MIN_THRESHOLD_PERCENT, 100f)
             ((1.0 - clamped / 100.0) * durationMs).toLong()
         }
         NextEpisodeThresholdMode.MINUTES_BEFORE_END -> {
@@ -128,7 +128,7 @@ object PlayerNextEpisodeRules {
         durationMs: Long
     ): Boolean = when (mode) {
         NextEpisodeThresholdMode.PERCENTAGE -> {
-            val clamped = percent.coerceIn(97f, 100f)
+            val clamped = percent.coerceIn(MIN_THRESHOLD_PERCENT, 100f)
             (positionMs.toDouble() / durationMs.toDouble()) >= (clamped / 100.0)
         }
         NextEpisodeThresholdMode.MINUTES_BEFORE_END -> {
@@ -136,6 +136,12 @@ object PlayerNextEpisodeRules {
             remainingMs <= (minutes.coerceIn(0f, 3.5f) * 60_000f).toLong()
         }
     }
+
+    /**
+     * Earliest point in a file the "Up next" prompt may fire. 97% left no room on short
+     * episodes, where the credits routinely start before the last 3%.
+     */
+    const val MIN_THRESHOLD_PERCENT = 95f
 
     val OUTRO_SEGMENT_TYPES = setOf("outro", "ed", "mixed-ed")
 

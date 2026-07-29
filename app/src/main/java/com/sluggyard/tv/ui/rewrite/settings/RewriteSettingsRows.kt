@@ -52,15 +52,23 @@ private fun RewriteSettingsRowShell(
     focused: Boolean,
     interaction: MutableInteractionSource,
     contentDescription: String? = null,
+    modifier: Modifier = Modifier,
     content: @Composable RowScope.() -> Unit,
 ) {
-    Column(modifier = Modifier.fillMaxWidth()) {
+    Column(modifier = modifier.fillMaxWidth()) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .fillMaxWidth()
-                .background(if (focused) SlugYardPalette.Surface else Color.Transparent)
-                .then(if (focused) Modifier.border(2.dp, SlugYardPalette.FocusRing, RoundedCornerShape(8.dp)) else Modifier)
+                .background(if (focused) SlugYardPalette.SurfaceElevated else Color.Transparent)
+                .then(
+                    if (focused) {
+                        // Rect focus — never a stadium/pill outline inside settings rows.
+                        Modifier.border(2.dp, SlugYardPalette.FocusRing, RoundedCornerShape(6.dp))
+                    } else {
+                        Modifier
+                    },
+                )
                 .then(
                     if (onClick != null) {
                         Modifier.clickable(interactionSource = interaction, indication = null, onClick = onClick)
@@ -154,6 +162,7 @@ internal fun RewriteActionRow(
     title: String,
     description: String,
     actionLabel: String = "Open",
+    modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
     val interaction = remember { MutableInteractionSource() }
@@ -163,6 +172,7 @@ internal fun RewriteActionRow(
         focused = focused,
         interaction = interaction,
         contentDescription = "$title. $description. $actionLabel",
+        modifier = modifier,
     ) {
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)

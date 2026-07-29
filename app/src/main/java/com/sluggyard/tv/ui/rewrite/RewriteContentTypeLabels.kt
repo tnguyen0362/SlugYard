@@ -7,6 +7,11 @@ internal fun rewriteContentTypeLabel(rawType: String?): String? = when (rawType.
     else -> rawType?.takeIf { it.isNotBlank() }?.replaceFirstChar { it.titlecase() }
 }
 
+internal fun rewriteIsMovieType(rawType: String?): Boolean =
+    rawType.orEmpty().trim().lowercase() in setOf(
+        "movie", "movies", "film", "films",
+    )
+
 internal fun rewriteIsSeriesType(rawType: String?): Boolean =
     rawType.orEmpty().trim().lowercase() in setOf(
         "series", "show", "shows", "tv", "tvshow", "tvshows",

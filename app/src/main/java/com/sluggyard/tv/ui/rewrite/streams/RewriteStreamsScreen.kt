@@ -1,5 +1,6 @@
 package com.sluggyard.tv.ui.rewrite.streams
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -49,6 +50,12 @@ data class RewriteStreamCandidate(
     val metadataText: String? = null,
     val videoSizeBytes: Long? = null,
     val seeders: Int? = null,
+    val filename: String? = null,
+    val streamDescription: String? = null,
+    val bingeGroup: String? = null,
+    val videoHash: String? = null,
+    val requestHeaders: Map<String, String> = emptyMap(),
+    val trackers: List<String> = emptyList(),
 )
 
 sealed interface RewriteStreamGroupState {
@@ -89,6 +96,8 @@ fun RewriteStreamsScreen(
     contentFocusRequester: FocusRequester? = null,
     modifier: Modifier = Modifier,
 ) {
+    BackHandler(enabled = true, onBack = onBack)
+    val backFocusRequester = remember { FocusRequester() }
     val listItems = buildList<StreamListItem> {
         add(StreamListItem.Header(title))
         groups.forEach { group ->
@@ -110,9 +119,14 @@ fun RewriteStreamsScreen(
             if (index == 0) contentFocusRequester ?: FocusRequester() else FocusRequester()
         }
     }
-    if (contentFocusRequester != null) {
-        LaunchedEffect(contentFocusRequester, firstStreamId) {
-            contentFocusRequester.requestFocusReliably(retries = 8)
+    LaunchedEffect(contentFocusRequester, firstStreamId, candidateIds) {
+        when {
+            firstStreamId != null && contentFocusRequester != null ->
+                contentFocusRequester.requestFocusReliably(retries = 8)
+            firstStreamId != null ->
+                candidateFocusRequesters.firstOrNull()?.requestFocusReliably(retries = 8)
+            else ->
+                backFocusRequester.requestFocusReliably(retries = 8)
         }
     }
     Column(
@@ -142,6 +156,7 @@ fun RewriteStreamsScreen(
                         if (item.key == "header:$title") {
                             androidx.compose.material3.OutlinedButton(
                                 onClick = onBack,
+                                modifier = Modifier.focusRequester(backFocusRequester),
                             ) {
                                 Text("Back")
                             }
@@ -156,7 +171,7 @@ fun RewriteStreamsScreen(
                     stream = item.stream,
                     onClick = { onStreamSelected(item.stream) },
                     focusRequester = candidateFocusRequesters[candidateIndex],
-                    upFocusRequester = candidateFocusRequesters.getOrNull(candidateIndex - 1),
+                    upFocusRequester = if (candidateIndex == 0) backFocusRequester else candidateFocusRequesters.getOrNull(candidateIndex - 1),
                     downFocusRequester = candidateFocusRequesters.getOrNull(candidateIndex + 1),
                 )
             }

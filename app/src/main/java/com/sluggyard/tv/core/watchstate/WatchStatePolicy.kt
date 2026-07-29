@@ -6,6 +6,12 @@ const val STARTED_PROGRESS_FRACTION = 0.02
 const val COMPLETED_PROGRESS_FRACTION = 0.90
 const val PASSIVE_COMPLETION_SEED_FRACTION = 0.95
 
+/**
+ * Absolute floor for "started". 2% of a 2h film is ~2.5 minutes, so a short sample never showed
+ * up in Continue Watching at all. Ten seconds of real playback is a deliberate watch.
+ */
+const val STARTED_MIN_POSITION_MS = 10_000L
+
 /** Input needed to decide whether a movie belongs in Continue Watching. */
 data class MovieResumeEvidence(
     val savedPositionMs: Long = 0,
@@ -35,6 +41,17 @@ object WatchStatePolicy {
         progressFraction != null &&
             progressFraction >= STARTED_PROGRESS_FRACTION &&
             progressFraction < COMPLETED_PROGRESS_FRACTION
+
+    /**
+     * Position-aware form of [isStartedButIncomplete]: either the percentage threshold or the
+     * absolute [STARTED_MIN_POSITION_MS] floor qualifies a checkpoint for Continue Watching.
+     */
+    fun isStartedButIncomplete(positionMs: Long, durationMs: Long): Boolean {
+        if (durationMs <= 0L) return false
+        val fraction = positionMs.toDouble() / durationMs
+        if (isCompleted(fraction)) return false
+        return fraction >= STARTED_PROGRESS_FRACTION || positionMs >= STARTED_MIN_POSITION_MS
+    }
 
     fun isCompleted(progressFraction: Double?): Boolean =
         progressFraction != null && progressFraction >= COMPLETED_PROGRESS_FRACTION

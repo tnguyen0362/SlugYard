@@ -9,11 +9,31 @@ data class ManualStreamSelection(
     val fileIndex: Int?,
     val season: Int? = null,
     val episode: Int? = null,
+    val streamName: String? = null,
+    val streamDescription: String? = null,
+    val filename: String? = null,
+    val videoHash: String? = null,
+    val videoSizeBytes: Long? = null,
+    val bingeGroup: String? = null,
+    val requestHeaders: Map<String, String> = emptyMap(),
+    val addonName: String? = null,
+    val trackers: List<String> = emptyList(),
 )
 
 data class ResolvedPlaybackSource(
     val url: String,
     val sourceId: String,
+    val streamName: String? = null,
+    val streamDescription: String? = null,
+    val filename: String? = null,
+    val videoHash: String? = null,
+    val videoSizeBytes: Long? = null,
+    val bingeGroup: String? = null,
+    val requestHeaders: Map<String, String> = emptyMap(),
+    val addonName: String? = null,
+    val infoHash: String? = null,
+    val fileIndex: Int? = null,
+    val trackers: List<String> = emptyList(),
 )
 
 data class RewritePlaybackHandoff(
@@ -47,9 +67,9 @@ interface DebridManualResolver {
 /**
  * Prepares a user-selected stream for the retained playback engine.
  *
- * This coordinator deliberately knows nothing about Media3, decoder settings, or autoplay. It
- * only owns the spec-required manual resolution rule: direct streams are immediately playable;
- * torrent streams are resolved by the selected provider before any player handoff occurs.
+ * Direct HTTP streams are immediately playable. Torrents prefer the configured debrid
+ * provider; when debrid is unavailable they hand off a `torrent://` sentinel so the
+ * retained player can start TorrServer — matching the legacy StreamScreen path.
  */
 class ManualStreamResolutionCoordinator(
     private val resolvers: Set<DebridManualResolver>,
@@ -59,18 +79,47 @@ class ManualStreamResolutionCoordinator(
         configuredService: DebridService?,
     ): ManualResolutionResult {
         selection.directUrl?.takeIf(String::isNotBlank)?.let { directUrl ->
-            return ManualResolutionResult.Ready(ResolvedPlaybackSource(directUrl, selection.id))
+            val lower = directUrl.trim().lowercase()
+            val looksLikeTorrentProxy = lower.startsWith("magnet:") ||
+                lower.startsWith("torrent:") ||
+                "infohash=" in lower ||
+                "/resolve/" in lower ||
+                "torrentio.strem.fun" in lower ||
+                "/createtorrent" in lower
+            if (!looksLikeTorrentProxy) {
+                return ManualResolutionResult.Ready(selection.toResolved(directUrl))
+            }
+            // Fall through to hash resolve when the "direct" URL is actually a debrid proxy.
         }
         val infoHash = selection.infoHash?.takeIf(String::isNotBlank)
             ?: return ManualResolutionResult.Unavailable("This stream has no playable URL or torrent hash")
         val service = configuredService
-            ?: return ManualResolutionResult.Unavailable("A debrid provider is required for this torrent")
-        val resolver = resolvers.firstOrNull { it.service == service }
-            ?: return ManualResolutionResult.Unavailable("The configured debrid provider is unavailable")
+        val resolver = service?.let { svc -> resolvers.firstOrNull { it.service == svc } }
+        if (resolver == null) {
+            // No debrid: hand the torrent sentinel to the player (legacy behavior).
+            return ManualResolutionResult.Ready(
+                selection.toResolved(
+                    url = "torrent://$infoHash",
+                    infoHash = infoHash,
+                    fileIndex = selection.fileIndex,
+                ),
+            )
+        }
         return try {
             ManualResolutionResult.Ready(
                 resolver.resolve(infoHash, selection.fileIndex, selection.season, selection.episode)
-                    .copy(sourceId = selection.id),
+                    .copy(
+                        sourceId = selection.id,
+                        streamName = selection.streamName,
+                        streamDescription = selection.streamDescription,
+                        filename = selection.filename,
+                        videoHash = selection.videoHash,
+                        videoSizeBytes = selection.videoSizeBytes,
+                        bingeGroup = selection.bingeGroup,
+                        requestHeaders = selection.requestHeaders,
+                        addonName = selection.addonName,
+                        trackers = selection.trackers,
+                    ),
             )
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -83,3 +132,23 @@ class ManualStreamResolutionCoordinator(
         }
     }
 }
+
+private fun ManualStreamSelection.toResolved(
+    url: String,
+    infoHash: String? = null,
+    fileIndex: Int? = null,
+): ResolvedPlaybackSource = ResolvedPlaybackSource(
+    url = url,
+    sourceId = id,
+    streamName = streamName,
+    streamDescription = streamDescription,
+    filename = filename,
+    videoHash = videoHash,
+    videoSizeBytes = videoSizeBytes,
+    bingeGroup = bingeGroup,
+    requestHeaders = requestHeaders,
+    addonName = addonName,
+    infoHash = infoHash,
+    fileIndex = fileIndex,
+    trackers = trackers,
+)

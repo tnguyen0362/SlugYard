@@ -56,6 +56,7 @@ interface RewriteSettingsFacade {
     suspend fun setMdblistEnabled(enabled: Boolean)
     suspend fun setMdblistApiKey(apiKey: String)
     suspend fun setDebridEnabled(enabled: Boolean)
+    suspend fun setCommunityAddonEnabled(enabled: Boolean)
     suspend fun setFrameRateMatchingMode(mode: FrameRateMatchingMode)
     suspend fun setResolutionMatchingEnabled(enabled: Boolean)
     suspend fun setAudioOutputChannels(channels: AudioOutputChannels)
@@ -136,6 +137,10 @@ class DefaultRewriteSettingsFacade @Inject constructor(
 
     override suspend fun setDebridEnabled(enabled: Boolean) {
         debridStore.setEnabled(enabled)
+    }
+
+    override suspend fun setCommunityAddonEnabled(enabled: Boolean) {
+        debridStore.setCommunityAddonEnabled(enabled)
     }
 
     override suspend fun setFrameRateMatchingMode(mode: FrameRateMatchingMode) {

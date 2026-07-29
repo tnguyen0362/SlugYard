@@ -11,8 +11,9 @@ import java.util.Locale
  */
 object StreamTextSizeParser {
 
+    // IEC (GiB) and SI-style (GB) labels; allow optional space (`102GB`, `102.5 GB`).
     private val SIZE_REGEX = Regex(
-        """(\d+(?:[.,]\d+)?)\s*(TB|GB|MB|KB)\b""",
+        """(\d+(?:[.,]\d+)?)\s*(TiB|TB|GiB|GB|MiB|MB|KiB|KB)\b""",
         RegexOption.IGNORE_CASE
     )
 
@@ -34,10 +35,10 @@ object StreamTextSizeParser {
         val match = SIZE_REGEX.find(text) ?: return null
         val value = match.groupValues[1].replace(',', '.').toDoubleOrNull() ?: return null
         val multiplier = when (match.groupValues[2].uppercase(Locale.ROOT)) {
-            "TB" -> KILO * KILO * KILO * KILO
-            "GB" -> KILO * KILO * KILO
-            "MB" -> KILO * KILO
-            "KB" -> KILO
+            "TB", "TIB" -> KILO * KILO * KILO * KILO
+            "GB", "GIB" -> KILO * KILO * KILO
+            "MB", "MIB" -> KILO * KILO
+            "KB", "KIB" -> KILO
             else -> return null
         }
         return (value * multiplier).toLong().takeIf { it > 0L }

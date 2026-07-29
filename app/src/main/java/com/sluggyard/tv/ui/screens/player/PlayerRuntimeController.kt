@@ -187,7 +187,7 @@ class PlayerRuntimeController(
             .takeIf { it.isNotBlank() && it.contains('.') }
     internal var currentAddonName: String? = navigationArgs.addonName
     internal var currentAddonLogo: String? = navigationArgs.addonLogo
-    internal val contentGenres: String? = navigationArgs.contentGenres
+    internal var contentGenres: String? = navigationArgs.contentGenres
     internal var currentStreamDescription: String? = navigationArgs.streamDescription
     internal var contentLanguage: String? = navigationArgs.contentLanguage
     internal var currentVideoCodec: String? = null
@@ -238,6 +238,7 @@ class PlayerRuntimeController(
             currentStreamAddonName = navigationArgs.addonName,
             releaseYear = year,
             contentType = contentType,
+            poster = poster,
             backdrop = backdrop,
             logo = logo,
             showLoadingOverlay = true,
@@ -410,7 +411,7 @@ class PlayerRuntimeController(
     internal var streamAutoPlayNextEpisodeEnabledSetting: Boolean = false
     internal var streamAutoPlayPreferBingeGroupForNextEpisodeSetting: Boolean = false
     internal var nextEpisodeThresholdModeSetting: NextEpisodeThresholdMode = NextEpisodeThresholdMode.PERCENTAGE
-    internal var nextEpisodeThresholdPercentSetting: Float = 98f
+    internal var nextEpisodeThresholdPercentSetting: Float = PlayerNextEpisodeRules.MIN_THRESHOLD_PERCENT
     internal var nextEpisodeThresholdMinutesBeforeEndSetting: Float = 2f
     internal var stillWatchingEnabledSetting: Boolean = false
     internal var stillWatchingEpisodeThresholdSetting: Int =

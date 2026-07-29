@@ -206,6 +206,50 @@ interface TmdbApi {
         @Query("with_watch_monetization_types") withWatchMonetizationTypes: String? = null
     ): Response<TmdbDiscoverResponse>
 
+    @GET("trending/{media_type}/{time_window}")
+    suspend fun getTrending(
+        @Path("media_type") mediaType: String,
+        @Path("time_window") timeWindow: String,
+        @Query("api_key") apiKey: String,
+        @Query("language") language: String? = null,
+        @Query("page") page: Int = 1,
+    ): Response<TmdbDiscoverResponse>
+
+    @GET("movie/now_playing")
+    suspend fun getNowPlayingMovies(
+        @Query("api_key") apiKey: String,
+        @Query("language") language: String? = null,
+        @Query("page") page: Int = 1,
+    ): Response<TmdbDiscoverResponse>
+
+    @GET("movie/top_rated")
+    suspend fun getTopRatedMovies(
+        @Query("api_key") apiKey: String,
+        @Query("language") language: String? = null,
+        @Query("page") page: Int = 1,
+    ): Response<TmdbDiscoverResponse>
+
+    @GET("tv/top_rated")
+    suspend fun getTopRatedTv(
+        @Query("api_key") apiKey: String,
+        @Query("language") language: String? = null,
+        @Query("page") page: Int = 1,
+    ): Response<TmdbDiscoverResponse>
+
+    @GET("tv/airing_today")
+    suspend fun getAiringToday(
+        @Query("api_key") apiKey: String,
+        @Query("language") language: String? = null,
+        @Query("page") page: Int = 1,
+    ): Response<TmdbDiscoverResponse>
+
+    @GET("tv/on_the_air")
+    suspend fun getOnTheAir(
+        @Query("api_key") apiKey: String,
+        @Query("language") language: String? = null,
+        @Query("page") page: Int = 1,
+    ): Response<TmdbDiscoverResponse>
+
     @GET("list/{list_id}")
     suspend fun getListDetails(
         @Path("list_id") listId: Int,
@@ -592,6 +636,7 @@ data class TmdbDiscoverResult(
     @Json(name = "name") val name: String? = null,
     @Json(name = "original_title") val originalTitle: String? = null,
     @Json(name = "original_name") val originalName: String? = null,
+    @Json(name = "media_type") val mediaType: String? = null,
     @Json(name = "poster_path") val posterPath: String? = null,
     @Json(name = "backdrop_path") val backdropPath: String? = null,
     @Json(name = "overview") val overview: String? = null,

@@ -7,7 +7,7 @@ import com.sluggyard.tv.core.debrid.supports
 data class DebridSettings(
     val enabled: Boolean = false,
     val cloudLibraryEnabled: Boolean = true,
-    val communityAddonEnabled: Boolean = false,
+    val communityAddonEnabled: Boolean = true,
     val torboxApiKey: String = "",
     val premiumizeApiKey: String = "",
     val realDebridApiKey: String = "",

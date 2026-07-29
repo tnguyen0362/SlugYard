@@ -1,5 +1,6 @@
 package com.sluggyard.tv.ui.rewrite.streams
 
+import com.sluggyard.tv.core.debrid.StreamTextSizeParser
 import com.sluggyard.tv.core.streamresolution.StreamCacheState
 
 /**
@@ -17,11 +18,9 @@ internal object RewriteStreamScoringEngine {
     )
 
     fun choose(candidates: List<RewriteStreamCandidate>, context: Context): RewriteStreamCandidate? {
-        val playable = candidates.filter {
-            it.isWellFormed() &&
-                it.cacheState != StreamCacheState.CHECKING &&
-                it.cacheState != StreamCacheState.NOT_CACHED
-        }
+        // Never auto-start an uncached torrent (that triggers "downloading to debrid").
+        // Prefer instant/direct or confirmed-cached only.
+        val playable = candidates.filter { it.isAutoPlayEligible() }
         if (playable.isEmpty()) return null
 
         // DV7 is supported by the player conversion path. Only reject a known Profile 8.6
@@ -48,17 +47,21 @@ internal object RewriteStreamScoringEngine {
     }
 
     fun score(candidate: RewriteStreamCandidate, context: Context): Int {
+        val episodeLike = isEpisodeLike(context)
         val weights = when (classify(context)) {
-            ContentKind.ANIME -> Weights(15, 5, 35, 35, 10)
-            ContentKind.K_DRAMA, ContentKind.J_DRAMA -> Weights(15, 10, 35, 30, 10)
+            // Episodes get a larger size weight so absurd remux/packs lose to sane encodes.
+            ContentKind.ANIME -> if (episodeLike) Weights(15, 5, 30, 30, 20) else Weights(15, 5, 35, 35, 10)
+            ContentKind.K_DRAMA, ContentKind.J_DRAMA ->
+                if (episodeLike) Weights(15, 10, 30, 25, 20) else Weights(15, 10, 35, 30, 10)
             ContentKind.LIVE -> Weights(20, 10, 5, 55, 10)
-            ContentKind.MAINSTREAM -> Weights(30, 15, 10, 35, 10)
+            ContentKind.MAINSTREAM ->
+                if (episodeLike) Weights(25, 15, 10, 30, 20) else Weights(30, 15, 10, 35, 10)
         }
         val quality = qualityScore(candidate)
         val audio = audioScore(candidate)
         val subtitles = subtitleScore(candidate, context)
         val reliability = reliabilityScore(candidate)
-        val size = sizeScore(candidate)
+        val size = sizeScore(candidate, context, episodeLike)
         return (
             quality * weights.quality +
                 audio * weights.audio +
@@ -103,7 +106,10 @@ internal object RewriteStreamScoringEngine {
         val codecBonus = if (Regex("\\b(av1|hevc|h265|10[- ]?bit)\\b").containsMatchIn(text)) 8 else 0
         val hdrBonus = if (Regex("\\b(hdr10\\+?|dolby.?vision|dv)\\b").containsMatchIn(text)) 5 else 0
         val bad = if (Regex("\\b(cam|hdcam|telesync|tscam|telecine|screener)\\b").containsMatchIn(text)) 35 else 0
-        return (base + codecBonus + hdrBonus - bad).coerceIn(0, 100)
+        val aiUpscalePenalty = if (
+            Regex("\\b(ai.?upscale|upscaled|ai.?enhance|reupscale|topaz|esrgan)\\b").containsMatchIn(text)
+        ) 40 else 0
+        return (base + codecBonus + hdrBonus - bad - aiUpscalePenalty).coerceIn(0, 100)
     }
 
     private fun audioScore(candidate: RewriteStreamCandidate): Int {
@@ -154,19 +160,36 @@ internal object RewriteStreamScoringEngine {
         return ((cache * 2) + seederScore) / 3
     }
 
-    private fun sizeScore(candidate: RewriteStreamCandidate): Int {
-        val size = candidate.videoSizeBytes ?: return 60
+    private fun sizeScore(
+        candidate: RewriteStreamCandidate,
+        context: Context,
+        episodeLike: Boolean = isEpisodeLike(context),
+    ): Int {
+        val size = resolveSizeBytes(candidate) ?: return 60
         if (size <= 0) return 60
         val sizeGb = size / 1_073_741_824.0
         val text = candidate.searchText().lowercase()
-        val expected = when {
-            "2160p" in text || "4k" in text -> 15.0
-            "1080p" in text -> 8.0
-            "720p" in text -> 4.0
-            "480p" in text -> 2.0
-            else -> 4.0
+        val expected = expectedSizeGb(text, episodeLike)
+        return if (episodeLike) {
+            episodeSizeScore(sizeGb, text, expected)
+        } else {
+            movieSizeScore(sizeGb, expected)
         }
-        val ratio = sizeGb / expected
+    }
+
+    /**
+     * Episodes still lose points for being oversized: a 20GB single episode is a mislabeled
+     * season pack or a remux nobody asked for, and packs break episode-scoped playback.
+     */
+    private fun episodeSizeScore(sizeGb: Double, text: String, expectedGb: Double): Int {
+        when {
+            sizeGb >= 40.0 -> return 0
+            sizeGb >= 25.0 -> return 3
+            sizeGb >= 15.0 -> return 10
+            sizeGb >= 10.0 -> return 20
+            sizeGb >= 6.0 && !isUhd(text) -> return 30
+        }
+        val ratio = sizeGb / expectedGb
         return when {
             ratio < 0.3 -> 20
             ratio < 0.5 -> 40
@@ -175,7 +198,66 @@ internal object RewriteStreamScoringEngine {
             ratio <= 1.3 -> 100
             ratio <= 1.8 -> 85
             ratio <= 2.5 -> 70
-            else -> 50
+            ratio <= 3.5 -> 35
+            ratio <= 5.0 -> 15
+            else -> 5
+        }
+    }
+
+    /**
+     * Movies are never size-penalized for being large — bigger is usually a better encode.
+     * Only undersized rips lose points; everything at/above a sane encode size scores full.
+     */
+    private fun movieSizeScore(sizeGb: Double, expectedGb: Double): Int {
+        val ratio = sizeGb / expectedGb
+        return when {
+            ratio < 0.3 -> 25
+            ratio < 0.5 -> 50
+            ratio < 0.7 -> 75
+            else -> 100
+        }
+    }
+
+    private fun resolveSizeBytes(candidate: RewriteStreamCandidate): Long? =
+        candidate.videoSizeBytes?.takeIf { it > 0L }
+            ?: StreamTextSizeParser.sizeBytesFromText(candidate.streamDescription)
+            ?: StreamTextSizeParser.sizeBytesFromText(candidate.title)
+            ?: StreamTextSizeParser.sizeBytesFromText(candidate.detailLabel)
+            ?: StreamTextSizeParser.sizeBytesFromText(candidate.filename)
+            ?: StreamTextSizeParser.sizeBytesFromText(candidate.metadataText)
+
+    private fun isEpisodeLike(context: Context): Boolean {
+        val type = context.contentType.trim().lowercase()
+        return type in setOf(
+            "series", "show", "shows", "tv", "tvshow", "tvshows", "anime", "episode", "episodes",
+        )
+    }
+
+    private fun isUhd(text: String): Boolean =
+        Regex("\\b(2160p|4k|uhd)\\b").containsMatchIn(text)
+
+    private fun expectedSizeGb(text: String, episodeLike: Boolean): Double {
+        val uhd = isUhd(text)
+        val fhd = Regex("\\b1080p\\b").containsMatchIn(text)
+        val hd = Regex("\\b720p\\b").containsMatchIn(text)
+        val sd = Regex("\\b(480p|sd)\\b").containsMatchIn(text)
+        return if (episodeLike) {
+            when {
+                uhd -> 4.0
+                fhd -> 1.5
+                hd -> 0.7
+                sd -> 0.35
+                else -> 1.2
+            }
+        } else {
+            // Movie targets leave headroom for legitimate 4K remux (~20–50GB).
+            when {
+                uhd -> 25.0
+                fhd -> 10.0
+                hd -> 4.0
+                sd -> 2.0
+                else -> 8.0
+            }
         }
     }
 
@@ -189,6 +271,24 @@ internal object RewriteStreamScoringEngine {
 
     private fun RewriteStreamCandidate.isWellFormed(): Boolean =
         !directUrl.isNullOrBlank() || !infoHash.isNullOrBlank()
+
+    private fun RewriteStreamCandidate.isAutoPlayEligible(): Boolean {
+        if (!isWellFormed()) return false
+        val hash = infoHash?.trim().orEmpty()
+        if (hash.isNotBlank()) {
+            // Only auto-start confirmed cached torrents. UNKNOWN may still be offered after the
+            // cache-check timeout (see AppShell), but NOT_CACHED / still-CHECKING never auto-play.
+            return when (cacheState) {
+                StreamCacheState.CACHED -> true
+                StreamCacheState.UNKNOWN -> true // probe failed; try resolve once, reject if uncached
+                StreamCacheState.NOT_APPLICABLE -> true // no debrid probes (e.g. Real-Debrid)
+                StreamCacheState.CHECKING, StreamCacheState.NOT_CACHED -> false
+            }
+        }
+        val url = directUrl?.trim().orEmpty()
+        if (url.isBlank()) return false
+        return !isNonInstantStreamUrl(url)
+    }
 
     private fun RewriteStreamCandidate.isKnownUnsupportedDolbyVision(): Boolean {
         val text = searchText().lowercase()

@@ -35,6 +35,21 @@ class StremioResponseDecoderTest {
     }
 
     @Test
+    fun `stream decoder accepts WatchHub externalUrl availability rows`() {
+        val payload = objectOf(
+            """{"streams":[{"name":"Netflix","title":"Netflix\nHD","externalUrl":"https://www.netflix.com/title/1"},{"name":"Broken"}]}""",
+        )
+
+        val streams = StremioResponseDecoder.streamItems(payload)
+
+        assertEquals(1, streams.size)
+        assertEquals("Netflix", streams.single().sourceName)
+        assertEquals("https://www.netflix.com/title/1", streams.single().externalUrl)
+        assertEquals(null, streams.single().directUrl)
+        assertEquals(null, streams.single().infoHash)
+    }
+
+    @Test
     fun `subtitle decoder accepts documented language aliases and drops no-url entries`() {
         val payload = objectOf("""{"subtitles":[{"lang":"en","url":"https://sub/en"},{"language":"es","url":"https://sub/es"},{"lang":"fr"}]}""")
 

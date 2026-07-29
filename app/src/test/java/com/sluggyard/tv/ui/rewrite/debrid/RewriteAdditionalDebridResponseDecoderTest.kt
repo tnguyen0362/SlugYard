@@ -44,14 +44,14 @@ class RewriteAdditionalDebridResponseDecoderTest {
     }
 
     @Test
-    fun `torbox download request keeps credentials out of the URL`() {
-        val path = RewriteTorboxRequestPaths.downloadLink(torrentId = 42, fileId = 7)
+    fun `torbox download request includes token query required by TorBox requestdl`() {
+        val path = RewriteTorboxRequestPaths.downloadLink(apiKey = "secret-key", torrentId = 42, fileId = 7)
 
         assertEquals(
-            "v1/api/torrents/requestdl?torrent_id=42&file_id=7&zip_link=false&redirect=false&append_name=false",
+            "v1/api/torrents/requestdl?token=secret-key&torrent_id=42&file_id=7&zip_link=false&redirect=false&append_name=false",
             path,
         )
-        kotlin.test.assertFalse(path.contains("token", ignoreCase = true))
+        kotlin.test.assertTrue(path.contains("token=secret-key"))
     }
 
     private fun payload(value: String) = json.parseToJsonElement(value).jsonObject

@@ -10,6 +10,7 @@ data class AddonEpisodeMetadata(
     val title: String,
     val thumbnailUrl: String?,
     val released: String?,
+    val description: String? = null,
 )
 
 data class AddonMetadata(
@@ -20,8 +21,13 @@ data class AddonMetadata(
     val backgroundUrl: String?,
     val description: String?,
     val releaseInfo: String?,
+    val imdbRating: String? = null,
+    val runtime: String? = null,
     val genres: List<String>,
     val cast: List<String>,
+    val directors: List<String> = emptyList(),
+    val language: String? = null,
+    val country: String? = null,
     val episodes: List<AddonEpisodeMetadata>,
 )
 
@@ -35,6 +41,9 @@ object StremioMetadataDecoder {
         if (id.isBlank() || type.isBlank() || title.isBlank()) {
             return AddonTransportResult.MalformedResponse("Meta response must contain id, type, and name")
         }
+        val directors = meta.stringArray("director").ifEmpty {
+            listOfNotNull(meta.string("director")?.takeIf(String::isNotBlank))
+        }
         return AddonTransportResult.Success(
             AddonMetadata(
                 id = id,
@@ -43,9 +52,14 @@ object StremioMetadataDecoder {
                 posterUrl = meta.string("poster"),
                 backgroundUrl = meta.string("background"),
                 description = meta.string("description"),
-                releaseInfo = meta.string("releaseInfo"),
+                releaseInfo = meta.string("releaseInfo") ?: meta.string("year"),
+                imdbRating = meta.string("imdbRating"),
+                runtime = meta.string("runtime"),
                 genres = meta.stringArray("genres"),
                 cast = meta.stringArray("cast"),
+                directors = directors,
+                language = meta.string("language") ?: meta.string("lang"),
+                country = meta.string("country"),
                 episodes = meta.array("videos").orEmpty().mapIndexedNotNull(::episode),
             ),
         )
@@ -62,6 +76,9 @@ object StremioMetadataDecoder {
             title = title,
             thumbnailUrl = video.string("thumbnail"),
             released = video.string("released"),
+            description = video.string("overview")
+                ?: video.string("description")
+                ?: video.string("summary"),
         )
     }
 

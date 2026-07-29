@@ -267,7 +267,7 @@ data class PlayerSettings(
     val stillWatchingEnabled: Boolean = false,
     val stillWatchingEpisodeThreshold: Int = DEFAULT_STILL_WATCHING_EPISODE_THRESHOLD,
     val nextEpisodeThresholdMode: NextEpisodeThresholdMode = NextEpisodeThresholdMode.PERCENTAGE,
-    val nextEpisodeThresholdPercent: Float = 99f,
+    val nextEpisodeThresholdPercent: Float = MIN_NEXT_EPISODE_THRESHOLD_PERCENT,
     val nextEpisodeThresholdMinutesBeforeEnd: Float = 2f,
     val streamReuseLastLinkEnabled: Boolean = false,
     val streamReuseLastLinkCacheHours: Int = 24,
@@ -359,6 +359,12 @@ enum class FrameRateMatchingMode {
 enum class NextEpisodeThresholdMode {
     PERCENTAGE, MINUTES_BEFORE_END
 }
+
+/**
+ * Lowest selectable "Up next" trigger point. Mirrors PlayerNextEpisodeRules.MIN_THRESHOLD_PERCENT;
+ * 97% was too late on short episodes whose credits start earlier.
+ */
+const val MIN_NEXT_EPISODE_THRESHOLD_PERCENT = 95f
 
 enum class SubtitleOrganizationMode {
     NONE, BY_LANGUAGE, BY_ADDON
@@ -856,8 +862,8 @@ class PlayerSettingsDataStore @Inject constructor(
             nextEpisodeThresholdPercent = normalizeHalfStep(
                 value = prefs[nextEpisodeThresholdPercentKey]
                     ?: prefs[nextEpisodeThresholdPercentLegacyKey]?.toFloat()
-                    ?: 99f,
-                min = 97f,
+                    ?: MIN_NEXT_EPISODE_THRESHOLD_PERCENT,
+                min = MIN_NEXT_EPISODE_THRESHOLD_PERCENT,
                 max = 100f
             ),
             nextEpisodeThresholdMinutesBeforeEnd = normalizeHalfStep(
@@ -1163,7 +1169,8 @@ class PlayerSettingsDataStore @Inject constructor(
 
     suspend fun setNextEpisodeThresholdPercent(percent: Float) {
         store().edit { prefs ->
-            prefs[nextEpisodeThresholdPercentKey] = normalizeHalfStep(value = percent, min = 97f, max = 100f)
+            prefs[nextEpisodeThresholdPercentKey] =
+                normalizeHalfStep(value = percent, min = MIN_NEXT_EPISODE_THRESHOLD_PERCENT, max = 100f)
         }
     }
 

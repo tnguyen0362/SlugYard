@@ -5,6 +5,7 @@ import android.os.SystemClock
 import android.util.Log
 import com.sluggyard.tv.R
 import com.sluggyard.tv.core.streamresolution.ResolvedPlaybackSource
+import com.sluggyard.tv.ui.screens.player.PlayerMediaSourceFactory
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.lang.ref.WeakReference
@@ -17,16 +18,36 @@ internal fun PlayerRuntimeController.configureRewriteLaunch(source: ResolvedPlay
     if (initialPlaybackStarted) return
     initialStreamUrl = source.url
     currentStreamUrl = source.url
-    currentHeaders = emptyMap()
+    currentHeaders = PlayerMediaSourceFactory.sanitizeHeaders(source.requestHeaders)
+    currentFilename = source.filename
+        ?: source.url.substringBefore('?').substringAfterLast('/', "")
+            .takeIf { it.isNotBlank() && it.contains('.') }
+        ?: currentFilename
+    currentVideoHash = source.videoHash ?: currentVideoHash
+    currentVideoSize = source.videoSizeBytes ?: currentVideoSize
+    currentStreamDescription = source.streamDescription ?: currentStreamDescription
+    currentAddonName = source.addonName ?: currentAddonName
+    currentInfoHash = source.infoHash
+    isTorrentStream = source.infoHash != null && !source.url.startsWith("http", ignoreCase = true)
     currentStreamMimeType = PlayerMediaSourceFactory.inferMimeType(
         url = source.url,
         filename = currentFilename,
         responseHeaders = currentStreamResponseHeaders,
     )
+    source.bingeGroup?.takeIf { it.isNotBlank() }?.let { binge ->
+        contentId?.let { cid ->
+            scope.launch(kotlinx.coroutines.NonCancellable) {
+                bingeGroupCacheDataStore.save(cid, binge)
+            }
+        }
+    }
     _uiState.update {
         it.copy(
             currentStreamUrl = source.url,
-            currentStreamName = source.sourceId,
+            currentStreamName = source.streamName ?: source.sourceId,
+            currentStreamAddonName = source.addonName ?: it.currentStreamAddonName,
+            currentStreamInfoHash = source.infoHash,
+            currentStreamFileIdx = source.fileIndex,
             error = null,
         )
     }
@@ -44,7 +65,8 @@ internal fun PlayerRuntimeController.startInitialPlaybackIfNeeded() {
         }
     }
 
-    val infoHash = navigationArgs.infoHash
+    val infoHash = currentInfoHash ?: navigationArgs.infoHash
+    val fileIdx = _uiState.value.currentStreamFileIdx ?: navigationArgs.fileIdx
     val clickElapsedMs = launchStartedAtElapsedMs
         ?.let { (SystemClock.elapsedRealtime() - it).coerceAtLeast(0L) }
         ?: -1L
@@ -60,17 +82,17 @@ internal fun PlayerRuntimeController.startInitialPlaybackIfNeeded() {
             "streamHash=${initialStreamUrl.hashCode().toUInt().toString(16)}",
     )
 
-    val isTorrentLaunch = infoHash != null && !initialStreamUrl.startsWith("http")
+    val isTorrentLaunch = infoHash != null && !currentStreamUrl.startsWith("http", ignoreCase = true)
     if (isTorrentLaunch) {
         torrentStreamJob = scope.launch {
             try {
                 Log.d("PlayerStartup", "Starting torrent stream for $infoHash")
                 observeTorrentState()
                 val localUrl = startTorrentStream(
-                    infoHash = infoHash,
-                    fileIdx = navigationArgs.fileIdx,
-                    filename = navigationArgs.filename,
-                    trackers = navigationArgs.torrentTrackers
+                    infoHash = infoHash!!,
+                    fileIdx = fileIdx,
+                    filename = currentFilename ?: navigationArgs.filename,
+                    trackers = navigationArgs.torrentTrackers,
                 )
                 Log.d("PlayerStartup", "Torrent stream ready: $localUrl")
                 currentStreamUrl = localUrl
@@ -78,7 +100,7 @@ internal fun PlayerRuntimeController.startInitialPlaybackIfNeeded() {
                 preparePlaybackBeforeStart(
                     url = localUrl,
                     headers = emptyMap(),
-                    loadSavedProgress = true
+                    loadSavedProgress = true,
                 )
             } catch (ce: kotlinx.coroutines.CancellationException) {
                 throw ce
@@ -88,9 +110,9 @@ internal fun PlayerRuntimeController.startInitialPlaybackIfNeeded() {
                     it.copy(
                         error = context.getString(
                             R.string.player_error_failed_start_torrent,
-                            e.message ?: context.getString(R.string.error_unknown)
+                            e.message ?: context.getString(R.string.error_unknown),
                         ),
-                        showLoadingOverlay = false
+                        showLoadingOverlay = false,
                     )
                 }
             }
@@ -101,7 +123,7 @@ internal fun PlayerRuntimeController.startInitialPlaybackIfNeeded() {
     preparePlaybackBeforeStart(
         url = currentStreamUrl,
         headers = currentHeaders,
-        loadSavedProgress = !navigationArgs.startFromBeginning
+        loadSavedProgress = !navigationArgs.startFromBeginning,
     )
 }
 

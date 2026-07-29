@@ -30,9 +30,25 @@ class RewriteTorboxResponseDecoderTest {
     }
 
     @Test
+    fun `cloud list decoder maps torrent rows`() {
+        val result = RewriteTorboxResponseDecoder.cloudItems(
+            payload(
+                """{"data":[{"id":9,"name":"Movie.mkv","size":2048,"download_state":"completed"},{"name":"missing-id"}]}""",
+            ),
+        )
+
+        val items = (result as RewriteTorboxResult.Success).value
+        assertEquals(
+            listOf(RewriteTorboxCloudItem(9, "Movie.mkv", 2048, "completed")),
+            items,
+        )
+    }
+
+    @Test
     fun `invalid envelopes are surfaced rather than treated as empty success`() {
         assertTrue(RewriteTorboxResponseDecoder.cachedHashes(payload("""{"success":true}""")) is RewriteTorboxResult.InvalidResponse)
         assertTrue(RewriteTorboxResponseDecoder.downloadUrl(payload("""{"data":""}""")) is RewriteTorboxResult.InvalidResponse)
+        assertTrue(RewriteTorboxResponseDecoder.cloudItems(payload("""{"data":{}}""")) is RewriteTorboxResult.InvalidResponse)
     }
 
     private fun payload(raw: String) = Json.parseToJsonElement(raw).jsonObject

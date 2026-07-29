@@ -440,7 +440,7 @@ fun PlayerScreen(
             } catch (e: Exception) {
                 // Focus requester may not be ready yet
             }
-        } else if (!uiState.showControls) {
+        } else if (!uiState.showControls && !isExternalSecondaryOpen) {
             // When controls are hidden, let skip intro button take focus if visible
             val skipVisible = uiState.activeSkipInterval != null && !uiState.skipIntervalDismissed
             val nextEpisodeVisible = uiState.postPlayMode is PostPlayMode.AutoPlay

@@ -45,6 +45,23 @@ class RewriteStreamAutoPickerTest {
     }
 
     @Test
+    fun unknownTorrentAloneIsAutoSelectedAfterCacheProbeTimeout() {
+        // AppShell remaps lingering CHECKING → UNKNOWN after the cache wait; UNKNOWN must remain
+        // eligible so a hung TorBox probe cannot permanently block Play.
+        val unknown = candidate("unknown", cacheState = StreamCacheState.UNKNOWN, infoHash = "unknown-hash")
+        assertEquals(unknown, selectRewriteAutoPlayCandidate(groups(unknown)))
+    }
+
+    @Test
+    fun aiUpscaledCachedLosesToCleanCached() {
+        val ai = candidate("ai", cacheState = StreamCacheState.CACHED, infoHash = "ai-hash")
+            .copy(title = "2160p AI Upscale")
+        val clean = candidate("clean", cacheState = StreamCacheState.CACHED, infoHash = "clean-hash")
+            .copy(title = "1080p BluRay")
+        assertEquals(clean, selectRewriteAutoPlayCandidate(groups(ai, clean)))
+    }
+
+    @Test
     fun checkingAndNotCachedCandidatesAreNotAutoSelected() {
         val checking = candidate("checking", cacheState = StreamCacheState.CHECKING, infoHash = "checking-hash")
         val notCached = candidate("not-cached", cacheState = StreamCacheState.NOT_CACHED, infoHash = "not-cached-hash")
@@ -59,6 +76,87 @@ class RewriteStreamAutoPickerTest {
         val notCached = candidate("not-cached", cacheState = StreamCacheState.NOT_CACHED, infoHash = "not-cached-hash")
 
         assertFalse(hasRewritePendingCacheChecks(groups(cached, notCached)))
+    }
+
+    @Test
+    fun absurdlyLargeAnimeEpisodeLosesToNormalEncode() {
+        val huge = candidate("huge", cacheState = StreamCacheState.CACHED, infoHash = "huge-hash")
+            .copy(
+                title = "Show.S01E01.1080p.BluRay.x265\n👤 80 💾 102GB ⚙️ RARBG",
+                metadataText = "Show.S01E01.1080p.BluRay.x265 💾 102GB",
+                seeders = 80,
+            )
+        val normal = candidate("normal", cacheState = StreamCacheState.CACHED, infoHash = "normal-hash")
+            .copy(
+                title = "Show.S01E01.1080p.WEB-DL.x265\n👤 70 💾 1.6 GB ⚙️ EZTV",
+                metadataText = "Show.S01E01.1080p.WEB-DL.x265 💾 1.6 GB",
+                seeders = 70,
+            )
+        val context = RewriteStreamScoringEngine.Context(
+            title = "Anime Show",
+            contentType = "series",
+            genres = listOf("Animation", "Anime"),
+            language = "ja",
+        )
+
+        assertTrue(
+            RewriteStreamScoringEngine.score(normal, context) >
+                RewriteStreamScoringEngine.score(huge, context),
+        )
+        assertEquals(normal, selectRewriteAutoPlayCandidate(groups(huge, normal), context))
+    }
+
+    @Test
+    fun sizeParsedFromTitleIsUsedWhenVideoSizeBytesMissing() {
+        val fromTitle = candidate("title-size", directUrl = "https://stream.test/title")
+            .copy(title = "Episode 1080p 💾 1.8 GB")
+        val structured = candidate("structured", directUrl = "https://stream.test/structured")
+            .copy(
+                title = "Episode 1080p",
+                videoSizeBytes = (1.8 * 1024 * 1024 * 1024).toLong(),
+            )
+        val context = RewriteStreamScoringEngine.Context(title = "Show", contentType = "series")
+
+        assertEquals(
+            RewriteStreamScoringEngine.score(structured, context),
+            RewriteStreamScoringEngine.score(fromTitle, context),
+        )
+    }
+
+    @Test
+    fun legitimate4kMovieRemuxIsNotCrushedBySizeAlone() {
+        val remux = candidate("remux", cacheState = StreamCacheState.CACHED, infoHash = "remux-hash")
+            .copy(
+                title = "Movie.2024.2160p.UHD.BluRay.REMUX.HDR 💾 42 GB",
+                seeders = 50,
+            )
+        val web = candidate("web", cacheState = StreamCacheState.CACHED, infoHash = "web-hash")
+            .copy(
+                title = "Movie.2024.1080p.WEB-DL 💾 8 GB",
+                seeders = 50,
+            )
+        val context = RewriteStreamScoringEngine.Context(title = "Movie", contentType = "movie")
+
+        // Remux may or may not win overall, but its size score must stay meaningful.
+        assertTrue(RewriteStreamScoringEngine.score(remux, context) > 40)
+        // Movies are not size-penalized for being large — a 102GB 4K remux stays competitive
+        // with a 42GB remux (episode scoring still crushes absurd packs).
+        assertTrue(
+            kotlin.math.abs(
+                RewriteStreamScoringEngine.score(remux, context) -
+                    RewriteStreamScoringEngine.score(
+                        remux.copy(title = "Movie.2024.2160p 💾 102 GB"),
+                        context,
+                    ),
+            ) < 15,
+        )
+        // Sanity: remux remains competitive with a mid-size 1080p encode.
+        assertTrue(
+            kotlin.math.abs(
+                RewriteStreamScoringEngine.score(remux, context) -
+                    RewriteStreamScoringEngine.score(web, context),
+            ) < 40,
+        )
     }
 
     @Test
@@ -93,6 +191,44 @@ class RewriteStreamAutoPickerTest {
         val dv7 = candidate("dv7", directUrl = "https://stream.test/dv7")
             .copy(title = "2160p Dolby Vision Profile 7")
         assertEquals(dv7, selectRewriteAutoPlayCandidate(groups(dv7, hdr10)))
+    }
+
+    @Test
+    fun torrentWithDirectUrlButNotCachedIsNeverAutoSelected() {
+        val uncachedWithUrl = candidate(
+            "uncached-url",
+            directUrl = "https://torrentio.strem.fun/resolve/abc",
+            infoHash = "uncached-hash",
+            cacheState = StreamCacheState.NOT_CACHED,
+        )
+        val checkingWithUrl = candidate(
+            "checking-url",
+            directUrl = "https://torrentio.strem.fun/resolve/def",
+            infoHash = "checking-hash",
+            cacheState = StreamCacheState.CHECKING,
+        )
+        assertNull(selectRewriteAutoPlayCandidate(groups(uncachedWithUrl, checkingWithUrl)))
+    }
+
+    @Test
+    fun cachedTorrentWithDirectUrlIsAutoSelected() {
+        val cached = candidate(
+            "cached-url",
+            directUrl = "https://torrentio.strem.fun/resolve/cached",
+            infoHash = "cached-hash",
+            cacheState = StreamCacheState.CACHED,
+        )
+        assertEquals(cached, selectRewriteAutoPlayCandidate(groups(cached)))
+    }
+
+    @Test
+    fun magnetOnlyUrlIsNotAutoSelected() {
+        val magnet = candidate(
+            "magnet",
+            directUrl = "magnet:?xt=urn:btih:abcdef",
+            cacheState = StreamCacheState.NOT_APPLICABLE,
+        )
+        assertNull(selectRewriteAutoPlayCandidate(groups(magnet)))
     }
 
     private fun groups(vararg candidates: RewriteStreamCandidate) = listOf(

@@ -27,6 +27,13 @@ data class RewriteTorboxFile(
     val sizeBytes: Long?,
 )
 
+data class RewriteTorboxCloudItem(
+    val id: Int,
+    val name: String,
+    val sizeBytes: Long?,
+    val downloadState: String?,
+)
+
 sealed interface RewriteTorboxResult<out T> {
     data class Success<T>(val value: T) : RewriteTorboxResult<T>
     data class HttpFailure(val statusCode: Int) : RewriteTorboxResult<Nothing>
@@ -70,8 +77,11 @@ class RewriteTorboxTransport(
     suspend fun torrentFiles(apiKey: String, torrentId: Int): RewriteTorboxResult<List<RewriteTorboxFile>> =
         get(apiKey, "v1/api/torrents/mylist?id=$torrentId&bypass_cache=true").flatMap(RewriteTorboxResponseDecoder::files)
 
+    suspend fun listCloudTorrents(apiKey: String): RewriteTorboxResult<List<RewriteTorboxCloudItem>> =
+        get(apiKey, "v1/api/torrents/mylist").flatMap(RewriteTorboxResponseDecoder::cloudItems)
+
     suspend fun downloadUrl(apiKey: String, torrentId: Int, fileId: Int): RewriteTorboxResult<String> =
-        get(apiKey, RewriteTorboxRequestPaths.downloadLink(torrentId, fileId))
+        get(apiKey, RewriteTorboxRequestPaths.downloadLink(apiKey, torrentId, fileId))
             .flatMap(RewriteTorboxResponseDecoder::downloadUrl)
 
     private suspend fun get(apiKey: String, path: String): RewriteTorboxResult<JsonObject> = request(
@@ -124,8 +134,14 @@ internal suspend fun <T> retryRewriteProviderCall(
 
 /** Request URLs are safe to retain in diagnostics: authentication remains in the Bearer header. */
 internal object RewriteTorboxRequestPaths {
-    fun downloadLink(torrentId: Int, fileId: Int): String =
-        "v1/api/torrents/requestdl?torrent_id=$torrentId&file_id=$fileId&zip_link=false&redirect=false&append_name=false"
+    /**
+     * TorBox documents that [requestdl] requires the API key as query `token=` (in addition to
+     * Bearer). Omitting it returns success:false / empty data — surface as "no download URL".
+     */
+    fun downloadLink(apiKey: String, torrentId: Int, fileId: Int): String {
+        val token = java.net.URLEncoder.encode(apiKey.trim(), Charsets.UTF_8.name())
+        return "v1/api/torrents/requestdl?token=$token&torrent_id=$torrentId&file_id=$fileId&zip_link=false&redirect=false&append_name=false"
+    }
 }
 
 internal object RewriteTorboxResponseDecoder {
@@ -160,9 +176,33 @@ internal object RewriteTorboxResponseDecoder {
         })
     }
 
+    fun cloudItems(payload: JsonObject): RewriteTorboxResult<List<RewriteTorboxCloudItem>> {
+        val data = payload["data"] as? JsonArray ?: return RewriteTorboxResult.InvalidResponse
+        return RewriteTorboxResult.Success(data.mapNotNull { raw ->
+            val item = raw as? JsonObject ?: return@mapNotNull null
+            val id = (item["id"] as? JsonPrimitive)?.intOrNull ?: return@mapNotNull null
+            val name = (item["name"] as? JsonPrimitive)?.contentOrNull?.takeIf(String::isNotBlank)
+                ?: return@mapNotNull null
+            RewriteTorboxCloudItem(
+                id = id,
+                name = name,
+                sizeBytes = (item["size"] as? JsonPrimitive)?.contentOrNull?.toLongOrNull(),
+                downloadState = (item["download_state"] as? JsonPrimitive)?.contentOrNull,
+            )
+        })
+    }
+
     fun downloadUrl(payload: JsonObject): RewriteTorboxResult<String> {
-        val url = ((payload["data"] as? JsonPrimitive)?.contentOrNull ?: (payload["data"] as? JsonObject)?.get("url")?.let { it as? JsonPrimitive }?.contentOrNull)
-            ?.takeIf(String::isNotBlank)
+        if ((payload["success"] as? JsonPrimitive)?.contentOrNull == "false") {
+            return RewriteTorboxResult.InvalidResponse
+        }
+        val data = payload["data"]
+        val url = when (data) {
+            is JsonPrimitive -> data.contentOrNull
+            is JsonObject -> listOf("url", "download", "link")
+                .firstNotNullOfOrNull { key -> (data[key] as? JsonPrimitive)?.contentOrNull }
+            else -> null
+        }?.takeIf { it.isNotBlank() && (it.startsWith("http://") || it.startsWith("https://")) }
             ?: return RewriteTorboxResult.InvalidResponse
         return RewriteTorboxResult.Success(url)
     }

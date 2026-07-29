@@ -24,6 +24,7 @@ import com.sluggyard.tv.ui.rewrite.settings.RewriteSettingsFacade
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 import javax.inject.Named
+import kotlinx.coroutines.flow.first
 
 // Compatibility-only symbols for compiled, unreachable legacy screens. They are not provided by
 // the rewrite activity and will disappear with those screens during the final provenance sweep.
@@ -76,6 +77,21 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var rewriteLibraryWatchRepository: RewriteLibraryWatchRepository
 
+    @Inject
+    lateinit var tmdbMetadataService: com.sluggyard.tv.core.tmdb.TmdbMetadataService
+
+    @Inject
+    lateinit var tmdbService: com.sluggyard.tv.core.tmdb.TmdbService
+
+    @Inject
+    lateinit var tmdbApi: com.sluggyard.tv.data.remote.api.TmdbApi
+
+    @Inject
+    lateinit var traktApi: com.sluggyard.tv.data.remote.api.TraktApi
+
+    @Inject
+    lateinit var traktAuthService: com.sluggyard.tv.data.repository.TraktAuthService
+
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
@@ -88,12 +104,29 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val graph = remember {
+                val relatedDataSource = com.sluggyard.tv.ui.rewrite.details.RewriteRelatedDataSource(
+                    tmdbMetadata = tmdbMetadataService,
+                    tmdbService = tmdbService,
+                    traktApi = traktApi,
+                    traktAuth = traktAuthService,
+                    tmdbSettings = { settingsFacade.tmdbSettings.first() },
+                    moreLikeThisSource = {
+                        settingsFacade.traktSettings.moreLikeThisSource.first()
+                    },
+                )
+                val tmdbHomeDataSource = com.sluggyard.tv.ui.rewrite.home.RewriteTmdbHomeDataSource(
+                    tmdbApi = tmdbApi,
+                    tmdbSettings = { settingsFacade.tmdbSettings.first() },
+                    metadataAddonId = { null },
+                )
                 RewriteAppGraph(
                     context = applicationContext,
                     profileManager = profileManager,
                     rewriteDataStore = rewriteDataStore,
                     progressSyncBridge = rewriteProgressSyncBridge,
                     libraryWatchRepository = rewriteLibraryWatchRepository,
+                    relatedDataSource = relatedDataSource,
+                    tmdbHomeDataSource = tmdbHomeDataSource,
                 )
             }
             SlugYardTvTheme {

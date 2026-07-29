@@ -5,6 +5,7 @@ import com.sluggyard.tv.core.addonprotocol.AddonRegistryAction
 import com.sluggyard.tv.core.addonprotocol.AddonRegistryState
 import com.sluggyard.tv.core.addonprotocol.AddonTransportResult
 import com.sluggyard.tv.core.addonprotocol.ManagedAddon
+import com.sluggyard.tv.core.addonprotocol.SlugYardCommunitySourcePolicy
 import com.sluggyard.tv.core.addonprotocol.StremioAddonGateway
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -16,17 +17,40 @@ import org.junit.Test
 
 class RewriteCommunityAddonProvisionerTest {
     @Test
-    fun `provisions only fixed curated endpoints`() = runTest {
+    fun `provisions only fixed curated endpoints with debrid`() = runTest {
         val registry = FakeRegistry()
         val gateway = FakeGateway()
 
-        val report = RewriteCommunityAddonProvisioner(gateway, registry).provision()
+        val report = RewriteCommunityAddonProvisioner(gateway, registry).provision(
+            configured = null,
+            debridConfigured = true,
+        )
 
-        assertEquals(4, gateway.requestedUrls.size)
+        assertEquals(SlugYardCommunitySourcePolicy.bootstrapManifestUrls.size, gateway.requestedUrls.size)
         assertTrue(gateway.requestedUrls.none { it.contains("example.test") })
-        assertEquals(4, registry.curated.single().size)
-        assertEquals(4, report.installedCount)
+        assertEquals(SlugYardCommunitySourcePolicy.bootstrapManifestUrls.size, registry.curated.single().size)
+        assertEquals(SlugYardCommunitySourcePolicy.bootstrapManifestUrls.size, report.installedCount)
         assertEquals(0, report.unavailableCount)
+    }
+
+    @Test
+    fun `without debrid skips torrent content sources`() = runTest {
+        val registry = FakeRegistry()
+        val gateway = FakeGateway()
+
+        val report = RewriteCommunityAddonProvisioner(gateway, registry).provision(
+            configured = null,
+            debridConfigured = false,
+        )
+
+        assertEquals(SlugYardCommunitySourcePolicy.infrastructureManifestUrls.size, gateway.requestedUrls.size)
+        assertTrue(gateway.requestedUrls.none { it.contains("torrentio", ignoreCase = true) })
+        assertTrue(gateway.requestedUrls.any { it.contains("watchhub", ignoreCase = true) })
+        assertEquals(SlugYardCommunitySourcePolicy.infrastructureManifestUrls.size, report.installedCount)
+        assertEquals(
+            SlugYardCommunitySourcePolicy.infrastructureManifestUrls.toSet(),
+            registry.lastRetainUrls,
+        )
     }
 
     @Test
@@ -34,11 +58,27 @@ class RewriteCommunityAddonProvisionerTest {
         val registry = FakeRegistry()
         val gateway = FakeGateway(failingRequestIndex = 1)
 
-        val report = RewriteCommunityAddonProvisioner(gateway, registry).provision()
+        val report = RewriteCommunityAddonProvisioner(gateway, registry).provision(
+            configured = null,
+            debridConfigured = true,
+        )
 
-        assertEquals(3, registry.curated.single().size)
-        assertEquals(3, report.installedCount)
+        assertEquals(SlugYardCommunitySourcePolicy.bootstrapManifestUrls.size - 1, registry.curated.single().size)
+        assertEquals(SlugYardCommunitySourcePolicy.bootstrapManifestUrls.size - 1, report.installedCount)
         assertEquals(1, report.unavailableCount)
+    }
+
+    @Test
+    fun `uninstall clears curated registry`() = runTest {
+        val registry = FakeRegistry()
+        val gateway = FakeGateway()
+        val provisioner = RewriteCommunityAddonProvisioner(gateway, registry)
+        provisioner.provision(debridConfigured = true)
+
+        val report = provisioner.uninstall()
+
+        assertEquals(0, report.installedCount)
+        assertTrue(registry.cleared)
     }
 
     private class FakeGateway(
@@ -66,10 +106,21 @@ class RewriteCommunityAddonProvisionerTest {
     private class FakeRegistry : RewriteAddonRegistry {
         override val state: Flow<AddonRegistryState> = MutableStateFlow(AddonRegistryState())
         val curated = mutableListOf<List<ManagedAddon>>()
+        var cleared = false
+        var lastRetainUrls: Set<String> = emptySet()
 
         override suspend fun dispatch(action: AddonRegistryAction) = Unit
-        override suspend fun ensureCurated(addons: List<ManagedAddon>) {
+        override suspend fun ensureCurated(
+            addons: List<ManagedAddon>,
+            retainManifestUrls: Set<String>,
+        ) {
             curated += addons
+            lastRetainUrls = retainManifestUrls
+        }
+
+        override suspend fun clearCurated() {
+            cleared = true
+            curated.clear()
         }
     }
 }

@@ -356,7 +356,9 @@ private fun PlayerRuntimeController.scanTextGroup(
                 ?: context.getString(com.sluggyard.tv.R.string.player_track_subtitle_fallback, subtitleTracks.size + 1),
             language = format.language,
             trackId = format.id,
-            codec = CustomDefaultTrackNameProvider.formatNameFromMime(format.sampleMimeType),
+            codec = CustomDefaultTrackNameProvider.formatNameFromMime(format.sampleMimeType)
+                ?: CustomDefaultTrackNameProvider.formatNameFromMime(format.codecs)
+                ?: format.codecs?.substringBefore(',')?.trim()?.takeIf { it.isNotBlank() },
             isForced = forcedFlag || nameHintsForced || songsAndSigns,
             isSelected = isSelected
         )
@@ -1852,7 +1854,11 @@ internal fun PlayerRuntimeController.startFrameRateProbe(
 
 internal fun PlayerRuntimeController.applySubtitlePreferences(preferred: String, secondary: String?) {
     if (isUsingMpvEngine()) {
-        mpvView?.applySubtitleLanguagePreferences(preferred, secondary)
+        mpvView?.applySubtitleLanguagePreferences(
+            preferred = preferred,
+            secondary = secondary,
+            preferAss = shouldPreferAssSubtitles(),
+        )
         if (preferred == "none") {
             mpvView?.disableSubtitles()
             _uiState.update { it.copy(selectedSubtitleTrackIndex = -1, selectedAddonSubtitle = null) }

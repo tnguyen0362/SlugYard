@@ -12,7 +12,9 @@ import com.sluggyard.tv.data.local.PlayerSettings
 import com.sluggyard.tv.data.local.StreamAutoPlayMode
 import com.sluggyard.tv.data.local.StreamAutoPlaySource
 import com.sluggyard.tv.domain.model.AddonStreams
+import com.sluggyard.tv.domain.model.ProxyHeaders
 import com.sluggyard.tv.domain.model.Stream
+import com.sluggyard.tv.domain.model.StreamBehaviorHints
 import com.sluggyard.tv.domain.model.StreamDebridCacheState
 import com.sluggyard.tv.domain.model.Video
 import com.sluggyard.tv.domain.model.WatchProgress
@@ -705,19 +707,32 @@ internal fun PlayerRuntimeController.switchToRewritePlaybackSource(handoff: Rewr
             currentEpisodeTitle = handoff.episodeTitle,
         )
     }
+    val source = handoff.source
+    val isTorrent = source.infoHash != null && !source.url.startsWith("http", ignoreCase = true)
     switchToSourceStream(
         Stream(
-            name = handoff.source.sourceId,
-            title = handoff.source.sourceId,
-            description = null,
-            url = handoff.source.url,
+            name = source.streamName ?: source.sourceId,
+            title = source.streamName ?: source.sourceId,
+            description = source.streamDescription,
+            url = source.url.takeUnless { isTorrent },
             ytId = null,
-            infoHash = null,
-            fileIdx = null,
+            infoHash = source.infoHash.takeIf { isTorrent },
+            fileIdx = source.fileIndex.takeIf { isTorrent },
             externalUrl = null,
-            behaviorHints = null,
-            addonName = "Rewrite",
+            behaviorHints = StreamBehaviorHints(
+                notWebReady = null,
+                bingeGroup = source.bingeGroup,
+                countryWhitelist = null,
+                proxyHeaders = source.requestHeaders.takeIf { it.isNotEmpty() }?.let {
+                    ProxyHeaders(request = it, response = null)
+                },
+                videoHash = source.videoHash,
+                videoSize = source.videoSizeBytes,
+                filename = source.filename,
+            ),
+            addonName = source.addonName ?: "Rewrite",
             addonLogo = null,
+            sources = source.trackers.map { "tracker:$it" }.takeIf { it.isNotEmpty() },
         ),
         resumePositionMs = handoff.resumePositionMs,
     )
@@ -1390,7 +1405,8 @@ private fun PlayerRuntimeController.beginHttpEpisodeStream(
     autoSkippedIntervalKeys.clear()
 
     fetchParentalGuide(contentId, contentType, currentSeason, currentEpisode)
-    fetchSkipIntervals(contentId, currentSeason, currentEpisode)
+    // videoId carries the episode-specific (mal:/kitsu:) id AniSkip needs; contentId is the parent.
+    fetchSkipIntervals(currentVideoId ?: contentId, currentSeason, currentEpisode)
 
     queuePlaybackRawEventLine(
         "LINK_SELECTED: source=in_player_source host=${url.traceHost()} " +
@@ -1494,7 +1510,7 @@ private fun PlayerRuntimeController.switchToEpisodeStreamCommon(
     autoSkippedIntervalKeys.clear()
 
     fetchParentalGuide(contentId, contentType, currentSeason, currentEpisode)
-    fetchSkipIntervals(contentId, currentSeason, currentEpisode)
+    fetchSkipIntervals(currentVideoId ?: contentId, currentSeason, currentEpisode)
 }
 
 internal fun PlayerRuntimeController.showEpisodeStreamPicker(video: Video, forceRefresh: Boolean = true) {

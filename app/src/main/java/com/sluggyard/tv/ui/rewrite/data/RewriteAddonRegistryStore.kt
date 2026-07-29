@@ -26,8 +26,19 @@ private val rewriteAddonRegistryKey = stringPreferencesKey("rewrite_addon_regist
 interface RewriteAddonRegistry {
     val state: Flow<AddonRegistryState>
     suspend fun dispatch(action: AddonRegistryAction)
-    /** Adds backend-curated manifests without exposing a user mutation surface. */
-    suspend fun ensureCurated(addons: List<ManagedAddon>)
+    /**
+     * Adds backend-curated manifests without exposing a user mutation surface.
+     *
+     * [retainManifestUrls] is the allowlisted set that should remain after this pass.
+     * Manifests outside that set are dropped (e.g. torrent sources when debrid is off).
+     * Manifests inside the set that fail to fetch this run are kept if already installed.
+     */
+    suspend fun ensureCurated(
+        addons: List<ManagedAddon>,
+        retainManifestUrls: Set<String> = SlugYardCommunitySourcePolicy.bootstrapManifestUrls.toSet(),
+    )
+    /** Removes all allowlisted community manifests (Install restores them via provisioning). */
+    suspend fun clearCurated()
 }
 
 /**
@@ -63,33 +74,44 @@ class RewriteAddonRegistryStore(
         }
     }
 
-    override suspend fun ensureCurated(addons: List<ManagedAddon>) {
-        runtimeConfiguredUrls.value = addons
-            .filter { it.manifestUrl in SlugYardCommunitySourcePolicy.bootstrapManifestUrls }
+    override suspend fun ensureCurated(
+        addons: List<ManagedAddon>,
+        retainManifestUrls: Set<String>,
+    ) {
+        val retain = retainManifestUrls.intersect(SlugYardCommunitySourcePolicy.bootstrapManifestUrls.toSet())
+        val refreshedConfigured = addons
+            .filter { it.manifestUrl in retain }
             .mapNotNull { addon -> addon.configuredManifestUrl?.let { addon.manifestUrl to it } }
             .toMap()
-        if (addons.isEmpty()) return
+        // Keep prior configured URLs for retained manifests that failed to refresh this pass.
+        runtimeConfiguredUrls.value = runtimeConfiguredUrls.value
+            .filterKeys { it in retain }
+            .plus(refreshedConfigured)
         dataStore.edit { preferences ->
             val current = preferences[rewriteAddonRegistryKey]
                 ?.let(RewriteAddonRegistryCodec::decode)
                 ?.let(::sanitizeCuratedRegistry)
                 ?: AddonRegistryState()
-            val curated = addons.filter { addon ->
-                addon.manifestUrl in SlugYardCommunitySourcePolicy.bootstrapManifestUrls
-            }
+            val curated = addons.filter { addon -> addon.manifestUrl in retain }
             val byUrl = curated.associateBy(ManagedAddon::manifestUrl)
             val updated = current.addons.mapNotNull { existing ->
-                byUrl[existing.manifestUrl]?.copy(enabled = existing.enabled) ?: existing.takeIf {
-                    it.manifestUrl in SlugYardCommunitySourcePolicy.bootstrapManifestUrls
-                }
+                byUrl[existing.manifestUrl]?.copy(enabled = existing.enabled)
+                    ?: existing.takeIf { it.manifestUrl in retain }
             }
-            val additions = curated.filter { candidate -> current.addons.none { it.manifestUrl == candidate.manifestUrl } }
+            val additions = curated.filter { candidate ->
+                current.addons.none { it.manifestUrl == candidate.manifestUrl }
+            }
             val next = sanitizeCuratedRegistry(AddonRegistryState(updated + additions))
             if (next != current) {
-                preferences[rewriteAddonRegistryKey] = RewriteAddonRegistryCodec.encode(
-                    next,
-                )
+                preferences[rewriteAddonRegistryKey] = RewriteAddonRegistryCodec.encode(next)
             }
+        }
+    }
+
+    override suspend fun clearCurated() {
+        runtimeConfiguredUrls.value = emptyMap()
+        dataStore.edit { preferences ->
+            preferences.remove(rewriteAddonRegistryKey)
         }
     }
 }
