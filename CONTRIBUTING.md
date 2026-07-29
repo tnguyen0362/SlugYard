@@ -6,15 +6,16 @@ Thanks for helping improve SlugYard.
 
 These rules are enforced strictly. Issues and PRs that do not follow them will be closed without review.
 
-## Current PR policy (2026-05-23)
+## Current PR policy (0.1.0-beta)
 
-We are currently focusing on getting SlugYard ready for a stable release.
+SlugYard is in **public beta**. Help is welcome within a narrow lane so the
+product can stabilize.
 
 Until further notice, please do not open:
 
 - Feature requests
 - Feature additions
-- UI changes
+- UI redesigns
 - Refactors
 - Other non-critical changes
 
@@ -22,10 +23,13 @@ Pull requests are accepted only for:
 
 - Localization/translation updates
 - Critical bug fixes with a linked issue, reproduction steps, and testing notes
+- Documentation fixes that correct inaccurate public docs (README, PRIVACY, SECURITY, NOTICE)
 
 Anything outside this scope may be closed or deferred without review.
 
-Currently open PRs are not automatically exempt from this policy. Only selected PRs may be considered internally if they directly support the stable release.
+Security-sensitive reports: see [SECURITY.md](SECURITY.md) — do not open a public issue for credential leaks.
+
+Currently open PRs are not automatically exempt from this policy. Only selected PRs may be considered internally if they directly support the beta release.
 
 ---
 

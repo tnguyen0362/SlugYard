@@ -11,10 +11,14 @@ and application settings. These changes are maintained by the SlugYard project.
 SlugYard is distributed under the GNU General Public License, version 3.0.
 See LICENSE for the complete license text.
 
-Third-party GPL component:
+Third-party GPL / copyleft components (non-exhaustive):
 
-SlugYard distributes `nextlib-mediainfo` version 1.9.1-0.11.0 from the
-`io.github.anilbeesetti:nextlib-mediainfo` Maven coordinate. The upstream
-project is licensed under GPL-3.0.
+- `nextlib-mediainfo` (GPL-3.0) — `io.github.anilbeesetti:nextlib-mediainfo`
+  Source: https://github.com/anilbeesetti/nextlib
+- libmpv / mpv-android lineage (GPL family) used for the MPV playback path
+  See: https://github.com/jarnedemeulemeester/libmpv-android
+- Optional FFmpeg-based decoder / downmix work under `ffmpeg-decoder-downmix/`
+  (see that module’s NOTICE.md when the local decoder is enabled)
 
-Source: https://github.com/anilbeesetti/nextlib
+Additional Apache-2.0 / permissive dependencies (AndroidX Media3, OkHttp, etc.)
+are declared in Gradle and remain compatible with GPLv3 distribution.

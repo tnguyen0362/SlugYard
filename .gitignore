@@ -77,8 +77,21 @@ status-page/
 captures/
 *.uiautomator.xml
 *.xml.dump
+emu_*.png
+emu_*.xml
+home_focus_verify.png
+*_sm.png
 
 # Local exports and generated research output
 open_issues*.csv
 open_prs*.csv
 *_raw.txt
+
+# Internal agent / audit artifacts (keep local; do not publish)
+BUG_SWEEP_FINDINGS.md
+UX_ANNOYANCE_SWEEP.md
+HANDOFF_*.md
+CLAUDE_UI_HANDOFF.md
+PUREFIRE_ADDON_CONFIG.md
+BEHAVIOR_SPEC.md
+.superpowers/

@@ -20,7 +20,7 @@ schema through the dashboard SQL Editor. The file has two application paths:
 ### Step-by-Step Instructions
 
 1. **Open Supabase Dashboard**
-   - Go to: https://supabase.com/dashboard/project/xmxrrundgciztisdwmdg/sql/new
+   - Go to: `https://supabase.com/dashboard/project/<your-project-ref>/sql/new`
 
 2. **Choose the application path**
    - For a new project, open `supabase-schema.sql` and copy the entire file.
