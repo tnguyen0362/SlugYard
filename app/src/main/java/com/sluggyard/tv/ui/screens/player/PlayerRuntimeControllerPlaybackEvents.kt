@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import android.util.Log
+import com.sluggyard.tv.core.logging.ExperimentalDiagnostics
 
 internal const val AUDIO_AMPLIFICATION_MIN_DB = 0
 internal const val AUDIO_AMPLIFICATION_MAX_DB = 10
@@ -942,6 +943,16 @@ fun PlayerRuntimeController.hideControls() {
 }
 
 fun PlayerRuntimeController.onEvent(event: PlayerEvent) {
+    ExperimentalDiagnostics.event(
+        "player_input",
+        "event_received",
+        mapOf(
+            "event" to event.javaClass.simpleName,
+            "engine" to _uiState.value.internalPlayerEngine,
+            "playing" to _uiState.value.isPlaying,
+            "positionMs" to playbackTimeline.value.currentPosition,
+        ),
+    )
     onUserInteraction()
     when (event) {
         PlayerEvent.OnPlayPause -> handlePlayPause()

@@ -54,6 +54,37 @@ class TorboxFileSelectorTest {
     }
 
     @Test
+    fun `matches dash-numbered episode before requested index and ignores creditless special`() {
+        val selected = selector.selectFile(
+            files = listOf(
+                file(id = 18, name = "show (Creditless ED 01).mkv", size = 400),
+                file(id = 12, name = "show - 01 [Multi-Sub].mkv", size = 3_600),
+                file(id = 28, name = "show - Especial 01.mkv", size = 100),
+            ),
+            resolve = resolve(fileIdx = 0),
+            season = 1,
+            episode = 1,
+        )
+
+        assertEquals(12, selected?.id)
+    }
+
+    @Test
+    fun `does not use requested index when episode file is ambiguous`() {
+        val selected = selector.selectFile(
+            files = listOf(
+                file(id = 0, name = "show (Creditless ED 01).mkv", size = 400),
+                file(id = 1, name = "show (Creditless OP 01).mkv", size = 300),
+            ),
+            resolve = resolve(fileIdx = 0),
+            season = 1,
+            episode = 1,
+        )
+
+        assertEquals(null, selected)
+    }
+
+    @Test
     fun `falls back to largest playable video`() {
         val selected = selector.selectFile(
             files = listOf(

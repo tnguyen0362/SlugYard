@@ -1,5 +1,6 @@
 package com.sluggyard.tv.ui.rewrite.player
 
+import android.util.Log
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -40,11 +41,17 @@ import com.sluggyard.tv.ui.screens.player.PlayerViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 // First periodic checkpoint lands at ~10s so a short sample still reaches Continue Watching,
 // matching WatchStatePolicy.STARTED_MIN_POSITION_MS.
 private const val CHECKPOINT_DISTANCE_MS = 10_000L
 private const val CHECKPOINT_POLL_INTERVAL_MS = 5_000L
+// Hard cap for next-episode stream discovery, matching the legacy player path's
+// NEXT_EPISODE_SEARCH_HARD_CAP_MS contract. A hung provider must not leave the
+// next-episode coroutine waiting indefinitely.
+private const val NEXT_EPISODE_SEARCH_HARD_CAP_MS = 120_000L
+private const val REWRITE_SUBTITLE_DIAGNOSTIC_TAG = "RewriteSubtitleDiag"
 
 private data class RewriteActivePlaybackContext(
     val contentId: String,
@@ -134,8 +141,7 @@ fun RewriteRetainedPlayerHost(
     LaunchedEffect(contentId, contentType, season, episode) {
         viewModel.setRewriteAddonSubtitles(emptyList())
         subtitleDataSource.subtitleGroups(contentType, contentId).collect { groups ->
-            viewModel.setRewriteAddonSubtitles(
-                groups.flatMap { group ->
+            val tracks = groups.flatMap { group ->
                     (group.state as? RewriteSubtitleGroupState.Content)?.tracks.orEmpty().map { track ->
                         Subtitle(
                             id = "rewrite:${group.addonId}:${track.id}",
@@ -146,8 +152,13 @@ fun RewriteRetainedPlayerHost(
                             format = track.format,
                         )
                     }
-                }.distinctBy(Subtitle::id),
+                }.distinctBy(Subtitle::id)
+            Log.d(
+                REWRITE_SUBTITLE_DIAGNOSTIC_TAG,
+                "content=$contentId season=$season episode=$episode groups=${groups.size} " +
+                    "tracks=${tracks.joinToString(" | ") { "${it.id}:${it.lang}:${it.format ?: "unknown"}" }}",
             )
+            viewModel.setRewriteAddonSubtitles(tracks)
         }
     }
 
@@ -267,29 +278,86 @@ fun RewriteRetainedPlayerHost(
         }
     }
 
+    lateinit var selectRewriteSource: (
+        com.sluggyard.tv.ui.rewrite.streams.RewriteStreamCandidate,
+        Boolean,
+    ) -> Unit
+
     fun selectEpisode(selectedSeason: Int, selectedEpisode: RewriteDetailsEpisode) {
-        loadPlayerSources(
-            requestType = "series",
-            requestId = selectedEpisode.id,
-            panel = RewritePlayerSecondaryPanel.EPISODE_SOURCES,
-            forceRefresh = true,
-        )
+        // Episode selection is a playback intent, not a request to open a second source picker.
+        // Resolve the episode through the same cached-only auto-picker used by Details and
+        // Continue Watching, then hand it to the retained player in one transition.
+        secondaryJob?.cancel()
         secondaryState = secondaryState.copy(
+            panel = RewritePlayerSecondaryPanel.EPISODES,
+            sourceGroups = emptyList(),
+            sourceLoading = true,
+            sourceError = null,
+            failedSourceIds = emptySet(),
             episodeSourceId = selectedEpisode.id,
             episodeSourceTitle = "S${selectedSeason}E${selectedEpisode.displayNumber} · ${selectedEpisode.title}",
             episodeSourceSeason = selectedSeason,
             episodeSourceEpisode = selectedEpisode.number,
             episodeSourceEpisodeTitle = selectedEpisode.title,
         )
+        secondaryJob = scope.launch {
+            try {
+                var groups = emptyList<RewriteStreamGroup>()
+                val settled = withTimeoutOrNull(NEXT_EPISODE_SEARCH_HARD_CAP_MS) {
+                    streamsDataSource.streamGroups(
+                        type = "series",
+                        id = selectedEpisode.id,
+                        configuredDebrid = configuredDebrid(),
+                    ).collect { groups = it }
+                }
+                if (settled == null) {
+                    secondaryState = secondaryState.copy(
+                        sourceLoading = false,
+                        sourceError = "Episode sources took too long to respond. Try again.",
+                    )
+                    return@launch
+                }
+                val candidate = selectRewriteAutoPlayCandidate(
+                    groups = groups,
+                    context = com.sluggyard.tv.ui.rewrite.streams.RewriteStreamScoringEngine.Context(
+                        title = activeContext.title,
+                        contentType = "series",
+                        genres = viewModel.rewriteContentGenres()
+                            ?.split(',', '|', '/')
+                            ?.map { it.trim() }
+                            ?.filter { it.isNotEmpty() }
+                            .orEmpty(),
+                        language = viewModel.rewriteContentLanguage(),
+                        preferredSubtitleLanguage = playerState.subtitleStyle.preferredLanguage,
+                    ),
+                )
+                if (candidate == null) {
+                    secondaryState = secondaryState.copy(
+                        sourceLoading = false,
+                        sourceError = "No cached playable source was found for this episode.",
+                    )
+                    return@launch
+                }
+                selectRewriteSource(candidate, true)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                secondaryState = secondaryState.copy(
+                    sourceLoading = false,
+                    sourceError = failure.message ?: "Episode playback could not start",
+                )
+            }
+        }
     }
 
-    fun selectRewriteSource(candidate: com.sluggyard.tv.ui.rewrite.streams.RewriteStreamCandidate) {
+    selectRewriteSource = { candidate, forceDebridForTorrent ->
         secondaryState = secondaryState.copy(sourceLoading = true, sourceError = null)
         scope.launch {
             when (val result = manualResolution.prepare(
                 candidate.toManualSelection(
                     season = secondaryState.episodeSourceSeason ?: season,
                     episode = secondaryState.episodeSourceEpisode ?: episode,
+                    forceDebridForTorrent = forceDebridForTorrent,
                 ),
                 configuredDebrid(),
             )) {
@@ -315,6 +383,12 @@ fun RewriteRetainedPlayerHost(
                         episode = handoff.episode,
                         episodeTitle = handoff.episodeTitle,
                     )
+                    // Reset the checkpoint throttle baseline so the new source can save
+                    // checkpoints from its own start position. Without this, a same-episode
+                    // source switch inherits the old source's lastSavedPositionMs, and the
+                    // distance-gate blocks all checkpoint writes for the new source until
+                    // the user scrubs past the old baseline.
+                    lastSavedPositionMs = 0L
                     viewModel.onEvent(PlayerEvent.OnRewritePlaybackSourceSelected(handoff))
                     secondaryState = secondaryState.copy(
                         panel = RewritePlayerSecondaryPanel.HIDDEN,
@@ -342,16 +416,31 @@ fun RewriteRetainedPlayerHost(
         viewModel.onEvent(PlayerEvent.OnDismissNextEpisodeCard)
         scope.launch {
             var groups = emptyList<RewriteStreamGroup>()
-            streamsDataSource.streamGroups(
-                type = "series",
-                id = next.videoId,
-                configuredDebrid = configuredDebrid(),
-            ).collect { groups = it }
+            val settled = withTimeoutOrNull(NEXT_EPISODE_SEARCH_HARD_CAP_MS) {
+                streamsDataSource.streamGroups(
+                    type = "series",
+                    id = next.videoId,
+                    configuredDebrid = configuredDebrid(),
+                ).collect { groups = it }
+            }
+            if (settled == null) {
+                // Hung provider left the discovery flow incomplete — fall back to the Sources
+                // panel instead of passing a partial groups snapshot to scoring.
+                openSources()
+                return@launch
+            }
             val candidate = selectRewriteAutoPlayCandidate(
                 groups = groups,
                 context = com.sluggyard.tv.ui.rewrite.streams.RewriteStreamScoringEngine.Context(
                     title = activeContext.title,
                     contentType = "series",
+                    genres = viewModel.rewriteContentGenres()
+                        ?.split(',')
+                        ?.map { it.trim() }
+                        ?.filter { it.isNotEmpty() }
+                        .orEmpty(),
+                    language = viewModel.rewriteContentLanguage(),
+                    preferredSubtitleLanguage = playerState.subtitleStyle.preferredLanguage,
                 ),
             ) ?: run {
                 openSources()
@@ -476,8 +565,9 @@ fun RewriteRetainedPlayerHost(
         onPlaybackErrorBack = onBack,
         onRewriteNextEpisode = ::playNextRewriteEpisode,
         onBeforeExit = { snapshot ->
-            checkpointSavedOnExit = true
-            if (snapshot.currentPosition > 0L && snapshot.duration > 0L) {
+            val exitDurationMs = if (snapshot.duration > 0L) snapshot.duration else latestTimeline.duration
+            if (snapshot.currentPosition > 0L && exitDurationMs > 0L) {
+                checkpointSavedOnExit = true
                 val contextAtExit = activeContext
                 scope.launch(kotlinx.coroutines.NonCancellable) {
                     progressRepository.save(
@@ -490,7 +580,7 @@ fun RewriteRetainedPlayerHost(
                             parentId = contextAtExit.parentId,
                             parentType = contextAtExit.parentType,
                             positionMs = snapshot.currentPosition,
-                            durationMs = snapshot.duration,
+                            durationMs = exitDurationMs,
                             updatedAtEpochMs = System.currentTimeMillis(),
                             season = contextAtExit.season,
                             episode = contextAtExit.episode,
@@ -538,7 +628,7 @@ fun RewriteRetainedPlayerHost(
                         )
                     },
                     onSelectSourceAddon = { addon -> secondaryState = secondaryState.copy(selectedSourceAddon = addon) },
-                    onSelectSource = ::selectRewriteSource,
+                    onSelectSource = { candidate -> selectRewriteSource(candidate, false) },
                     onBackToEpisodes = {
                         secondaryJob?.cancel()
                         openEpisodes()

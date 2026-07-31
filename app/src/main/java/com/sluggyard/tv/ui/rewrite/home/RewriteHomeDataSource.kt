@@ -1,5 +1,6 @@
 package com.sluggyard.tv.ui.rewrite.home
 
+import android.os.SystemClock
 import com.sluggyard.tv.core.addonprotocol.AddonManifestPolicy
 import com.sluggyard.tv.core.addonprotocol.AddonRegistryState
 import com.sluggyard.tv.core.addonprotocol.AddonTransportResult
@@ -9,6 +10,7 @@ import com.sluggyard.tv.core.addonprotocol.StremioResponseDecoder
 import com.sluggyard.tv.core.aggregation.HomeCatalogKey
 import com.sluggyard.tv.core.aggregation.ReleaseVisibilityPolicy
 import com.sluggyard.tv.ui.rewrite.data.RewriteHomeSettings
+import com.sluggyard.tv.core.logging.ExperimentalDiagnostics
 
 /**
  * Bridges the clean addon protocol models to the rewritten Home controller.
@@ -33,25 +35,60 @@ class RewriteHomeDataSource(
                         key = HomeCatalogKey(addon.manifest.id, catalog.id),
                         title = catalog.displayName,
                         load = {
+                            val startedAt = SystemClock.elapsedRealtime()
+                            ExperimentalDiagnostics.event(
+                                "home",
+                                "catalog_load_started",
+                                mapOf(
+                                    "addon" to addon.manifest.id,
+                                    "catalog" to catalog.id,
+                                    "type" to catalog.type,
+                                ),
+                            )
                             when (val result = gateway.fetchCatalog(
                                 manifestUrl = addon.configuredManifestUrl ?: addon.manifestUrl,
                                 type = catalog.type,
                                 catalogId = catalog.id,
                             )) {
-                                is AddonTransportResult.Success -> StremioResponseDecoder.catalogItems(result.value)
-                                    .filter { item -> ReleaseVisibilityPolicy.isVisible(item.releaseInfo, settings.hideUnreleased) }
-                                    .map { item ->
-                                        RewriteHomePoster(
-                                            id = item.id,
-                                            title = item.title,
-                                            imageUrl = item.posterUrl,
-                                            addonId = addon.manifest.id,
-                                            contentType = item.type,
-                                            summary = item.description?.takeIf { it.isNotBlank() },
-                                            backdropUrl = item.backgroundUrl?.takeIf { it.isNotBlank() },
-                                        )
-                                    }
-                                else -> throw AddonCatalogLoadException(addon, catalog.id, result)
+                                is AddonTransportResult.Success -> {
+                                    val posters = StremioResponseDecoder.catalogItems(result.value)
+                                        .filter { item -> ReleaseVisibilityPolicy.isVisible(item.releaseInfo, settings.hideUnreleased) }
+                                        .map { item ->
+                                            RewriteHomePoster(
+                                                id = item.id,
+                                                title = item.title,
+                                                imageUrl = item.posterUrl,
+                                                addonId = addon.manifest.id,
+                                                contentType = item.type,
+                                                summary = item.description?.takeIf { it.isNotBlank() },
+                                                backdropUrl = item.backgroundUrl?.takeIf { it.isNotBlank() },
+                                            )
+                                        }
+                                    ExperimentalDiagnostics.event(
+                                        "home",
+                                        "catalog_load_completed",
+                                        mapOf(
+                                            "addon" to addon.manifest.id,
+                                            "catalog" to catalog.id,
+                                            "resultCount" to posters.size,
+                                            "durationMs" to SystemClock.elapsedRealtime() - startedAt,
+                                        ),
+                                    )
+                                    posters
+                                }
+                                else -> {
+                                    ExperimentalDiagnostics.event(
+                                        "home",
+                                        "catalog_load_failed",
+                                        mapOf(
+                                            "addon" to addon.manifest.id,
+                                            "catalog" to catalog.id,
+                                            "result" to result.describe(),
+                                            "durationMs" to SystemClock.elapsedRealtime() - startedAt,
+                                        ),
+                                    )
+                                    throw AddonCatalogLoadException(addon, catalog.id, result)
+                                }
                             }
                         },
                     )

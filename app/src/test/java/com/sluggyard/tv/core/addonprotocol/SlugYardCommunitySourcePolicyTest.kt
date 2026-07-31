@@ -13,6 +13,7 @@ class SlugYardCommunitySourcePolicyTest {
         assertTrue(urls.any { it.contains("watchhub", ignoreCase = true) })
         assertTrue(urls.any { it.contains("torrentio", ignoreCase = true) })
         assertTrue(urls.any { it.contains("mediafusion", ignoreCase = true) })
+        assertTrue(urls.any { it.contains("comet", ignoreCase = true) })
     }
 
     @Test
@@ -33,12 +34,35 @@ class SlugYardCommunitySourcePolicyTest {
         assertTrue(urls.any { it.contains("cinemeta", ignoreCase = true) })
         assertFalse(urls.any { it.contains("torrentio", ignoreCase = true) })
         assertFalse(urls.any { it.contains("mediafusion", ignoreCase = true) })
+        assertFalse(urls.any { it.contains("comet", ignoreCase = true) })
     }
 
     @Test
     fun `with debrid provisions full bootstrap allowlist`() {
         val urls = SlugYardCommunitySourcePolicy.provisionManifestUrls(debridConfigured = true)
         assertEquals(SlugYardCommunitySourcePolicy.bootstrapManifestUrls, urls)
+    }
+
+    @Test
+    fun `torrentio is ready only when enabled configured and stream capable`() {
+        val torrentio = ManagedAddon(
+            manifestUrl = "https://torrentio.strem.fun/manifest.json",
+            configuredManifestUrl = "https://torrentio.strem.fun/debridoptions=nodownloadlinks|torbox=redacted/manifest.json",
+            manifest = AddonManifestContract(
+                id = "com.stremio.torrentio.addon",
+                name = "Torrentio",
+                resources = setOf(AddonResource.STREAM),
+            ),
+        )
+
+        assertTrue(SlugYardCommunitySourcePolicy.isTorrentioReady(listOf(torrentio)))
+        assertFalse(SlugYardCommunitySourcePolicy.isTorrentioReady(listOf(torrentio.copy(enabled = false))))
+        assertFalse(SlugYardCommunitySourcePolicy.isTorrentioReady(listOf(torrentio.copy(configuredManifestUrl = null))))
+        assertFalse(
+            SlugYardCommunitySourcePolicy.isTorrentioReady(
+                listOf(torrentio.copy(manifest = torrentio.manifest.copy(resources = emptySet()))),
+            ),
+        )
     }
 
     @Test

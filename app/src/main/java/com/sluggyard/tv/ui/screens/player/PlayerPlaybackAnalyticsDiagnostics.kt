@@ -21,6 +21,7 @@ import com.sluggyard.tv.data.repository.PlaybackIssuePlaybackFormatInput
 import com.sluggyard.tv.data.repository.PlaybackIssuePlaybackHealthSnapshotInput
 import com.sluggyard.tv.data.repository.PlaybackIssuePlaybackLoadErrorInput
 import com.sluggyard.tv.data.repository.PlaybackIssuePlaybackLoadInput
+import com.sluggyard.tv.core.logging.ExperimentalDiagnostics
 
 private const val PLAYBACK_ANALYTICS_EVENT_LIMIT = 140
 private const val PLAYBACK_RAW_EVENT_LIMIT = 220
@@ -613,6 +614,32 @@ internal class PlayerPlaybackAnalyticsDiagnostics {
                 loadErrorCount = loadErrorCount
             )
         )
+        ExperimentalDiagnostics.event(
+            "playback",
+            "health_snapshot",
+            mapOf(
+                "host" to traceHost,
+                "engine" to traceEngine,
+                "elapsedMs" to (now - sessionStartedAtElapsedMs).coerceAtLeast(0L),
+                "state" to playbackStateName,
+                "playing" to isPlaying,
+                "loading" to isLoading,
+                "positionMs" to positionMs,
+                "bufferedPositionMs" to bufferedPositionMs,
+                "durationMs" to durationMs,
+                "bufferedPercentage" to bufferedPercentage,
+                "droppedFrames" to droppedFrames,
+                "audioUnderruns" to audioUnderrunCount,
+                "rebuffers" to rebufferCount,
+                "rebufferTotalMs" to rebufferTotalMs,
+                "bandwidthBps" to bandwidthEstimateBps,
+                "totalBytesLoaded" to totalBytesLoaded,
+                "loadStarted" to loadStartedCount,
+                "loadCompleted" to loadCompletedCount,
+                "loadCanceled" to loadCanceledCount,
+                "loadErrors" to loadErrorCount,
+            ),
+        )
         while (healthSnapshots.size > PLAYBACK_HEALTH_SNAPSHOT_LIMIT) healthSnapshots.removeFirst()
     }
 
@@ -645,6 +672,20 @@ internal class PlayerPlaybackAnalyticsDiagnostics {
             )
         )
         while (events.size > PLAYBACK_ANALYTICS_EVENT_LIMIT) events.removeFirst()
+        ExperimentalDiagnostics.event(
+            "playback",
+            "exo_event",
+            mapOf(
+                "eventName" to name,
+                "host" to traceHost,
+                "engine" to traceEngine,
+                "elapsedMs" to (now - sessionStartedAtElapsedMs).coerceAtLeast(0L),
+                "state" to playbackStateName,
+                "positionMs" to position,
+                "bufferedPositionMs" to bufferedPosition,
+                "details" to details.toTraceDetails(),
+            ),
+        )
     }
 
     private fun buildRawEventLine(

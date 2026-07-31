@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.AttributeSet
 import android.util.Log
 import android.view.SurfaceHolder
+import com.sluggyard.tv.data.local.AudioOutputChannels
 import com.sluggyard.tv.data.local.MpvHardwareDecodeMode
 import com.sluggyard.tv.data.local.SubtitleStyleSettings
 import `is`.xyz.mpv.BaseMPVView
@@ -28,6 +29,7 @@ class MpvPlayerSurfaceView @JvmOverloads constructor(
 ) : BaseMPVView(context, attrs) {
 
     @Volatile private var initialized = false
+    private var mpvSurfaceAttached = false
     private var hasQueuedInitialMedia = false
     private var lastMediaRequestKey: String? = null
     private var pendingInitialMediaUrl: String? = null
@@ -35,6 +37,7 @@ class MpvPlayerSurfaceView @JvmOverloads constructor(
     private var preferredSubtitleLanguages: List<String> = emptyList()
     private var preferAssSubtitles: Boolean = false
     private var subtitleSelectionRetryCount = 0
+    private var cachePausePropertySupported: Boolean? = null
 
     private val subtitleSelectionRunnable = object : Runnable {
         override fun run() {
@@ -65,6 +68,7 @@ class MpvPlayerSurfaceView @JvmOverloads constructor(
     fun ensureInitialized() {
         if (initialized) return
         Utils.copyAssets(context)
+        cachePausePropertySupported = null
         initialize(configDir = context.filesDir.path, cacheDir = context.cacheDir.path)
         initialized = true
     }
@@ -80,34 +84,17 @@ class MpvPlayerSurfaceView @JvmOverloads constructor(
             ?.let { String.format(Locale.US, "start=%.3f", it / 1000.0) }
 
         when {
-            startOption != null && holder.surface?.isValid == true -> {
-                ensureSurfaceAttachedIfAlreadyAvailable()
-                mpv.command("loadfile", url, "replace", startOption)
-                hasQueuedInitialMedia = true
-                pendingInitialMediaUrl = null
-                pendingInitialStartOption = null
-            }
-            startOption != null -> {
+            else -> {
+                // Keep media ownership in this subclass. BaseMPVView.playFile() stores a private
+                // path, while this view also has a resume-aware pending request; mixing the two
+                // queues can reach an attached, idle MPV without ever issuing loadfile.
                 pendingInitialMediaUrl = url
                 pendingInitialStartOption = startOption
                 hasQueuedInitialMedia = true
-            }
-            hasQueuedInitialMedia -> {
-                pendingInitialMediaUrl = null
-                pendingInitialStartOption = null
                 if (holder.surface?.isValid == true) {
                     ensureSurfaceAttachedIfAlreadyAvailable()
-                    mpv.command("loadfile", url, "replace")
-                } else {
-                    playFile(url)
+                    issuePendingMediaLoadIfAttached()
                 }
-            }
-            else -> {
-                pendingInitialMediaUrl = null
-                pendingInitialStartOption = null
-                playFile(url)
-                ensureSurfaceAttachedIfAlreadyAvailable()
-                hasQueuedInitialMedia = true
             }
         }
         lastMediaRequestKey = requestKey
@@ -117,25 +104,24 @@ class MpvPlayerSurfaceView @JvmOverloads constructor(
 
     override fun surfaceCreated(holder: SurfaceHolder) {
         super.surfaceCreated(holder)
-        val url = pendingInitialMediaUrl ?: return
-        val startOption = pendingInitialStartOption
-        pendingInitialMediaUrl = null
-        pendingInitialStartOption = null
-        if (startOption != null) mpv.command("loadfile", url, "replace", startOption)
-        else mpv.command("loadfile", url, "replace")
+        mpvSurfaceAttached = true
+        issuePendingMediaLoadIfAttached()
+    }
+
+    override fun surfaceDestroyed(holder: SurfaceHolder) {
+        mpvSurfaceAttached = false
+        super.surfaceDestroyed(holder)
     }
 
     fun setMediaUsingLoadfile(url: String, headers: Map<String, String>) {
         ensureInitialized()
         val requestKey = buildMediaRequestKey(url, headers)
         applyHeaders(headers)
-        pendingInitialMediaUrl = null
+        pendingInitialMediaUrl = url
         pendingInitialStartOption = null
         if (holder.surface?.isValid == true) {
             ensureSurfaceAttachedIfAlreadyAvailable()
-            mpv.command("loadfile", url, "replace")
-        } else {
-            playFile(url)
+            issuePendingMediaLoadIfAttached()
         }
         hasQueuedInitialMedia = true
         lastMediaRequestKey = requestKey
@@ -148,11 +134,29 @@ class MpvPlayerSurfaceView @JvmOverloads constructor(
         val currentHolder = holder
         val currentSurface = currentHolder.surface ?: return
         if (!currentSurface.isValid) return
+        if (mpvSurfaceAttached) return
         // Some fallback transitions initialize mpv after the Surface is already
         // alive; in that path the SurfaceHolder callback may not fire again, so
         // force attach.
         runCatching { surfaceCreated(currentHolder) }
             .onFailure { Log.w(TAG, "Failed to force MPV surface attach: ${it.message}") }
+    }
+
+    private fun issuePendingMediaLoadIfAttached() {
+        if (!initialized || !mpvSurfaceAttached) return
+        val url = pendingInitialMediaUrl ?: return
+        val startOption = pendingInitialStartOption
+        pendingInitialMediaUrl = null
+        pendingInitialStartOption = null
+        runCatching {
+            // mpv 0.38 added the playlist index as the third argument. Per-file options now
+            // occupy the fourth argument, so resume loads must pass -1 before start=seconds.
+            if (startOption != null) mpv.command("loadfile", url, "replace", "-1", startOption)
+            else mpv.command("loadfile", url, "replace")
+            Log.d(TAG, "Issued loadfile after surface attach start=${startOption != null}")
+        }.onFailure { failure ->
+            Log.w(TAG, "Failed to issue loadfile: ${failure.message}")
+        }
     }
 
     private fun applyDefaultTrackSelectionForNewLoad() {
@@ -174,12 +178,20 @@ class MpvPlayerSurfaceView @JvmOverloads constructor(
     }
 
     fun isPausedForCacheNow(): Boolean {
-        // `paused-for-cache` is not exposed by the bundled mpv 0.41 Android
-        // build. Polling it from the playback ticker only creates failing JNI
-        // calls during startup and always evaluated to false anyway. Normal
-        // `pause` plus `core-idle` state still distinguish a user pause from a
-        // not-yet-loaded file on this build.
-        return false
+        if (!initialized || cachePausePropertySupported == false) return false
+        return runCatching { mpv.getPropertyBoolean("paused-for-cache") }
+            .fold(
+                onSuccess = { value ->
+                    cachePausePropertySupported = value != null
+                    value == true
+                },
+                onFailure = {
+                    // Older libmpv Android builds may omit this property. Probe once,
+                    // then keep the normal pause/core-idle fallback without log spam.
+                    cachePausePropertySupported = false
+                    false
+                },
+            )
     }
 
     fun isCoreIdleNow(): Boolean {
@@ -233,6 +245,26 @@ class MpvPlayerSurfaceView @JvmOverloads constructor(
             // Re-run automatic audio selection with the latest preferences.
             mpv.setPropertyString("aid", "auto")
         }.onFailure { Log.w(TAG, "Failed to set audio language preference: ${it.message}") }
+    }
+
+    fun applyAudioOutputSettings(
+        downmixEnabled: Boolean,
+        outputChannels: AudioOutputChannels,
+        maintainOriginalMix: Boolean,
+    ) {
+        if (!initialized) return
+        runCatching {
+            mpv.setPropertyString(
+                "audio-channels",
+                if (downmixEnabled) outputChannels.ffmpegLayoutName else "auto-safe",
+            )
+            mpv.setPropertyBoolean(
+                "audio-normalize-downmix",
+                downmixEnabled && !maintainOriginalMix,
+            )
+        }.onFailure {
+            Log.w(TAG, "Failed to apply mpv audio output settings: ${it.message}")
+        }
     }
 
     fun applyHardwareDecodeMode(mode: MpvHardwareDecodeMode) {
@@ -380,7 +412,7 @@ class MpvPlayerSurfaceView @JvmOverloads constructor(
         val languages = listOfNotNull(
             preferred.takeIf { it.isNotBlank() && !it.equals("none", ignoreCase = true) },
             secondary?.takeIf { it.isNotBlank() && !it.equals("none", ignoreCase = true) }
-        )
+        ).ifEmpty { if (preferAss) listOf("en") else emptyList() }
         if (languages.isEmpty()) {
             preferredSubtitleLanguages = emptyList()
             removeCallbacks(subtitleSelectionRunnable)
@@ -419,7 +451,7 @@ class MpvPlayerSurfaceView @JvmOverloads constructor(
             return "ass" in haystack || "ssa" in haystack
         }
         fun languageScore(track: MpvTrack): Int {
-            val language = track.language ?: return 0
+            val language = track.language ?: track.name
             return preferredSubtitleLanguages.indexOfFirst { preferred ->
                 PlayerSubtitleUtils.matchesLanguageCode(language, preferred)
             }.let { if (it < 0) 100 else it }
@@ -439,8 +471,8 @@ class MpvPlayerSurfaceView @JvmOverloads constructor(
             val haystack = listOfNotNull(selected.codec, selected.name).joinToString(" ").lowercase(Locale.US)
             val isAss = "ass" in haystack || "ssa" in haystack
             if (!isAss) return false
-            val language = selected.language
-            if (language.isNullOrBlank()) return true
+            val language = selected.language ?: selected.name
+            if (language.isBlank()) return false
             return preferredSubtitleLanguages.any { preferred ->
                 PlayerSubtitleUtils.matchesLanguageCode(language, preferred)
             }
@@ -568,6 +600,7 @@ class MpvPlayerSurfaceView @JvmOverloads constructor(
         lastMediaRequestKey = null
         pendingInitialMediaUrl = null
         pendingInitialStartOption = null
+        mpvSurfaceAttached = false
     }
 
     override fun initOptions() {

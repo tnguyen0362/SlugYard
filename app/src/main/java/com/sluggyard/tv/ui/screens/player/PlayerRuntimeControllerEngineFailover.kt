@@ -773,12 +773,13 @@ internal fun PlayerRuntimeController.buildRememberedInternalSubtitleSelectionFor
         languageIndexHint = uiTrack?.let { track ->
             subtitleLanguageOrdinalHintForEngineSwitch(state.subtitleTracks, track)
         },
-        isForcedHint = uiTrack?.isForced ?: isForced
+        isForcedHint = uiTrack?.isForced ?: isForced,
+        isSignsAndSongsHint = uiTrack?.isSignsAndSongs
     )
     logSwitchTrace(
         stage = "capture-subtitle-hints-build",
         message = "inputId=$trackId inputLang=$language inputName=$name inputForced=$isForced " +
-            "uiTrack=${uiTrack?.let { "${it.index}/${it.trackId}/${it.language}/${it.name}/forced=${it.isForced}" } ?: "none"} " +
+            "uiTrack=${uiTrack?.let { "${it.index}/${it.trackId}/${it.language}/${it.name}/forced=${it.isForced}/signs=${it.isSignsAndSongs}" } ?: "none"} " +
             "result=${describeRememberedTrackForLog(selection)} allowUiFallback=$allowUiStateFallbackForHints"
     )
     return selection

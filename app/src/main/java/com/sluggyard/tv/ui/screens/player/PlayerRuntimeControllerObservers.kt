@@ -404,6 +404,7 @@ private fun PlayerRuntimeController.reconcilePlayerSettings(settings: PlayerSett
 
     reconcileMpvHardwareDecodeMode(settings)
     reconcilePreferredAudioLanguages(settings)
+    reconcileMpvAudioOutputSettings(settings)
 
     // Subtitle preferences: re-run auto-select when language/forced changed.
     val subStyle = settings.subtitleStyle
@@ -473,7 +474,9 @@ private fun PlayerRuntimeController.pushSettingsToUiState(
             centerMixLevelDb = resolvedCenterMixDb,
             isAudioAmplificationAvailable = settings.audioAmplificationDb != 0 || resolvedAudioAmpDb != 0,
             isCenterMixAvailable = settings.centerMixLevelDb != 0 || resolvedCenterMixDb != 0,
-            tunnelingEnabled = settings.tunnelingEnabled,
+            // MPV has no ExoPlayer tunneling path; expose the effective value,
+            // not the persisted preference, to controls and diagnostics.
+            tunnelingEnabled = settings.tunnelingEnabled && resolvedEngine == InternalPlayerEngine.EXOPLAYER,
             internalPlayerEngine = resolvedEngine,
             useLibass = settings.useLibass,
             libassRenderType = settings.libassRenderType,
@@ -484,6 +487,16 @@ private fun PlayerRuntimeController.pushSettingsToUiState(
             streamAutoPlayPreferBingeGroupForNextEpisode = settings.streamAutoPlayPreferBingeGroupForNextEpisode
         )
     }
+}
+
+/** Applies persisted channel-layout/downmix settings to the active MPV backend. */
+private fun PlayerRuntimeController.reconcileMpvAudioOutputSettings(settings: PlayerSettings) {
+    if (!isUsingMpvEngine()) return
+    mpvView?.applyAudioOutputSettings(
+        downmixEnabled = settings.downmixEnabled,
+        outputChannels = settings.audioOutputChannels,
+        maintainOriginalMix = settings.maintainOriginalAudioOnDownmix,
+    )
 }
 
 /** Registers/unregisters the audio route callback when the per-device setting changes. */

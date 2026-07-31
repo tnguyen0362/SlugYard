@@ -69,6 +69,7 @@ internal fun groupRewritePlaybackCheckpoints(
         )
     }
     .sortedByDescending(RewritePlaybackCheckpoint::updatedAtEpochMs)
+
 interface RewritePlaybackProgressRepository {
     val checkpoints: Flow<List<RewritePlaybackCheckpoint>>
     suspend fun save(checkpoint: RewritePlaybackCheckpoint)
@@ -89,6 +90,7 @@ class RewritePlaybackProgressStore(
             .orEmpty()
             .asSequence()
             .filter(RewritePlaybackCheckpoint::isResumable)
+            .distinctBy { rewriteProgressKey(it.contentId, it.season, it.episode) }
             .sortedByDescending(RewritePlaybackCheckpoint::updatedAtEpochMs)
             .toList()
     }

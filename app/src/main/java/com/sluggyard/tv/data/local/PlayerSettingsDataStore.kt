@@ -12,6 +12,7 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import com.sluggyard.tv.core.player.LastPlaybackDiagnostics
+import com.sluggyard.tv.core.logging.ExperimentalDiagnostics
 import com.sluggyard.tv.core.profile.ProfileManager
 import com.sluggyard.tv.ui.screens.player.ExoPlayerPerformanceHelper
 import com.sluggyard.tv.ui.util.languageCodeToName
@@ -23,6 +24,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
@@ -575,7 +577,9 @@ class PlayerSettingsDataStore @Inject constructor(
     private val targetBufferSizeMbKey = intPreferencesKey("target_buffer_size_mb")
     private val backBufferDurationMsKey = intPreferencesKey("back_buffer_duration_ms")
     private val retainBackBufferFromKeyframeKey = booleanPreferencesKey("retain_back_buffer_from_keyframe")
-    private val exoPerformanceModeEnabledKey = booleanPreferencesKey("nuvio_performance_mode_enabled")
+    private val exoPerformanceModeEnabledKey = booleanPreferencesKey("performance_mode_enabled")
+    // Read-only compatibility alias for profiles created before the SlugYard rename.
+    private val legacyPerformanceModeEnabledKey = booleanPreferencesKey("nuvio_performance_mode_enabled")
 
     // Migration marker keys
     private val migrationLoadControlDefaultsAlignedDoneKey = booleanPreferencesKey("migration_load_control_defaults_aligned_done")
@@ -907,7 +911,7 @@ class PlayerSettingsDataStore @Inject constructor(
             enableBufferLogs = prefs[enableBufferLogsKey] ?: false,
             resizeMode = (prefs[resizeModeKey] ?: 0).coerceIn(0, 4),
             enableHttp2 = prefs[enableHttp2Key] ?: PlayerSettings.DEFAULT_ENABLE_HTTP2,
-            exoPerformanceModeEnabled = (prefs[exoPerformanceModeEnabledKey] ?: PlayerSettings.DEFAULT_EXO_PERFORMANCE_MODE_ENABLED) &&
+            exoPerformanceModeEnabled = performanceModeEnabled(prefs) &&
                 android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O,
             subtitleStyle = SubtitleStyleSettings(
                 preferredLanguage = normalizeSubtitlePreferredLanguageForRead(
@@ -939,6 +943,94 @@ class PlayerSettingsDataStore @Inject constructor(
                 backBufferDurationMs = prefs[backBufferDurationMsKey] ?: BufferSettings.DEFAULT_BACK_BUFFER_DURATION_MS,
                 retainBackBufferFromKeyframe = prefs[retainBackBufferFromKeyframeKey] ?: false
             )
+        )
+    }.onEach(::recordPlayerSettingsSnapshot)
+
+    private fun recordPlayerSettingsSnapshot(settings: PlayerSettings) {
+        ExperimentalDiagnostics.event(
+            "settings",
+            "player_snapshot_core",
+            mapOf(
+                "preference" to settings.playerPreference,
+                "engine" to settings.internalPlayerEngine,
+                "autoSwitch" to settings.autoSwitchInternalPlayerOnError,
+                "libass" to settings.useLibass,
+                "libassRender" to settings.libassRenderType,
+                "mpvHwdec" to settings.mpvHardwareDecodeMode,
+                "frameRate" to settings.frameRateMatchingMode,
+                "resolutionMatching" to settings.resolutionMatchingEnabled,
+                "resizeMode" to settings.resizeMode,
+                "dvMode" to settings.dv7HandlingMode,
+                "dvLibdoviMode" to settings.dv7LibdoviModeOverride,
+                "stripHdr10Plus" to settings.stripHdr10PlusSei,
+            ),
+        )
+        ExperimentalDiagnostics.event(
+            "settings",
+            "player_snapshot_audio_subtitle",
+            mapOf(
+                "audioLanguage" to settings.preferredAudioLanguage,
+                "secondaryAudio" to settings.secondaryPreferredAudioLanguage,
+                "audioChannels" to settings.audioOutputChannels,
+                "downmix" to settings.downmixEnabled,
+                "maintainMix" to settings.maintainOriginalAudioOnDownmix,
+                "tunneling" to settings.tunnelingEnabled,
+                "passthrough" to settings.forceOpticalPassthrough,
+                "skipSilence" to settings.skipSilence,
+                "audioAmplificationDb" to settings.audioAmplificationDb,
+                "centerMixDb" to settings.centerMixLevelDb,
+                "subtitleLanguage" to settings.subtitleStyle.preferredLanguage,
+                "secondarySubtitle" to settings.subtitleStyle.secondaryPreferredLanguage,
+                "forcedSubtitles" to settings.subtitleStyle.useForcedSubtitles,
+                "preferredSubtitlesOnly" to settings.subtitleStyle.showOnlyPreferredLanguages,
+                "subtitleSize" to settings.subtitleStyle.size,
+                "subtitleOffset" to settings.subtitleStyle.verticalOffset,
+                "subtitleBold" to settings.subtitleStyle.bold,
+                "subtitleOutline" to settings.subtitleStyle.outlineEnabled,
+                "subtitleOutlineWidth" to settings.subtitleStyle.outlineWidth,
+            ),
+        )
+        ExperimentalDiagnostics.event(
+            "settings",
+            "player_snapshot_network_policy",
+            mapOf(
+                "buffering" to settings.bufferEngineEnabled,
+                "parallelNetwork" to settings.parallelNetworkEnabled,
+                "bufferBudgetManaged" to settings.bufferBudgetManaged,
+                "largeTargetBuffer" to settings.allowLargeTargetBuffer,
+                "vodCache" to settings.vodCacheEnabled,
+                "vodCacheMode" to settings.vodCacheSizeMode,
+                "vodCacheSizeMb" to settings.vodCacheSizeMb,
+                "parallelConnections" to settings.useParallelConnections,
+                "connectionCount" to settings.parallelConnectionCount,
+                "chunkSizeKb" to settings.parallelChunkSizeKb,
+                "http2" to settings.enableHttp2,
+                "addonSubtitleStartup" to settings.addonSubtitleStartupMode,
+                "bufferLogs" to settings.enableBufferLogs,
+                "exoPerformance" to settings.exoPerformanceModeEnabled,
+            ),
+        )
+        ExperimentalDiagnostics.event(
+            "settings",
+            "player_snapshot_stream_policy",
+            mapOf(
+                "autoplayMode" to settings.streamAutoPlayMode,
+                "autoplaySource" to settings.streamAutoPlaySource,
+                "selectedAddonCount" to settings.streamAutoPlaySelectedAddons.size,
+                "selectedPluginCount" to settings.streamAutoPlaySelectedPlugins.size,
+                "regexLength" to settings.streamAutoPlayRegex.length,
+                "nextEpisodeAutoplay" to settings.streamAutoPlayNextEpisodeEnabled,
+                "preferBingeGroup" to settings.streamAutoPlayPreferBingeGroupForNextEpisode,
+                "reuseBingeGroup" to settings.streamAutoPlayReuseBingeGroup,
+                "autoplayTimeoutSeconds" to settings.streamAutoPlayTimeoutSeconds,
+                "stillWatching" to settings.stillWatchingEnabled,
+                "stillWatchingThreshold" to settings.stillWatchingEpisodeThreshold,
+                "nextThresholdMode" to settings.nextEpisodeThresholdMode,
+                "nextThresholdPercent" to settings.nextEpisodeThresholdPercent,
+                "nextThresholdMinutes" to settings.nextEpisodeThresholdMinutesBeforeEnd,
+                "reuseLastLink" to settings.streamReuseLastLinkEnabled,
+                "reuseLastLinkHours" to settings.streamReuseLastLinkCacheHours,
+            ),
         )
     }
 
@@ -1113,7 +1205,7 @@ class PlayerSettingsDataStore @Inject constructor(
     }
 
     suspend fun setStreamAutoPlayMode(mode: StreamAutoPlayMode) {
-        store().edit { prefs -> prefs[streamAutoPlayModeKey] = StreamAutoPlayMode.SCORED.name }
+        store().edit { prefs -> prefs[streamAutoPlayModeKey] = mode.name }
     }
 
     suspend fun setStreamAutoPlaySource(source: StreamAutoPlaySource) {
@@ -1493,7 +1585,7 @@ class PlayerSettingsDataStore @Inject constructor(
 
     val exoPerformanceModeEnabled: Flow<Boolean> = profileManager.activeProfileId.flatMapLatest { pid ->
         factory.get(pid, FEATURE_NAME).data.map { prefs ->
-            (prefs[exoPerformanceModeEnabledKey] ?: PlayerSettings.DEFAULT_EXO_PERFORMANCE_MODE_ENABLED) &&
+            performanceModeEnabled(prefs) &&
                 android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O
         }
     }
@@ -1533,7 +1625,12 @@ class PlayerSettingsDataStore @Inject constructor(
     }
 
     private fun isNativeMemoryActive(prefs: androidx.datastore.preferences.core.Preferences): Boolean {
-        val isEnabled = prefs[exoPerformanceModeEnabledKey] ?: PlayerSettings.DEFAULT_EXO_PERFORMANCE_MODE_ENABLED
+        val isEnabled = performanceModeEnabled(prefs)
         return isEnabled && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O
     }
+
+    private fun performanceModeEnabled(prefs: androidx.datastore.preferences.core.Preferences): Boolean =
+        prefs[exoPerformanceModeEnabledKey]
+            ?: prefs[legacyPerformanceModeEnabledKey]
+            ?: PlayerSettings.DEFAULT_EXO_PERFORMANCE_MODE_ENABLED
 }

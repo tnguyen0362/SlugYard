@@ -21,7 +21,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -47,12 +49,38 @@ import androidx.compose.ui.unit.dp
 import com.sluggyard.tv.ui.design.SlugYardPalette
 import com.sluggyard.tv.ui.design.SlugYardTvMetrics
 import com.sluggyard.tv.ui.screens.player.PlayerUiState
+import com.sluggyard.tv.ui.screens.player.PlayerSubtitleUtils
 import com.sluggyard.tv.ui.screens.player.RewritePlayerTrackActions
 import com.sluggyard.tv.ui.screens.player.TrackInfo
 import com.sluggyard.tv.ui.util.languageCodeToName
 
 private const val SubtitleOffKey = "off"
 private const val SubtitleFooterKey = "footer"
+
+internal fun audioTrackUiLabel(track: TrackInfo): String {
+    val language = track.language
+        ?.takeIf { it.isNotBlank() && !it.equals("und", ignoreCase = true) }
+        ?.let(::languageCodeToName)
+        ?: "Unknown language"
+    val format = audioFormatLabel(track.codec)
+    return listOfNotNull(language, format).joinToString(" · ")
+}
+
+private fun audioFormatLabel(codec: String?): String? {
+    val normalized = codec?.trim()?.lowercase()?.takeIf { it.isNotBlank() } ?: return null
+    return when {
+        "eac3" in normalized || "ec-3" in normalized -> "E-AC-3"
+        "truehd" in normalized -> "TrueHD"
+        "ac3" in normalized || "ac-3" in normalized -> "AC-3"
+        "dts" in normalized -> "DTS"
+        "opus" in normalized -> "Opus"
+        "vorbis" in normalized -> "Vorbis"
+        "flac" in normalized -> "FLAC"
+        "aac" in normalized -> "AAC"
+        "pcm" in normalized -> "PCM"
+        else -> normalized.substringAfterLast('/').replace('-', ' ').uppercase()
+    }
+}
 
 /** Rewrite-owned presentation for audio tracks, subtitle tracks, and a compact style editor. */
 @Composable
@@ -109,7 +137,7 @@ fun RewritePlayerTrackOverlay(
             val subtitleChoices = buildList {
                 state.subtitleTracks.forEachIndexed { ordinal, track ->
                     val language = subtitleLanguageName(track.language, track.name)
-                    val format = subtitleCodecTag(track.codec, track.name)
+                    val format = subtitleCodecTag(track.codec, track.sampleMimeType, track.name)
                     add(
                         SubtitleChoice(
                             key = "embedded:$ordinal:${track.trackId.orEmpty()}:${track.index}",
@@ -157,50 +185,55 @@ fun RewritePlayerTrackOverlay(
             )
         }
         state.showSubtitleStylePanel -> RewriteTrackSheet("Subtitle style", actions.onCloseSubtitleStyle, modifier, closeFocusRequester) {
-            Text("Size", style = MaterialTheme.typography.titleSmall, color = SlugYardPalette.OnCanvas)
-            StepperRow(
-                value = "${state.subtitleStyle.size}%",
-                onDecrease = { actions.onSetSubtitleSize((state.subtitleStyle.size - 10).coerceAtLeast(50)) },
-                onIncrease = { actions.onSetSubtitleSize((state.subtitleStyle.size + 10).coerceAtMost(200)) },
-            )
-            Text("Vertical position", style = MaterialTheme.typography.titleSmall, color = SlugYardPalette.OnCanvas)
-            StepperRow(
-                value = "${state.subtitleStyle.verticalOffset}% from bottom",
-                onDecrease = { actions.onSetSubtitleVerticalOffset((state.subtitleStyle.verticalOffset - 5).coerceAtLeast(-20)) },
-                onIncrease = { actions.onSetSubtitleVerticalOffset((state.subtitleStyle.verticalOffset + 5).coerceAtMost(50)) },
-            )
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Bold", modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, color = SlugYardPalette.OnCanvas)
-                Button(
-                    onClick = { actions.onSetSubtitleBold(!state.subtitleStyle.bold) },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (state.subtitleStyle.bold) SlugYardPalette.Accent else SlugYardPalette.SurfaceElevated,
-                    ),
-                ) { Text(if (state.subtitleStyle.bold) "On" else "Off") }
-            }
-            Text("Text color", style = MaterialTheme.typography.titleSmall, color = SlugYardPalette.OnCanvas)
-            ColorSwatchRow(
-                colors = subtitleTextColorSwatches,
-                selectedArgb = state.subtitleStyle.textColor,
-                onSelect = actions.onSetSubtitleTextColor,
-            )
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Outline", modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, color = SlugYardPalette.OnCanvas)
-                Button(
-                    onClick = { actions.onSetSubtitleOutlineEnabled(!state.subtitleStyle.outlineEnabled) },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (state.subtitleStyle.outlineEnabled) SlugYardPalette.Accent else SlugYardPalette.SurfaceElevated,
-                    ),
-                ) { Text(if (state.subtitleStyle.outlineEnabled) "On" else "Off") }
-            }
-            if (state.subtitleStyle.outlineEnabled) {
-                ColorSwatchRow(
-                    colors = subtitleOutlineColorSwatches,
-                    selectedArgb = state.subtitleStyle.outlineColor,
-                    onSelect = actions.onSetSubtitleOutlineColor,
+            // Style controls can extend below the TV viewport; scroll so D-pad can reach
+            // Outline color and Reset style. Mirrors the LazyColumn.weight(1f) pattern used by
+            // the speed dialog above.
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                Text("Size", style = MaterialTheme.typography.titleSmall, color = SlugYardPalette.OnCanvas)
+                StepperRow(
+                    value = "${state.subtitleStyle.size}%",
+                    onDecrease = { actions.onSetSubtitleSize((state.subtitleStyle.size - 10).coerceAtLeast(50)) },
+                    onIncrease = { actions.onSetSubtitleSize((state.subtitleStyle.size + 10).coerceAtMost(200)) },
                 )
+                Text("Vertical position", style = MaterialTheme.typography.titleSmall, color = SlugYardPalette.OnCanvas)
+                StepperRow(
+                    value = "${state.subtitleStyle.verticalOffset}% from bottom",
+                    onDecrease = { actions.onSetSubtitleVerticalOffset((state.subtitleStyle.verticalOffset - 5).coerceAtLeast(-20)) },
+                    onIncrease = { actions.onSetSubtitleVerticalOffset((state.subtitleStyle.verticalOffset + 5).coerceAtMost(50)) },
+                )
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Bold", modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, color = SlugYardPalette.OnCanvas)
+                    Button(
+                        onClick = { actions.onSetSubtitleBold(!state.subtitleStyle.bold) },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (state.subtitleStyle.bold) SlugYardPalette.Accent else SlugYardPalette.SurfaceElevated,
+                        ),
+                    ) { Text(if (state.subtitleStyle.bold) "On" else "Off") }
+                }
+                Text("Text color", style = MaterialTheme.typography.titleSmall, color = SlugYardPalette.OnCanvas)
+                ColorSwatchRow(
+                    colors = subtitleTextColorSwatches,
+                    selectedArgb = state.subtitleStyle.textColor,
+                    onSelect = actions.onSetSubtitleTextColor,
+                )
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Outline", modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, color = SlugYardPalette.OnCanvas)
+                    Button(
+                        onClick = { actions.onSetSubtitleOutlineEnabled(!state.subtitleStyle.outlineEnabled) },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (state.subtitleStyle.outlineEnabled) SlugYardPalette.Accent else SlugYardPalette.SurfaceElevated,
+                        ),
+                    ) { Text(if (state.subtitleStyle.outlineEnabled) "On" else "Off") }
+                }
+                if (state.subtitleStyle.outlineEnabled) {
+                    ColorSwatchRow(
+                        colors = subtitleOutlineColorSwatches,
+                        selectedArgb = state.subtitleStyle.outlineColor,
+                        onSelect = actions.onSetSubtitleOutlineColor,
+                    )
+                }
+                OutlinedButton(onClick = actions.onResetSubtitleStyle) { Text("Reset style") }
             }
-            OutlinedButton(onClick = actions.onResetSubtitleStyle) { Text("Reset style") }
         }
         state.showSpeedDialog -> RewriteTrackSheet("Playback speed", actions.onDismiss, modifier, closeFocusRequester) {
             val speeds = listOf(.5f, .75f, 1f, 1.25f, 1.5f, 2f)
@@ -298,8 +331,8 @@ private fun ColumnScope.TrackList(
     ) {
         itemsIndexed(tracks, key = { _, track -> track.index }) { index, track ->
             TrackRow(
-                title = track.name,
-                detail = track.language,
+                title = audioTrackUiLabel(track),
+                detail = track.channelCount?.takeIf { it > 0 }?.let { "$it channels" },
                 selected = track.index == selected || track.isSelected,
                 onClick = { onSelected(track.index) },
                 focusRequester = listFocusRequester.takeIf { index == selectedIndex },
@@ -454,38 +487,18 @@ private fun subtitleLanguageName(language: String?, fallback: String): String {
     }
 }
 
-private fun subtitleCodecTag(codec: String?, name: String?): String? {
-    val haystack = listOfNotNull(codec, name).joinToString(" ").lowercase()
-    return when {
-        "pgs" in haystack || "sup" in haystack || "hdmv" in haystack -> "PGS"
-        "ass" in haystack || "ssa" in haystack -> "ASS"
-        "srt" in haystack || "subrip" in haystack -> "SRT"
-        "vtt" in haystack || "webvtt" in haystack -> "VTT"
-        "ttml" in haystack -> "TTML"
-        "dvb" in haystack -> "DVB"
-        codec.isNullOrBlank() -> null
-        else -> codec.substringAfterLast('/').uppercase().take(8)
-    }
-}
+private fun subtitleCodecTag(codec: String?, sampleMimeType: String?, name: String): String =
+    PlayerSubtitleUtils.classifySubtitleFormat(
+        codecLabel = codec,
+        sampleMimeType = sampleMimeType,
+        trackTitle = name,
+    ) ?: "Text"
 
-private fun subtitleFormatTag(format: String?, url: String): String? {
-    val extension = format
-        ?.trim()
-        ?.substringAfterLast('.')
-        ?.takeIf(String::isNotBlank)
-        ?: url.substringBefore('?').substringBefore('#').substringAfterLast('.', "")
-            .ifBlank { url.substringAfter("format=", "").substringBefore('&') }
-    return when (extension.lowercase()) {
-        "srt" -> "SRT"
-        "vtt", "webvtt" -> "VTT"
-        "ass", "ssa" -> "ASS"
-        "sub" -> "SUB"
-        "ttml" -> "TTML"
-        "pgs", "sup" -> "PGS"
-        "idx" -> "IDX"
-        else -> null
-    }
-}
+private fun subtitleFormatTag(format: String?, url: String): String =
+    PlayerSubtitleUtils.classifySubtitleFormat(
+        url = url,
+        declaredFormat = format,
+    ) ?: "Text"
 
 @Composable
 private fun TrackRow(

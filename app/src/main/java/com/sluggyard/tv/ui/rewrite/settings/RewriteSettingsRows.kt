@@ -20,6 +20,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -27,6 +28,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.focusProperties
+import androidx.compose.foundation.focusable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -36,6 +38,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.sluggyard.tv.core.streamresolution.DebridService
 import com.sluggyard.tv.ui.design.SlugYardPalette
+import com.sluggyard.tv.core.logging.ExperimentalDiagnostics
 
 @Composable
 internal fun RewriteSettingsGroup(title: String, content: @Composable () -> Unit) {
@@ -55,6 +58,13 @@ private fun RewriteSettingsRowShell(
     modifier: Modifier = Modifier,
     content: @Composable RowScope.() -> Unit,
 ) {
+    LaunchedEffect(focused, contentDescription) {
+        ExperimentalDiagnostics.event(
+            "settings",
+            "focus_changed",
+            mapOf("control" to contentDescription, "focused" to focused),
+        )
+    }
     Column(modifier = modifier.fillMaxWidth()) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -71,8 +81,22 @@ private fun RewriteSettingsRowShell(
                 )
                 .then(
                     if (onClick != null) {
-                        Modifier.clickable(interactionSource = interaction, indication = null, onClick = onClick)
-                    } else Modifier
+                        Modifier.clickable(
+                            interactionSource = interaction,
+                            indication = null,
+                            onClick = {
+                                ExperimentalDiagnostics.event(
+                                    "settings",
+                                    "button_clicked",
+                                    mapOf("control" to contentDescription),
+                                )
+                                onClick()
+                            },
+                        )
+                    } else {
+                        // Read-only rows still need to receive D-pad focus so users can navigate to them.
+                        Modifier.focusable(interactionSource = interaction)
+                    }
                 )
                 .then(
                     contentDescription?.let { description ->
@@ -104,8 +128,12 @@ internal fun RewriteToggleRow(
 ) {
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
+    fun applyToggle(value: Boolean) {
+        ExperimentalDiagnostics.event("settings", "toggle_changed", mapOf("setting" to title, "value" to value))
+        onCheckedChange(value)
+    }
     RewriteSettingsRowShell(
-        onClick = { onCheckedChange(!checked) },
+        onClick = { applyToggle(!checked) },
         focused = focused,
         interaction = interaction,
         contentDescription = "$title. $description. ${if (checked) "On" else "Off"}.",
@@ -123,7 +151,7 @@ internal fun RewriteToggleRow(
         Spacer(Modifier.width(16.dp))
         Switch(
             checked = checked,
-            onCheckedChange = onCheckedChange,
+            onCheckedChange = ::applyToggle,
             modifier = Modifier.focusProperties { canFocus = false },
         )
     }
@@ -132,9 +160,10 @@ internal fun RewriteToggleRow(
 @Composable
 internal fun RewriteValueRow(title: String, value: String) {
     val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
     RewriteSettingsRowShell(
         onClick = null,
-        focused = false,
+        focused = focused,
         interaction = interaction,
         contentDescription = "$title: $value",
     ) {
@@ -208,10 +237,14 @@ internal fun RewriteCycleRow(
             selected = value,
             valueLabel = valueLabel,
             onValueSelected = {
+                ExperimentalDiagnostics.event("settings", "value_selected", mapOf("setting" to title, "value" to it))
                 onValueChanged(it)
                 showPicker = false
             },
-            onDismiss = { showPicker = false },
+            onDismiss = {
+                ExperimentalDiagnostics.event("settings", "value_picker_dismissed", mapOf("setting" to title))
+                showPicker = false
+            },
         )
     }
 }
@@ -225,6 +258,6 @@ internal fun addonLabel(url: String): String =
 internal val DebridService.label: String
     get() = when (this) {
         DebridService.REAL_DEBRID -> "Real-Debrid"
-        DebridService.TORBOX -> "Torbox"
+        DebridService.TORBOX -> "TorBox"
         DebridService.PREMIUMIZE -> "Premiumize"
     }

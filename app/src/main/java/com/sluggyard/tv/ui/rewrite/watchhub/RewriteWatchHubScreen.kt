@@ -80,7 +80,7 @@ fun RewriteWatchHubScreen(
                     .build(),
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().background(SlugYardPalette.SurfaceElevated),
             )
         }
         Box(
@@ -148,7 +148,7 @@ fun RewriteWatchHubScreen(
                             .weight(1f, fill = false)
                             .fillMaxWidth(),
                     ) {
-                        itemsIndexed(platforms) { _, platform ->
+                        itemsIndexed(platforms, key = { _, platform -> platform.label }) { _, platform ->
                             WatchHubPlatformCard(platform)
                         }
                     }

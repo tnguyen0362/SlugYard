@@ -1,5 +1,6 @@
 package com.sluggyard.tv.ui.rewrite.data
 
+import android.util.Log
 import com.sluggyard.tv.core.addonprotocol.AddonManifestPolicy
 import com.sluggyard.tv.core.addonprotocol.AddonTransportResult
 import com.sluggyard.tv.core.addonprotocol.ManagedAddon
@@ -11,11 +12,15 @@ import com.sluggyard.tv.core.aggregation.boundedAddonFanout
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.net.URI
 
 data class CommunityProvisioningReport(
     val installedCount: Int,
     val unavailableCount: Int,
+    val unavailableReasons: List<String> = emptyList(),
 )
+
+private const val COMMUNITY_PROVISION_TAG = "RewriteAddonProvision"
 
 /**
  * First-run backend provisioning for the single SlugYard Community integration.
@@ -50,15 +55,20 @@ class RewriteCommunityAddonProvisioner(
         configured: RewriteConfiguredAddonUrls?,
         debridConfigured: Boolean,
     ): CommunityProvisioningReport {
-        val registryUrls = SlugYardCommunitySourcePolicy.provisionManifestUrls(debridConfigured)
+        // Never request a keyless content-source manifest just because a stale provider selection
+        // exists. Content sources are eligible only when their generated URLs are available.
+        val hasConfiguredContentSources = debridConfigured && configured != null
+        val registryUrls = SlugYardCommunitySourcePolicy.provisionManifestUrls(hasConfiguredContentSources)
         val requests = registryUrls.map { registryUrl ->
             val requestUrl = when {
                 registryUrl.contains("torrentio", ignoreCase = true) -> configured?.torrentioManifestUrl
                 registryUrl.contains("mediafusion", ignoreCase = true) -> configured?.mediaFusionManifestUrl
+                registryUrl.contains("comet", ignoreCase = true) -> configured?.cometManifestUrl
                 else -> null
             } ?: registryUrl
             ManifestRequest(registryUrl, requestUrl)
         }
+        val unavailableReasons = mutableListOf<String>()
         val curated = buildList {
             boundedAddonFanout(
                 tasks = requests.mapIndexed { index, request ->
@@ -66,21 +76,62 @@ class RewriteCommunityAddonProvisioner(
                         when (val response = gateway.fetchManifest(request.requestUrl)) {
                             is AddonTransportResult.Success -> when (val validation = AddonManifestPolicy.validate(request.requestUrl, response.value)) {
                                 is com.sluggyard.tv.core.addonprotocol.ManifestValidation.Accepted ->
-                                    ManagedAddon(
-                                        manifestUrl = request.registryUrl,
-                                        configuredManifestUrl = request.requestUrl.takeUnless { it == request.registryUrl },
-                                        manifest = validation.manifest,
+                                    ProvisionedAddon(
+                                        registryUrl = request.registryUrl,
+                                        requestHost = request.requestHost(),
+                                        addon = ManagedAddon(
+                                            manifestUrl = request.registryUrl,
+                                            configuredManifestUrl = request.requestUrl.takeUnless { it == request.registryUrl },
+                                            manifest = validation.manifest,
+                                        ),
                                     )
-                                is com.sluggyard.tv.core.addonprotocol.ManifestValidation.Rejected -> null
+                                is com.sluggyard.tv.core.addonprotocol.ManifestValidation.Rejected ->
+                                    ProvisionedAddon(
+                                        registryUrl = request.registryUrl,
+                                        requestHost = request.requestHost(),
+                                        reason = validation.reason,
+                                    )
                             }
-                            else -> null
+                            is AddonTransportResult.HttpFailure -> ProvisionedAddon(
+                                registryUrl = request.registryUrl,
+                                requestHost = request.requestHost(),
+                                reason = "HTTP ${response.statusCode}",
+                            )
+                            is AddonTransportResult.NetworkFailure -> ProvisionedAddon(
+                                registryUrl = request.registryUrl,
+                                requestHost = request.requestHost(),
+                                reason = "network failure",
+                            )
+                            is AddonTransportResult.MalformedResponse -> ProvisionedAddon(
+                                registryUrl = request.registryUrl,
+                                requestHost = request.requestHost(),
+                                reason = "malformed manifest",
+                            )
                         }
                     }
                 },
                 maxConcurrent = requests.size.coerceAtMost(4).coerceAtLeast(1),
             ).collect { result ->
                 if (result is AddonFanoutResult.Success) {
-                    result.value?.let(::add)
+                    result.value.addon?.let(::add)
+                    result.value.reason?.let { reason ->
+                        unavailableReasons += "${result.value.registryUrl}: $reason"
+                        Log.w(
+                            COMMUNITY_PROVISION_TAG,
+                            "unavailable registry=${result.value.registryUrl} " +
+                                "requestHost=${result.value.requestHost} reason=$reason",
+                        )
+                    }
+                } else if (result is AddonFanoutResult.Failure) {
+                    val request = requests.getOrNull(result.key.toIntOrNull() ?: -1)
+                    val registryUrl = request?.registryUrl ?: "manifest"
+                    val reason = result.cause::class.simpleName ?: "provisioning failure"
+                    unavailableReasons += "$registryUrl: $reason"
+                    Log.w(
+                        COMMUNITY_PROVISION_TAG,
+                        "unavailable registry=$registryUrl " +
+                            "requestHost=${request?.requestHost() ?: "unknown"} reason=$reason",
+                    )
                 }
             }
         }
@@ -91,11 +142,24 @@ class RewriteCommunityAddonProvisioner(
         return CommunityProvisioningReport(
             installedCount = curated.size,
             unavailableCount = requests.size - curated.size,
+            unavailableReasons = unavailableReasons.toList(),
         )
     }
 
     private data class ManifestRequest(
         val registryUrl: String,
         val requestUrl: String,
+    ) {
+        fun requestHost(): String = runCatching { URI(requestUrl).host }
+            .getOrNull()
+            ?.takeIf(String::isNotBlank)
+            ?: "unknown"
+    }
+
+    private data class ProvisionedAddon(
+        val registryUrl: String,
+        val requestHost: String,
+        val addon: ManagedAddon? = null,
+        val reason: String? = null,
     )
 }

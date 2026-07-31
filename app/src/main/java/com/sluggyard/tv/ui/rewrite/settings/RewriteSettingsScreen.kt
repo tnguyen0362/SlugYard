@@ -82,6 +82,7 @@ fun RewriteSettingsScreen(
             RewriteSettingsCategory.Display -> DisplaySettings(facade, player, scope)
             RewriteSettingsCategory.Subtitles -> SubtitleSettings(facade, player, scope)
             RewriteSettingsCategory.Audio -> AudioSettings(facade, player, scope)
+            RewriteSettingsCategory.Advanced -> AdvancedSettings(player)
             RewriteSettingsCategory.About -> AboutSettings()
         }
     }

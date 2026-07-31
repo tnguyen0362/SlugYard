@@ -16,9 +16,12 @@ class RealDebridFileSelector @Inject constructor() {
         val playable = files.filter { it.isPlayableVideo() }
         if (playable.isEmpty()) return null
 
+        val targetSeason = season ?: resolve.season
+        val targetEpisode = episode ?: resolve.episode
+        val hasExplicitEpisodeTarget = season != null && episode != null
         val episodePatterns = buildDebridEpisodePatterns(
-            season = season ?: resolve.season,
-            episode = episode ?: resolve.episode
+            season = targetSeason,
+            episode = targetEpisode,
         )
         val names = resolve.specificDebridFileNames(episodePatterns)
         if (names.isNotEmpty()) {
@@ -27,9 +30,9 @@ class RealDebridFileSelector @Inject constructor() {
 
         if (episodePatterns.isNotEmpty()) {
             playable.firstOrNull { file ->
-                val fileName = file.displayName().lowercase()
-                episodePatterns.any { pattern -> fileName.contains(pattern) }
+                file.displayName().matchesDebridEpisodeFile(targetSeason, targetEpisode)
             }?.let { return it }
+            if (hasExplicitEpisodeTarget) return null
         }
 
         resolve.fileIdx?.let { fileIdx ->

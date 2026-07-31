@@ -1,7 +1,5 @@
 package com.sluggyard.tv.ui.rewrite.home
 
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -197,9 +195,14 @@ private val RewriteHomeCatalogFocusTopInset = (SlugYardTvMetrics.RootNavBarHeigh
 /** Focused Home tiles expand to a real ~16:9 layout width (pushes neighbors — no overlap). */
 private const val HomePosterLandscapeAspect = 16f / 9f
 /** Coil decode cap for landscape backdrops (sharp on TV without decoding at full focus px). */
-private const val MaxLandscapeDecodeWidthPx = 780
-private const val LandscapeFocusDwellMs = 180L
+private const val MaxLandscapeDecodeWidthPx = 1280
 private const val RowBringIntoViewDebounceMs = 120L
+
+internal fun heroDownCatalogRowIndex(rowIds: List<String>): Int {
+    val continueWatching = rowIds.indexOf("continue_watching")
+    if (continueWatching >= 0) return continueWatching
+    return rowIds.indexOfFirst { it != "continue_watching" }.let { if (it < 0) 0 else it }
+}
 
 /** Hero Play / View Details must not trigger LazyColumn bring-into-view (chops the title). */
 @OptIn(ExperimentalFoundationApi::class)
@@ -264,9 +267,13 @@ fun RewriteHomeScreen(
         }
     }
     val visibleHero = state.heroCandidates.getOrNull(heroIndex) ?: state.hero
-    /** First non–Continue Watching row — wrap target for last→Popular loops. */
+    /** First non-Continue Watching row, used for the intentional last-row wrap target. */
     val firstCatalogRowIndex = remember(state.rows.map { it.id }) {
         state.rows.indexOfFirst { it.id != "continue_watching" }.let { if (it < 0) 0 else it }
+    }
+    /** Hero Down should enter Continue Watching when that row exists, not skip to Popular. */
+    val heroDownRowIndex = remember(state.rows.map { it.id }) {
+        heroDownCatalogRowIndex(state.rows.map { it.id })
     }
     fun firstCatalogListIndex(): Int {
         var index = 0
@@ -403,12 +410,12 @@ fun RewriteHomeScreen(
                         onDetails = { onDetails(hero) },
                         contentFocusRequester = heroPlayFocusRequester,
                         headerFocusRequester = headerFocusRequester,
-                        downFocusRequester = rowFocusRequesters.getOrNull(firstCatalogRowIndex),
+                        downFocusRequester = rowFocusRequesters.getOrNull(heroDownRowIndex),
                         onPrepareFocusDown = {
-                            listState.scrollToItem(firstCatalogListIndex() + firstCatalogRowIndex)
+                            listState.scrollToItem(firstCatalogListIndex() + heroDownRowIndex)
                             delay(24)
                         },
-                        onRequestFocusDown = { scrollScope.launch { focusFirstCatalogRow() } },
+                        onRequestFocusDown = { scrollScope.launch { focusCatalogRow(heroDownRowIndex) } },
                         onHeroFocusChanged = { focused ->
                             heroActionFocused = focused
                             // Restore the full hero — never leave Play/Details pinned mid-viewport.
@@ -443,7 +450,8 @@ fun RewriteHomeScreen(
                     row = row,
                     listState = rowScrollStates.getOrPut(row.id) { LazyListState() },
                     smoothFocusMovement = smoothFocusMovement,
-                    expandOnFocus = expandOnFocus,
+                    // Continue Watching: portrait-only tiles (no landscape focus morph).
+                    expandOnFocus = expandOnFocus && row.id != "continue_watching",
                     onPosterSelected = if (row.id == "continue_watching" && onContinueWatchingSelected != null) {
                         onContinueWatchingSelected
                     } else {
@@ -926,15 +934,9 @@ internal fun RewritePosterCard(
     } else {
         cardWidth
     }
-    val animatedWidth by animateDpAsState(
-        targetValue = if (focused && expandOnFocus) focusedWidth else cardWidth,
-        animationSpec = if (smoothFocusMovement) {
-            tween(durationMillis = 110, easing = FastOutSlowInEasing)
-        } else {
-            tween(0)
-        },
-        label = "poster focus width",
-    )
+    // Focus changes are synchronous. A delayed width morph exposes the portrait bitmap in a
+    // larger frame and reads as a blurry zoom before landscape art arrives.
+    val layoutWidth = if (focused && expandOnFocus) focusedWidth else cardWidth
     LaunchedEffect(focused) {
         onFocusedChanged?.invoke(focused)
     }
@@ -1031,7 +1033,7 @@ internal fun RewritePosterCard(
                 }
             }
             .zIndex(if (focused) 1f else 0f)
-            .width(animatedWidth)
+            .width(layoutWidth)
             .semantics {
                 contentDescription = buildString {
                     append(poster.title)
@@ -1086,7 +1088,7 @@ internal fun RewritePosterCard(
     ) {
         Box(
             modifier = Modifier
-                .size(width = animatedWidth, height = cardHeight)
+                .size(width = layoutWidth, height = cardHeight)
                 .then(
                     if (focused) {
                         Modifier.border(3.dp, SlugYardPalette.FocusRing, RoundedCornerShape(SlugYardTvMetrics.CardCornerRadius))
@@ -1145,7 +1147,10 @@ internal fun RewritePosterCard(
                 AsyncImage(
                     model = posterRequest,
                     contentDescription = null,
-                    modifier = Modifier.fillMaxSize(),
+                    // Keep the portrait bitmap at its native card bounds while the container
+                    // expands. Stretching this layer to the landscape frame is the brief blurry
+                    // zoom users see before the backdrop request finishes.
+                    modifier = Modifier.size(cardWidth, cardHeight).align(Alignment.Center),
                     contentScale = ContentScale.Crop,
                     alignment = Alignment.Center,
                 )
@@ -1164,25 +1169,14 @@ internal fun RewritePosterCard(
                                 .build()
                         },
                         contentDescription = null,
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier.size(cardWidth, cardHeight).align(Alignment.Center),
                         contentScale = ContentScale.Crop,
                     )
                 }
             }
-            // Landscape only once focus has settled AND the art decoded — keep portrait visible
-            // underneath until then. The dwell gate stops a fast fling from queueing a Coil
-            // decode for every card it passes through.
-            var landscapeArmed by remember(landscapeUrl) { mutableStateOf(false) }
-            LaunchedEffect(focused, landscapeUrl) {
-                if (!focused || landscapeUrl == null) {
-                    landscapeArmed = false
-                    return@LaunchedEffect
-                }
-                delay(LandscapeFocusDwellMs)
-                landscapeArmed = true
-            }
-            if (landscapeArmed && landscapeUrl != null) {
-                var landscapeReady by remember(landscapeUrl) { mutableStateOf(false) }
+            // Request landscape art as soon as focus changes. The layout width and image layer
+            // switch immediately; Coil still loads the remote bitmap asynchronously.
+            if (focused && landscapeUrl != null) {
                 val landscapeRequest = remember(poster.id, landscapeUrl, landscapeDecode) {
                     ImageRequest.Builder(context)
                         .data(landscapeUrl)
@@ -1194,11 +1188,7 @@ internal fun RewritePosterCard(
                 AsyncImage(
                     model = landscapeRequest,
                     contentDescription = null,
-                    onSuccess = { landscapeReady = true },
-                    onError = { landscapeReady = false },
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .graphicsLayer { alpha = if (landscapeReady) 1f else 0f },
+                    modifier = Modifier.fillMaxSize(),
                     // 16:9 art in a 16:9 frame — center crop keeps the subject framed.
                     contentScale = ContentScale.Crop,
                     alignment = Alignment.Center,

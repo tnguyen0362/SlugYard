@@ -2,6 +2,7 @@ package com.sluggyard.tv.core.player
 
 import android.content.Context
 import android.util.Log
+import com.sluggyard.tv.BuildConfig
 import com.sluggyard.tv.core.network.NetworkResult
 import com.sluggyard.tv.data.local.PlayerSettingsDataStore
 import com.sluggyard.tv.data.repository.SkipIntroRepository
@@ -233,7 +234,7 @@ class ExternalPlaybackTracker @Inject constructor(
         // still foreground, so background-FGS-start restrictions don't apply.
         ExternalPlaybackKeepAliveService.start(appContext)
 
-        Log.d(TAG, "Started tracking: content=${metadata.contentId}, video=${metadata.videoId}")
+        if (BuildConfig.DEBUG) Log.d(TAG, "Started tracking: content=${metadata.contentId}, video=${metadata.videoId}")
 
         // On Zidoo devices, start REST API polling.
         if (ZidooPlayerMonitor.isZidooDevice()) {
@@ -400,17 +401,17 @@ class ExternalPlaybackTracker @Inject constructor(
         // fall back to the persisted copy so we still save progress and auto-advance.
         val metadata = pendingMetadata ?: loadPersistedMetadata()
         if (metadata == null) {
-            Log.d(TAG, "onActivityResult but no pending metadata (in-memory or persisted)")
+            if (BuildConfig.DEBUG) Log.d(TAG, "onActivityResult but no pending metadata (in-memory or persisted)")
             clearPersistedMetadata()
             stopTracking()
             return
         }
         if (pendingMetadata == null) {
-            Log.d(TAG, "onActivityResult recovered metadata from disk (process was recreated)")
+            if (BuildConfig.DEBUG) Log.d(TAG, "onActivityResult recovered metadata from disk (process was recreated)")
         }
 
         if (result == null) {
-            Log.d(TAG, "External player returned no progress data")
+            if (BuildConfig.DEBUG) Log.d(TAG, "External player returned no progress data")
             _autoNextOverlay.value = null
             clearPersistedMetadata()
             // On Zidoo, the monitor job handles progress - don't stop it prematurely.
@@ -422,7 +423,7 @@ class ExternalPlaybackTracker @Inject constructor(
         // in-memory metadata). Kept for a completion; dismissed below otherwise.
         raiseAutoNextOverlay(metadata)
 
-        Log.d(
+        if (BuildConfig.DEBUG) Log.d(
             TAG,
             "External player returned: pos=${result.positionMs}ms, dur=${result.durationMs}ms, " +
                 "endedByUser=${result.endedByUser}"
@@ -437,7 +438,7 @@ class ExternalPlaybackTracker @Inject constructor(
             scope.launch {
                 val fallback = resolveFallbackDurationMs(metadata)
                 val enriched = if (fallback > 0L) {
-                    Log.d(TAG, "Backfilled missing duration: ${fallback}ms")
+                    if (BuildConfig.DEBUG) Log.d(TAG, "Backfilled missing duration: ${fallback}ms")
                     result.copy(durationMs = fallback)
                 } else {
                     result
@@ -458,7 +459,7 @@ class ExternalPlaybackTracker @Inject constructor(
         // path (so Just Player's end-only completion still works).
         val duration = result.durationMs
         if (duration != null && duration in 1 until MIN_REAL_PLAYBACK_DURATION_MS) {
-            Log.d(TAG, "Ignoring ${duration}ms playback (likely a cache-sync placeholder)")
+            if (BuildConfig.DEBUG) Log.d(TAG, "Ignoring ${duration}ms playback (likely a cache-sync placeholder)")
             _autoNextOverlay.value = null
             clearPersistedMetadata()
             stopTracking()
@@ -607,7 +608,7 @@ class ExternalPlaybackTracker @Inject constructor(
             chainAborted = autoNextChainAborted
         )
         if (!attemptAdvance || episode == null) {
-            Log.d(AUTO_NEXT_TAG, "Auto-next not attempted: season=$season episode=$episode " +
+            if (BuildConfig.DEBUG) Log.d(AUTO_NEXT_TAG, "Auto-next not attempted: season=$season episode=$episode " +
                 "type=${metadata.contentType} cancelled=$autoNextCancelled chainAborted=$autoNextChainAborted")
             _autoNextOverlay.value = null
             return
@@ -630,7 +631,7 @@ class ExternalPlaybackTracker @Inject constructor(
             val autoPlayNextEnabled = playerSettingsDataStore.playerSettings.first()
                 .streamAutoPlayNextEpisodeEnabled
             if (!autoPlayNextEnabled) {
-                Log.d(AUTO_NEXT_TAG, "Auto-play next episode is OFF; skipping auto-advance")
+                if (BuildConfig.DEBUG) Log.d(AUTO_NEXT_TAG, "Auto-play next episode is OFF; skipping auto-advance")
                 dismissOverlayIfCurrent()
                 return@launch
             }
@@ -644,7 +645,7 @@ class ExternalPlaybackTracker @Inject constructor(
             }
             val meta = (result as? NetworkResult.Success)?.data
             if (meta == null) {
-                Log.d(AUTO_NEXT_TAG, "Could not load series meta for ${metadata.contentId} (timeout or error); skipping")
+                if (BuildConfig.DEBUG) Log.d(AUTO_NEXT_TAG, "Could not load series meta for ${metadata.contentId} (timeout or error); skipping")
                 dismissOverlayIfCurrent()
                 return@launch
             }
@@ -656,13 +657,13 @@ class ExternalPlaybackTracker @Inject constructor(
             )
             val nextEpisode = nextVideo?.episode
             if (nextVideo == null || nextEpisode == null) {
-                Log.d(AUTO_NEXT_TAG, "No next episode after S${season}E${episode} for ${metadata.contentId}")
+                if (BuildConfig.DEBUG) Log.d(AUTO_NEXT_TAG, "No next episode after S${season}E${episode} for ${metadata.contentId}")
                 dismissOverlayIfCurrent()
                 return@launch
             }
             val nextSeason = nextVideo.season
 
-            Log.d(
+            if (BuildConfig.DEBUG) Log.d(
                 AUTO_NEXT_TAG,
                 "Next episode resolved: S${nextSeason}E${nextEpisode} videoId=${nextVideo.id} " +
                     "(from S${season}E${episode}, content=${metadata.contentId})"
@@ -689,7 +690,7 @@ class ExternalPlaybackTracker @Inject constructor(
             // Safety net: normally cleared when the next player launches, but in Manual mode the
             // Stream screen waits for the user, so don't leave the loader stuck.
             delay(AUTO_NEXT_OVERLAY_TIMEOUT_MS)
-            Log.d(AUTO_NEXT_TAG, "safety-net timeout -> clearing loader")
+            if (BuildConfig.DEBUG) Log.d(AUTO_NEXT_TAG, "safety-net timeout -> clearing loader")
             // Clear unconditionally: the identity-guarded variant left a stale overlay stuck when a
             // re-raise had replaced the object this job captured.
             _autoNextOverlay.value = null
@@ -707,7 +708,7 @@ class ExternalPlaybackTracker @Inject constructor(
      *  of advancing anyway. Sets the durable chain abort too, so one Back press stops a runaway
      *  auto-next loop (it won't re-fire until a fresh/manual launch). Progress stays saved. */
     fun dismissAutoNextOverlay() {
-        Log.d(AUTO_NEXT_TAG, "dismissAutoNextOverlay (user back) overlayWasShowing=${_autoNextOverlay.value != null}")
+        if (BuildConfig.DEBUG) Log.d(AUTO_NEXT_TAG, "dismissAutoNextOverlay (user back) overlayWasShowing=${_autoNextOverlay.value != null}")
         autoNextCancelled = true
         autoNextChainAborted = true
         autoNextJob?.cancel()
@@ -719,7 +720,7 @@ class ExternalPlaybackTracker @Inject constructor(
      *  routine return to the screen never suppresses the next auto-advance. Suppresses re-raising
      *  so a later onStart can't bring back a loader that no longer has a job behind it. */
     fun releaseAutoNextOverlay() {
-        Log.d(AUTO_NEXT_TAG, "releaseAutoNextOverlay (settle) overlayWasShowing=${_autoNextOverlay.value != null}")
+        if (BuildConfig.DEBUG) Log.d(AUTO_NEXT_TAG, "releaseAutoNextOverlay (settle) overlayWasShowing=${_autoNextOverlay.value != null}")
         autoNextOverlaySuppressed = true
         autoNextJob?.cancel()
         autoNextJob = null
@@ -765,7 +766,7 @@ class ExternalPlaybackTracker @Inject constructor(
             logo = metadata.logo,
             title = metadata.contentName
         )
-        Log.d(AUTO_NEXT_TAG, "raised loader for ${metadata.videoId}")
+        if (BuildConfig.DEBUG) Log.d(AUTO_NEXT_TAG, "raised loader for ${metadata.videoId}")
     }
 
     // ===================== Tracking lifecycle + Zidoo =====================
@@ -777,7 +778,7 @@ class ExternalPlaybackTracker @Inject constructor(
         pendingMetadata = null
         isAutoLaunch = false
         ExternalPlaybackKeepAliveService.stop(appContext)
-        Log.d(TAG, "Stopped tracking")
+        if (BuildConfig.DEBUG) Log.d(TAG, "Stopped tracking")
     }
 
     /**
@@ -787,7 +788,7 @@ class ExternalPlaybackTracker @Inject constructor(
      */
     fun dismissOverlayOnly() {
         isAutoLaunch = false
-        Log.d(TAG, "Dismissed overlay only (Zidoo monitor still running)")
+        if (BuildConfig.DEBUG) Log.d(TAG, "Dismissed overlay only (Zidoo monitor still running)")
     }
 
     private fun startZidooMonitor(metadata: ExternalPlaybackMetadata) {
@@ -796,7 +797,7 @@ class ExternalPlaybackTracker @Inject constructor(
             val resumePosition = getResumePosition(metadata)
             val result = ZidooPlayerMonitor.awaitPlaybackEnd(resumePositionMs = resumePosition)
             if (result != null) {
-                Log.d(TAG, "Zidoo monitor: pos=${result.positionMs}ms, dur=${result.durationMs}ms")
+                if (BuildConfig.DEBUG) Log.d(TAG, "Zidoo monitor: pos=${result.positionMs}ms, dur=${result.durationMs}ms")
                 saveProgress(metadata, result.positionMs, result.durationMs)
             }
             // Don't call stopTracking here - let the ActivityResult path handle it
@@ -848,7 +849,7 @@ class ExternalPlaybackTracker @Inject constructor(
                 progressPercent = explicitPercent,
                 lastWatched = System.currentTimeMillis()
             )
-            Log.d(
+            if (BuildConfig.DEBUG) Log.d(
                 TAG,
                 "Saving progress: pos=${positionMs}ms, dur=${effectiveDuration}ms, " +
                     "content=${metadata.contentId}, video=${metadata.videoId}, " +
@@ -877,7 +878,7 @@ class ExternalPlaybackTracker @Inject constructor(
         }
         if (progressPercent <= 0f) return
         val scrobbleItem = buildScrobbleItem(metadata) ?: return
-        Log.d(TAG, "Sending Trakt scrobble: ${progressPercent}%")
+        if (BuildConfig.DEBUG) Log.d(TAG, "Sending Trakt scrobble: ${progressPercent}%")
         traktScrobbleService.scrobbleStart(scrobbleItem, progressPercent = 0f)
         traktScrobbleService.scrobbleStop(scrobbleItem, progressPercent = progressPercent)
     }

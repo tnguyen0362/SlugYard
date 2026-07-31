@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -249,7 +250,7 @@ private fun DetailsHeader(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Column(
-                modifier = Modifier.fillMaxWidth(0.48f),
+                modifier = Modifier.fillMaxWidth(0.58f),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text(
@@ -274,45 +275,48 @@ private fun DetailsHeader(
                         state.description,
                         style = MaterialTheme.typography.bodyLarge,
                         color = SlugYardPalette.OnCanvas.copy(alpha = 0.94f),
-                        maxLines = 3,
+                        maxLines = 5,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                // Vertical stacked filled actions — not an outlined pill row.
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    DetailsFilledButton(
-                        label = "Play",
-                        onClick = onPlay,
-                        primary = true,
-                        leadingIcon = true,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .focusRequester(contentFocusRequester),
-                    )
-                    DetailsFilledButton(
-                        label = if (state.inLibrary) "In My List" else "My List",
-                        onClick = { onLibraryChanged(!state.inLibrary) },
-                        primary = false,
-                        selected = state.inLibrary,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    if (onEpisodes != null) {
+                // Compact two-column actions preserve vertical room for the synopsis while
+                // keeping every target comfortably reachable with a remote.
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                         DetailsFilledButton(
-                            label = "Episodes",
-                            onClick = onEpisodes,
+                            label = "Play",
+                            onClick = onPlay,
+                            primary = true,
+                            leadingIcon = true,
+                            modifier = Modifier.weight(1f).focusRequester(contentFocusRequester),
+                        )
+                        DetailsFilledButton(
+                            label = if (state.inLibrary) "In My List" else "My List",
+                            onClick = { onLibraryChanged(!state.inLibrary) },
                             primary = false,
-                            selected = activeOverlay == RewriteDetailsOverlay.Episodes,
-                            modifier = Modifier.fillMaxWidth(),
+                            selected = state.inLibrary,
+                            modifier = Modifier.weight(1f),
                         )
                     }
-                    if (onMoreLikeThis != null) {
-                        DetailsFilledButton(
-                            label = if (moreLikeThisLoading) "More Like This…" else "More Like This",
-                            onClick = onMoreLikeThis,
-                            primary = false,
-                            selected = activeOverlay == RewriteDetailsOverlay.Related,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        if (onEpisodes != null) {
+                            DetailsFilledButton(
+                                label = "Episodes",
+                                onClick = onEpisodes,
+                                primary = false,
+                                selected = activeOverlay == RewriteDetailsOverlay.Episodes,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                        if (onMoreLikeThis != null) {
+                            DetailsFilledButton(
+                                label = if (moreLikeThisLoading) "More Like This…" else "More Like This",
+                                onClick = onMoreLikeThis,
+                                primary = false,
+                                selected = activeOverlay == RewriteDetailsOverlay.Related,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
                     }
                 }
             }
@@ -349,9 +353,9 @@ private fun DetailsFilledButton(
             containerColor = container,
             contentColor = content,
         ),
-        contentPadding = PaddingValues(horizontal = 22.dp, vertical = 12.dp),
+        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
         modifier = modifier
-            .heightIn(min = 48.dp)
+            .heightIn(min = 40.dp)
             .onFocusChanged { focused = it.isFocused }
             .then(
                 if (focused) {
@@ -362,9 +366,14 @@ private fun DetailsFilledButton(
             ),
     ) {
         if (leadingIcon) {
-            Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(22.dp))
-            Spacer(Modifier.width(8.dp))
+            Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(5.dp))
         }
-        Text(label, fontWeight = if (focused || filled) FontWeight.SemiBold else FontWeight.Medium)
+        Text(
+            label,
+            fontWeight = if (focused || filled) FontWeight.SemiBold else FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }

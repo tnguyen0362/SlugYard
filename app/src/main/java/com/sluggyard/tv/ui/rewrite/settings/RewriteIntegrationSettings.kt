@@ -118,9 +118,6 @@ internal fun IntegrationsSettings(
         traktMessage?.let { RewriteValueRow("Trakt", it) }
         if (traktAuth.isAuthenticated) RewriteActionRow("Disconnect Trakt", "Remove the Trakt token for this profile.") { scope.launch { facade.disconnectTrakt() } }
     }
-    RewriteSettingsGroup("TMDB") {
-        RewriteValueRow("Status", if (tmdb.enabled) "Enabled in Content & Discovery" else "Disabled — turn on in Content & Discovery")
-    }
     RewriteSettingsGroup("Community addons") {
         Text(
             if (debridConnected) {
@@ -300,7 +297,7 @@ private fun RewriteCredentialDialog(
             }
         },
         confirmButton = {
-            Button(onClick = onConfirm, enabled = apiKey.isNotBlank()) { Text("Continue") }
+            Button(onClick = onConfirm, enabled = apiKey.isNotBlank()) { Text("Save & Connect") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )

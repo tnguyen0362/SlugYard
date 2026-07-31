@@ -12,7 +12,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -89,15 +88,13 @@ class TorrentService @Inject constructor(
         streamUrl
     }
 
-    fun stopStream() {
+    suspend fun stopStream() {
         statsJob?.cancel()
         statsJob = null
 
         currentHash?.let { hash ->
             try {
-                runBlocking(Dispatchers.IO) {
-                    api.dropTorrent(hash)
-                }
+                api.dropTorrent(hash)
             } catch (e: Exception) {
                 Log.w(TAG, "Error dropping torrent", e)
             }
@@ -107,7 +104,7 @@ class TorrentService @Inject constructor(
     }
 
     fun shutdown() {
-        stopStream()
+        scope.launch { stopStream() }
         binary.stop()
     }
 

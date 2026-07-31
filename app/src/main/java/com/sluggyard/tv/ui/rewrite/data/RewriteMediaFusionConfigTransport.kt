@@ -77,5 +77,6 @@ class RewriteProviderAddonConfigurator(
                 // Fall back to keyless bootstrap; do not send tokens to a third-party encrypt host.
                 null
             },
+            cometManifestUrl = buildCometManifestUrl(service, apiKey),
         )
 }

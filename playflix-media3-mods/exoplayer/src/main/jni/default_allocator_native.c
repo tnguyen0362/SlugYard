@@ -1,6 +1,6 @@
 /* default_allocator_native.c
  * JNI implementation for native off-heap memory allocation.
- * Fork addition for NuvioEngineConfig performance mode.
+ * Fork addition for SlugYardEngineConfig performance mode.
  */
 #include <jni.h>
 #include <stdlib.h>

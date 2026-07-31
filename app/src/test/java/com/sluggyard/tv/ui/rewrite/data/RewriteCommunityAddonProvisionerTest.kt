@@ -22,15 +22,35 @@ class RewriteCommunityAddonProvisionerTest {
         val gateway = FakeGateway()
 
         val report = RewriteCommunityAddonProvisioner(gateway, registry).provision(
-            configured = null,
+            configured = RewriteConfiguredAddonUrls(
+                torrentioManifestUrl = "https://torrentio.strem.fun/debridoptions=nodownloadlinks%7Ctorbox=key/manifest.json",
+                mediaFusionManifestUrl = "https://mediafusion.example/configured/manifest.json",
+                cometManifestUrl = "https://comet.elfhosted.com/configured/manifest.json",
+            ),
             debridConfigured = true,
         )
 
         assertEquals(SlugYardCommunitySourcePolicy.bootstrapManifestUrls.size, gateway.requestedUrls.size)
         assertTrue(gateway.requestedUrls.none { it.contains("example.test") })
+        assertTrue(gateway.requestedUrls.contains("https://torrentio.strem.fun/debridoptions=nodownloadlinks%7Ctorbox=key/manifest.json"))
         assertEquals(SlugYardCommunitySourcePolicy.bootstrapManifestUrls.size, registry.curated.single().size)
         assertEquals(SlugYardCommunitySourcePolicy.bootstrapManifestUrls.size, report.installedCount)
         assertEquals(0, report.unavailableCount)
+    }
+
+    @Test
+    fun `stale debrid selection without generated urls skips torrent sources`() = runTest {
+        val registry = FakeRegistry()
+        val gateway = FakeGateway()
+
+        val report = RewriteCommunityAddonProvisioner(gateway, registry).provision(
+            configured = null,
+            debridConfigured = true,
+        )
+
+        assertEquals(SlugYardCommunitySourcePolicy.infrastructureManifestUrls.size, gateway.requestedUrls.size)
+        assertTrue(gateway.requestedUrls.none { it.contains("torrentio", ignoreCase = true) })
+        assertEquals(SlugYardCommunitySourcePolicy.infrastructureManifestUrls.size, report.installedCount)
     }
 
     @Test
@@ -59,13 +79,18 @@ class RewriteCommunityAddonProvisionerTest {
         val gateway = FakeGateway(failingRequestIndex = 1)
 
         val report = RewriteCommunityAddonProvisioner(gateway, registry).provision(
-            configured = null,
+            configured = RewriteConfiguredAddonUrls(
+                torrentioManifestUrl = "https://torrentio.strem.fun/debridoptions=nodownloadlinks%7Ctorbox=key/manifest.json",
+                mediaFusionManifestUrl = "https://mediafusion.example/configured/manifest.json",
+                cometManifestUrl = "https://comet.elfhosted.com/configured/manifest.json",
+            ),
             debridConfigured = true,
         )
 
         assertEquals(SlugYardCommunitySourcePolicy.bootstrapManifestUrls.size - 1, registry.curated.single().size)
         assertEquals(SlugYardCommunitySourcePolicy.bootstrapManifestUrls.size - 1, report.installedCount)
         assertEquals(1, report.unavailableCount)
+        assertTrue(report.unavailableReasons.any { "HTTP 503" in it })
     }
 
     @Test

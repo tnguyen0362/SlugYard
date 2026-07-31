@@ -248,7 +248,20 @@ data class TrackInfo(
     val channelCount: Int? = null,
     val isForced: Boolean = false,
     val isSelected: Boolean = false,
-    val sampleRate: Int? = null
+    val sampleRate: Int? = null,
+    /**
+     * True for signs-and-songs / signs & songs subtitle tracks (non-dialogue translation of
+     * on-screen text only). Distinct from [isForced]: a forced track translates the audio
+     * language when foreign speech is present, while signs-and-songs translates in-scene text
+     * for a viewer who understands the audio. Both are kept out of normal dialogue selection,
+     * but semantic restore must rank a dialogue/full track above a signs-and-songs track when
+     * both share the same language.
+     */
+    val isSignsAndSongs: Boolean = false,
+    /** Raw Media3 sample MIME type (e.g. `application/x-ssa`, `text/vtt`). Used by the
+     *  subtitle format classifier so the UI label does not collapse to "Text" when the codec
+     *  label is blank but the MIME type is known. */
+    val sampleMimeType: String? = null
 )
 
 data class NextEpisodeInfo(

@@ -57,6 +57,41 @@ class PlayerMediaSourceFactoryTest {
     }
 
     @Test
+    fun `buildPlaybackRequestHeaders applies a validated full-file range to progressive matroska`() {
+        val headers = PlayerMediaSourceFactory.buildPlaybackRequestHeaders(
+            url = "https://example.com/playback?id=42",
+            mimeType = MimeTypes.VIDEO_MATROSKA,
+            headers = mapOf("User-Agent" to "test-agent"),
+            rangeOverride = "bytes=0-4112645825"
+        )
+
+        assertEquals("bytes=0-4112645825", headers["Range"])
+        assertEquals("test-agent", headers["User-Agent"])
+    }
+
+    @Test
+    fun `buildPlaybackRequestHeaders leaves progressive matroska unchanged without validated range`() {
+        val headers = PlayerMediaSourceFactory.buildPlaybackRequestHeaders(
+            url = "https://example.com/playback?id=42",
+            mimeType = MimeTypes.VIDEO_MATROSKA,
+            headers = mapOf("User-Agent" to "test-agent")
+        )
+
+        assertNull(headers["Range"])
+    }
+
+    @Test
+    fun `buildPlaybackRequestHeaders leaves adaptive manifests unchanged`() {
+        val headers = PlayerMediaSourceFactory.buildPlaybackRequestHeaders(
+            url = "https://example.com/stream.m3u8",
+            mimeType = MimeTypes.APPLICATION_M3U8,
+            headers = mapOf("User-Agent" to "test-agent")
+        )
+
+        assertNull(headers["Range"])
+    }
+
+    @Test
     fun `inferMimeType uses filename star content disposition for octet stream responses`() {
         val mimeType = PlayerMediaSourceFactory.inferMimeType(
             url = "https://example.com/extract?id=42",

@@ -27,6 +27,19 @@ class RewriteStreamAutoPickerTest {
     }
 
     @Test
+    fun candidatesAt720pAreRemovedFromAutoPickAndDisplayRanking() {
+        val low = candidate("720", directUrl = "https://stream.test/720")
+            .copy(title = "Show 720p")
+        val preferred = candidate("1080", directUrl = "https://stream.test/1080")
+            .copy(title = "Show 1080p")
+        val context = RewriteStreamScoringEngine.Context(title = "Show", contentType = "movie")
+
+        assertEquals(preferred, selectRewriteAutoPlayCandidate(groups(low, preferred), context))
+        assertEquals(listOf(preferred), RewriteStreamScoringEngine.rankedCandidates(listOf(low, preferred), context))
+        assertNull(selectRewriteAutoPlayCandidate(groups(low), context))
+    }
+
+    @Test
     fun nonDolbyVisionDirectStreamWinsOverHigherQualityDolbyVisionStream() {
         val dolbyVision = candidate("dolby", directUrl = "https://stream.test/dv")
             .copy(title = "2160p Dolby Vision Profile 8.6")
@@ -45,11 +58,50 @@ class RewriteStreamAutoPickerTest {
     }
 
     @Test
-    fun unknownTorrentAloneIsAutoSelectedAfterCacheProbeTimeout() {
-        // AppShell remaps lingering CHECKING → UNKNOWN after the cache wait; UNKNOWN must remain
-        // eligible so a hung TorBox probe cannot permanently block Play.
+    fun unknownTorrentIsNotAutoSelected() {
+        // Uncached / probe-unknown torrents stay in Sources for manual pick only.
         val unknown = candidate("unknown", cacheState = StreamCacheState.UNKNOWN, infoHash = "unknown-hash")
-        assertEquals(unknown, selectRewriteAutoPlayCandidate(groups(unknown)))
+        assertNull(selectRewriteAutoPlayCandidate(groups(unknown)))
+    }
+
+    @Test
+    fun kDramaPrefersSoftsubsAndIgnoresDualAudio() {
+        val dualOnly = candidate("dual", cacheState = StreamCacheState.CACHED, infoHash = "dual-hash")
+            .copy(title = "Show.S01E01.1080p.WEB-DL.Dual-Audio", seeders = 80)
+        val soft = candidate("soft", cacheState = StreamCacheState.CACHED, infoHash = "soft-hash")
+            .copy(title = "Show.S01E01.1080p.WEB-DL.English.Softsubs", seeders = 20)
+        val context = RewriteStreamScoringEngine.Context(
+            title = "K Drama Show",
+            contentType = "series",
+            genres = listOf("K-Drama", "Romance"),
+            preferredSubtitleLanguage = "en",
+        )
+
+        assertEquals(
+            RewriteStreamScoringEngine.ContentKind.K_DRAMA,
+            RewriteStreamScoringEngine.contentKind(context),
+        )
+        assertEquals(soft, selectRewriteAutoPlayCandidate(groups(dualOnly, soft), context))
+    }
+
+    @Test
+    fun jDramaPrefersSoftsubsOverDualAudio() {
+        val dualOnly = candidate("dual", cacheState = StreamCacheState.CACHED, infoHash = "dual-hash")
+            .copy(title = "Show.S01E01.1080p.Dual-Audio", seeders = 90)
+        val soft = candidate("soft", cacheState = StreamCacheState.CACHED, infoHash = "soft-hash")
+            .copy(title = "Show.S01E01.1080p.Multiple Subtitle", seeders = 15)
+        val context = RewriteStreamScoringEngine.Context(
+            title = "J Drama Show",
+            contentType = "series",
+            genres = listOf("J-Drama"),
+            preferredSubtitleLanguage = "en",
+        )
+
+        assertEquals(
+            RewriteStreamScoringEngine.ContentKind.J_DRAMA,
+            RewriteStreamScoringEngine.contentKind(context),
+        )
+        assertEquals(soft, selectRewriteAutoPlayCandidate(groups(dualOnly, soft), context))
     }
 
     @Test
@@ -107,6 +159,306 @@ class RewriteStreamAutoPickerTest {
     }
 
     @Test
+    fun seriesAnimationWithoutJaLanguageStillUsesAnimeWeights() {
+        // Cinemeta often tags Akame/JJK-style titles as Animation only.
+        val raw4k = candidate("raw4k", cacheState = StreamCacheState.CACHED, infoHash = "raw-hash")
+            .copy(title = "Jujutsu.Kaisen.S01E01.2160p.BluRay.REMUX.RAW", seeders = 40)
+        val softAss = candidate("softAss", cacheState = StreamCacheState.CACHED, infoHash = "ass-hash")
+            .copy(title = "Jujutsu.Kaisen.S01E01.1080p.WEB-DL.SoftSubs.ASS", seeders = 35)
+        val context = RewriteStreamScoringEngine.Context(
+            title = "Jujutsu Kaisen",
+            contentType = "series",
+            genres = listOf("Action", "Animation"),
+            preferredSubtitleLanguage = "es",
+        )
+
+        assertEquals(softAss, selectRewriteAutoPlayCandidate(groups(raw4k, softAss), context))
+        assertTrue(
+            RewriteStreamScoringEngine.score(softAss, context) >
+                RewriteStreamScoringEngine.score(raw4k, context),
+        )
+    }
+
+    @Test
+    fun preferredLanguageBeatsOtherLanguageSoftsub() {
+        val spanish = candidate("es", cacheState = StreamCacheState.CACHED, infoHash = "es-hash")
+            .copy(title = "Show.S01E01.1080p.WEB-DL.Spanish.Softsubs", seeders = 40)
+        val english = candidate("en", cacheState = StreamCacheState.CACHED, infoHash = "en-hash")
+            .copy(title = "Show.S01E01.1080p.WEB-DL.English.Softsubs", seeders = 40)
+        val context = RewriteStreamScoringEngine.Context(
+            title = "Show",
+            contentType = "series",
+            genres = listOf("Animation"),
+            preferredSubtitleLanguage = "es",
+        )
+
+        assertEquals(spanish, selectRewriteAutoPlayCandidate(groups(english, spanish), context))
+    }
+
+    @Test
+    fun softsubAssBeatsHardsubWhenPreferredLanguageAbsentFromName() {
+        val hard = candidate("hard", cacheState = StreamCacheState.CACHED, infoHash = "hard-hash")
+            .copy(title = "Show.S01E01.1080p.BluRay.Hardsub", seeders = 80)
+        val soft = candidate("soft", cacheState = StreamCacheState.CACHED, infoHash = "soft-hash")
+            .copy(title = "Show.S01E01.1080p.BluRay.SoftSub.ASS", seeders = 50)
+        val context = RewriteStreamScoringEngine.Context(
+            title = "Show",
+            contentType = "series",
+            genres = listOf("Animation"),
+            preferredSubtitleLanguage = "pt-br",
+        )
+
+        assertEquals(soft, selectRewriteAutoPlayCandidate(groups(hard, soft), context))
+    }
+
+    @Test
+    fun knownSoftsubGroupBeatsRawWithoutSayingAss() {
+        // Real anime releases almost never put "ASS" in the title — SubsPlease is softsub.
+        val raw = candidate("raw", cacheState = StreamCacheState.CACHED, infoHash = "raw-hash")
+            .copy(title = "[SomeGroup] Jujutsu Kaisen - 01 (1080p) RAW", seeders = 60)
+        val soft = candidate("soft", cacheState = StreamCacheState.CACHED, infoHash = "soft-hash")
+            .copy(title = "[SubsPlease] Jujutsu Kaisen - 01 (1080p) [A1B2C3D4]", seeders = 55)
+        val context = RewriteStreamScoringEngine.Context(
+            title = "Jujutsu Kaisen",
+            contentType = "series",
+            genres = listOf("Animation"),
+            preferredSubtitleLanguage = "en",
+        )
+
+        assertEquals(soft, selectRewriteAutoPlayCandidate(groups(raw, soft), context))
+    }
+
+    @Test
+    fun animeRejectsHugeCachedSeasonPackEvenIfSoftsubTagged() {
+        // Onn repro: MediaFusion CACHED ~17GB season pack won softsub ranking and
+        // MPV hung forever on TorBox CDN ("Starting stream").
+        val pack = candidate("pack", cacheState = StreamCacheState.CACHED, infoHash = "pack-hash")
+            .copy(
+                title = "MediaFusion | Midnight cached pack",
+                filename = "[SubsPlease] Jujutsu Kaisen - 04v2 (1080p) [E77C9F8C].mkv",
+                videoSizeBytes = 17_826_048_926L,
+                seeders = 45,
+            )
+        val sane = candidate("sane", cacheState = StreamCacheState.CACHED, infoHash = "sane-hash")
+            .copy(
+                title = "[SubsPlease] Jujutsu Kaisen - 04v2 (1080p) [E77C9F8C].mkv",
+                filename = "[SubsPlease] Jujutsu Kaisen - 04v2 (1080p) [E77C9F8C].mkv",
+                videoSizeBytes = (350L * 1024 * 1024),
+                seeders = 40,
+            )
+        val context = RewriteStreamScoringEngine.Context(
+            title = "Jujutsu Kaisen",
+            contentType = "series",
+            genres = listOf("Animation", "Action", "Adventure"),
+            preferredSubtitleLanguage = "en",
+        )
+        assertEquals(sane, selectRewriteAutoPlayCandidate(groups(pack, sane), context))
+        assertNull(selectRewriteAutoPlayCandidate(groups(pack), context))
+    }
+
+    @Test
+    fun mediaFusionChromeTitleDoesNotCountAsSoftsubByItself() {
+        val chrome = candidate("chrome", cacheState = StreamCacheState.CACHED, infoHash = "chrome-hash")
+            .copy(
+                title = "MediaFusion | Midnight cached direct",
+                videoSizeBytes = (400L * 1024 * 1024),
+                seeders = 45,
+            )
+        val real = candidate("real", cacheState = StreamCacheState.CACHED, infoHash = "real-hash")
+            .copy(
+                title = "[SubsPlease] Show - 01 (1080p)",
+                videoSizeBytes = (400L * 1024 * 1024),
+                seeders = 40,
+            )
+        val context = RewriteStreamScoringEngine.Context(
+            title = "Show",
+            contentType = "series",
+            genres = listOf("Animation"),
+            preferredSubtitleLanguage = "en",
+        )
+        assertEquals(real, selectRewriteAutoPlayCandidate(groups(chrome, real), context))
+        assertTrue(
+            RewriteStreamScoringEngine.rank(real, context).softsubFit >
+                RewriteStreamScoringEngine.rank(chrome, context).softsubFit,
+        )
+    }
+
+    @Test
+    fun animeRanksSoftsubsThenDualThenSeeders() {
+        val softLowSeed = candidate("soft", cacheState = StreamCacheState.CACHED, infoHash = "soft-hash")
+            .copy(title = "[SubsPlease] Show - 01 (1080p)", seeders = 5)
+        val dualHighSeed = candidate("dual", cacheState = StreamCacheState.CACHED, infoHash = "dual-hash")
+            .copy(title = "[Kametsu] Show (BD 1080p) [Dual-Audio]", seeders = 900)
+        val dualSoftMid = candidate("both", cacheState = StreamCacheState.CACHED, infoHash = "both-hash")
+            .copy(title = "[Judas] Show - 01 [HEVC][Dual-Audio][Multi-Subs]", seeders = 20)
+        val context = RewriteStreamScoringEngine.Context(
+            title = "Show",
+            contentType = "series",
+            genres = listOf("Animation"),
+            preferredSubtitleLanguage = "en",
+        )
+
+        // Softsubs beat Dual-Audio-only even with way fewer seeders.
+        assertEquals(softLowSeed, selectRewriteAutoPlayCandidate(groups(dualHighSeed, softLowSeed), context))
+        // Dual+softsubs beat softsubs-only.
+        assertEquals(dualSoftMid, selectRewriteAutoPlayCandidate(groups(softLowSeed, dualSoftMid), context))
+    }
+
+    @Test
+    fun movieRanksSeedersThenQuality() {
+        val popularHd = candidate("pop", cacheState = StreamCacheState.CACHED, infoHash = "pop-hash")
+            .copy(title = "Movie 1080p WEB-DL", seeders = 500)
+        val rare4k = candidate("rare", cacheState = StreamCacheState.CACHED, infoHash = "rare-hash")
+            .copy(title = "Movie 2160p UHD BluRay REMUX HDR", seeders = 5)
+        val context = RewriteStreamScoringEngine.Context(title = "Movie", contentType = "movie")
+
+        assertEquals(popularHd, selectRewriteAutoPlayCandidate(groups(rare4k, popularHd), context))
+    }
+
+    @Test
+    fun preferredLangSoftsubBeatsDualAudioOnlyPack() {
+        // Kametsu-style Dual-Audio Hi10 with no Eng Sub / Multi-Subs must lose to softsub packs.
+        val dualOnly = candidate("dual", cacheState = StreamCacheState.CACHED, infoHash = "dual-hash")
+            .copy(
+                title = "[Kametsu] Show (BD 1080p Hi10 FLAC) [Dual-Audio]\n👤 43 💾 1.76 GB",
+                seeders = 43,
+            )
+        val engSub = candidate("eng", cacheState = StreamCacheState.CACHED, infoHash = "eng-hash")
+            .copy(
+                title = "[Anime Time] Show [Dual Audio][BD][1080p][HEVC][Eng Sub]\n👤 19 💾 347.2 MB",
+                seeders = 19,
+            )
+        val multi = candidate("multi", cacheState = StreamCacheState.CACHED, infoHash = "multi-hash")
+            .copy(
+                title = "[Erai-raws] Show - 01 [1080p][Multiple Subtitle]\n👤 26 💾 949.89 MB",
+                seeders = 26,
+            )
+        val context = RewriteStreamScoringEngine.Context(
+            title = "Show",
+            contentType = "series",
+            genres = listOf("Animation"),
+            preferredSubtitleLanguage = "en",
+        )
+
+        val pick = selectRewriteAutoPlayCandidate(groups(dualOnly, engSub, multi), context)
+        assertTrue(pick == engSub || pick == multi, "expected softsub winner, got ${pick?.title}")
+        assertTrue(
+            RewriteStreamScoringEngine.score(engSub, context) >
+                RewriteStreamScoringEngine.score(dualOnly, context),
+        )
+        assertTrue(
+            RewriteStreamScoringEngine.score(multi, context) >
+                RewriteStreamScoringEngine.score(dualOnly, context),
+        )
+    }
+
+    @Test
+    fun softsubScoringMustNotPickUnknownOverCachedDualAudio() {
+        // Softsub + preferred-lang bonuses can outrank reliability enough that UNKNOWN softsubs
+        // used to beat CACHED dual-audio — Play then hung resolving an uncached torrent.
+        val cachedDual = candidate("dual", cacheState = StreamCacheState.CACHED, infoHash = "dual-hash")
+            .copy(
+                title = "[Kametsu] Show (BD 1080p Hi10 FLAC) [Dual-Audio]\n👤 43 💾 1.76 GB",
+                seeders = 43,
+            )
+        val unknownSoft = candidate("soft", cacheState = StreamCacheState.UNKNOWN, infoHash = "soft-hash")
+            .copy(
+                title = "[Anime Time] Show [Dual Audio][BD][1080p][HEVC][Eng Sub]\n👤 19 💾 347.2 MB",
+                seeders = 19,
+            )
+        val context = RewriteStreamScoringEngine.Context(
+            title = "Show",
+            contentType = "series",
+            genres = listOf("Animation"),
+            preferredSubtitleLanguage = "en",
+        )
+
+        assertTrue(
+            RewriteStreamScoringEngine.rank(unknownSoft, context) >
+                RewriteStreamScoringEngine.rank(cachedDual, context),
+            "precondition: softsub rank alone still beats dual-audio",
+        )
+        assertEquals(
+            cachedDual,
+            selectRewriteAutoPlayCandidate(groups(cachedDual, unknownSoft), context),
+        )
+    }
+
+    @Test
+    fun animeHevcSoftsubBeatsHi10EvenWhenHi10IsKnownSoftsubGroup() {
+        // Doki is a softsub group but Hi10P (H.264 10-bit) → SW decode lag on leanback MPV.
+        val hi10 = candidate("hi10", cacheState = StreamCacheState.CACHED, infoHash = "hi10-hash")
+            .copy(
+                title = "[Doki] Show - 01 (1920x1080 Hi10P BD FLAC)\n👤 40 💾 684.14 MB",
+                seeders = 40,
+            )
+        val hevcDualSoft = candidate("hevc", cacheState = StreamCacheState.CACHED, infoHash = "hevc-hash")
+            .copy(
+                title = "[Judas] Show - 01 [BD 1080p][HEVC x265 10bit][Dual-Audio][Multi-Subs]\n👤 20 💾 300 MB",
+                seeders = 20,
+            )
+        val context = RewriteStreamScoringEngine.Context(
+            title = "Show",
+            contentType = "series",
+            genres = listOf("Animation"),
+            preferredSubtitleLanguage = "en",
+        )
+
+        assertEquals(hevcDualSoft, selectRewriteAutoPlayCandidate(groups(hi10, hevcDualSoft), context))
+        assertTrue(
+            RewriteStreamScoringEngine.score(hevcDualSoft, context) >
+                RewriteStreamScoringEngine.score(hi10, context),
+        )
+    }
+
+    @Test
+    fun animeHevc10BitIsNotPenalizedLikeHi10() {
+        val hevc10 = candidate("hevc10", cacheState = StreamCacheState.CACHED, infoHash = "hevc10-hash")
+            .copy(
+                title = "[Anime Time] Show [Dual Audio][BD][1080p][HEVC 10bit x265][Eng Sub]",
+                seeders = 25,
+            )
+        val hevc8 = candidate("hevc8", cacheState = StreamCacheState.CACHED, infoHash = "hevc8-hash")
+            .copy(
+                title = "[Anime Time] Show [Dual Audio][BD][1080p][HEVC x265][Eng Sub]",
+                seeders = 25,
+            )
+        val context = RewriteStreamScoringEngine.Context(
+            title = "Show",
+            contentType = "series",
+            genres = listOf("Animation"),
+            preferredSubtitleLanguage = "en",
+        )
+
+        // HEVC 10-bit is often HW-decodable; do not crush it relative to HEVC without 10bit tag.
+        val r10 = RewriteStreamScoringEngine.rank(hevc10, context)
+        val r8 = RewriteStreamScoringEngine.rank(hevc8, context)
+        assertEquals(r10.decodeFit, r8.decodeFit)
+        assertEquals(r10.softsubFit, r8.softsubFit)
+        assertEquals(r10.dualFit, r8.dualFit)
+        assertTrue(
+            kotlin.math.abs(r10.quality - r8.quality) <= 3,
+            "HEVC 10bit vs HEVC quality delta too large",
+        )
+    }
+
+    @Test
+    fun bracketLanguageTagCountsAsPreferredLanguage() {
+        val other = candidate("other", cacheState = StreamCacheState.CACHED, infoHash = "other-hash")
+            .copy(title = "[SubsPlease] Show - 01 (1080p)", seeders = 40)
+        val preferred = candidate("pref", cacheState = StreamCacheState.CACHED, infoHash = "pref-hash")
+            .copy(title = "[Erai-raws] Show - 01 [1080p][Multiple Subtitle][ES]", seeders = 40)
+        val context = RewriteStreamScoringEngine.Context(
+            title = "Show",
+            contentType = "series",
+            genres = listOf("Animation"),
+            preferredSubtitleLanguage = "es",
+        )
+
+        assertEquals(preferred, selectRewriteAutoPlayCandidate(groups(other, preferred), context))
+    }
+
+    @Test
     fun sizeParsedFromTitleIsUsedWhenVideoSizeBytesMissing() {
         val fromTitle = candidate("title-size", directUrl = "https://stream.test/title")
             .copy(title = "Episode 1080p 💾 1.8 GB")
@@ -136,26 +488,21 @@ class RewriteStreamAutoPickerTest {
                 seeders = 50,
             )
         val context = RewriteStreamScoringEngine.Context(title = "Movie", contentType = "movie")
-
-        // Remux may or may not win overall, but its size score must stay meaningful.
-        assertTrue(RewriteStreamScoringEngine.score(remux, context) > 40)
-        // Movies are not size-penalized for being large — a 102GB 4K remux stays competitive
-        // with a 42GB remux (episode scoring still crushes absurd packs).
-        assertTrue(
-            kotlin.math.abs(
-                RewriteStreamScoringEngine.score(remux, context) -
-                    RewriteStreamScoringEngine.score(
-                        remux.copy(title = "Movie.2024.2160p 💾 102 GB"),
-                        context,
-                    ),
-            ) < 15,
+        val remuxRank = RewriteStreamScoringEngine.rank(remux, context)
+        val hugeRank = RewriteStreamScoringEngine.rank(
+            remux.copy(title = "Movie.2024.2160p 💾 102 GB"),
+            context,
         )
-        // Sanity: remux remains competitive with a mid-size 1080p encode.
-        assertTrue(
-            kotlin.math.abs(
-                RewriteStreamScoringEngine.score(remux, context) -
-                    RewriteStreamScoringEngine.score(web, context),
-            ) < 40,
+        val webRank = RewriteStreamScoringEngine.rank(web, context)
+
+        // Movies are not size-penalized for being large — 102GB remux keeps full sizeFit.
+        assertEquals(100, remuxRank.sizeFit)
+        assertEquals(100, hugeRank.sizeFit)
+        // 4K remux still beats 1080p web on quality; size is not the decider.
+        assertTrue(remuxRank.quality > webRank.quality)
+        assertEquals(
+            remux,
+            selectRewriteAutoPlayCandidate(groups(remux, web), context),
         )
     }
 

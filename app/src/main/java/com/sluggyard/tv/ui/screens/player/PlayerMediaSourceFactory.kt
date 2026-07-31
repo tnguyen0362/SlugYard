@@ -45,6 +45,8 @@ internal class PlayerMediaSourceFactory(private val context: Context) {
     @Volatile private var currentVodCacheUrl: String? = null
     @Volatile private var currentVodCacheResolvedUrl: String? = null
     @Volatile private var currentVodCacheActive: Boolean = false
+    @Volatile var progressiveRangeOverride: String? = null
+    @Volatile var progressiveUrlOverride: String? = null
     private val parallelStartupPrefetchUnlocked = AtomicBoolean(true)
 
     fun unlockStartupPrefetch() {
@@ -87,15 +89,23 @@ internal class PlayerMediaSourceFactory(private val context: Context) {
         mediaMetadata: androidx.media3.common.MediaMetadata? = null
     ): MediaSource {
         val sanitizedHeaders = sanitizeHeaders(headers)
-        val httpDataSourceFactory = PlayerPlaybackNetworking.createDataSourceFactory(context, sanitizedHeaders)
-
         val resolvedMimeType = mimeTypeOverride ?: inferMimeType(
             url = url, filename = filename, responseHeaders = responseHeaders
         )
+        val playbackUrl = progressiveUrlOverride?.takeIf {
+            resolvedMimeType?.lowercase(Locale.US) in PROGRESSIVE_RANGE_MIMES
+        } ?: url
+        val playbackHeaders = buildPlaybackRequestHeaders(
+            url = playbackUrl,
+            mimeType = resolvedMimeType,
+            headers = sanitizedHeaders,
+            rangeOverride = progressiveRangeOverride
+        )
+        val httpDataSourceFactory = PlayerPlaybackNetworking.createDataSourceFactory(context, playbackHeaders)
         val isHls = resolvedMimeType == MimeTypes.APPLICATION_M3U8
         val isDash = resolvedMimeType == MimeTypes.APPLICATION_MPD
 
-        val mediaItemBuilder = MediaItem.Builder().setUri(url)
+        val mediaItemBuilder = MediaItem.Builder().setUri(playbackUrl)
         resolvedMimeType?.let(mediaItemBuilder::setMimeType)
         filename?.takeIf { it.isNotBlank() }?.let(mediaItemBuilder::setMediaId)
         mediaMetadata?.let(mediaItemBuilder::setMediaMetadata)
@@ -107,7 +117,7 @@ internal class PlayerMediaSourceFactory(private val context: Context) {
         parallelStartupPrefetchUnlocked.set(!(useParallelConnections && !isHls && !isDash))
         val progressiveUpstreamFactory: DataSource.Factory = if (useParallelConnections && !isHls && !isDash) {
             val okHttpFactory = OkHttpDataSource.Factory(playbackHttpClient).apply {
-                setDefaultRequestProperties(sanitizedHeaders)
+                setDefaultRequestProperties(playbackHeaders)
                 setUserAgent(DEFAULT_USER_AGENT)
             }
             ParallelRangeDataSource.Factory(
@@ -123,9 +133,9 @@ internal class PlayerMediaSourceFactory(private val context: Context) {
         }
 
         // 2. VOD disk cache (opt-in).
-        val useVodCache = ENABLE_VOD_CACHE && vodCacheEnabled && !isHls && !isDash && isHttpScheme(url)
+        val useVodCache = ENABLE_VOD_CACHE && vodCacheEnabled && !isHls && !isDash && isHttpScheme(playbackUrl)
         val previousVodCacheActive = currentVodCacheActive
-        currentVodCacheUrl = url
+        currentVodCacheUrl = playbackUrl
         currentVodCacheResolvedUrl = null
         val vodCacheMaxBytes = if (useVodCache && !isVodCacheDisabled) resolveVodCacheMaxBytes() else 0L
         val vodCacheActive = vodCacheMaxBytes > 0L
@@ -352,6 +362,25 @@ internal class PlayerMediaSourceFactory(private val context: Context) {
             }
         }
 
+        /**
+         * Some progressive providers return an HLS playlist for an un-ranged request but the
+         * actual Matroska file for an initial byte-range request. Keep the range hint limited to
+         * file-like media so adaptive manifests retain their normal request behavior.
+         */
+        internal fun buildPlaybackRequestHeaders(
+            url: String,
+            mimeType: String?,
+            headers: Map<String, String>,
+            rangeOverride: String? = null
+        ): Map<String, String> {
+            val scheme = url.substringBefore(':', missingDelimiterValue = "").lowercase(Locale.US)
+            val normalizedMime = mimeType?.lowercase(Locale.US)
+            if (scheme != "http" && scheme != "https") return headers
+            if (normalizedMime !in PROGRESSIVE_RANGE_MIMES) return headers
+            val range = rangeOverride?.takeIf { it.startsWith("bytes=", ignoreCase = true) } ?: return headers
+            return LinkedHashMap(headers).apply { put("Range", range) }
+        }
+
         internal fun inferMimeType(
             url: String,
             filename: String?,
@@ -504,6 +533,15 @@ internal class PlayerMediaSourceFactory(private val context: Context) {
         private val MIME_HINT_QUERY_KEYS = setOf(
             "format", "mime", "mime_type", "contenttype", "content_type", "type",
             "ext", "extension", "output", "protocol", "mode", "stream", "service"
+        )
+
+        private val PROGRESSIVE_RANGE_MIMES = setOf(
+            MimeTypes.VIDEO_MATROSKA,
+            "audio/x-matroska",
+            "video/mkv",
+            "audio/mkv",
+            MimeTypes.VIDEO_WEBM,
+            "audio/webm"
         )
 
         /**

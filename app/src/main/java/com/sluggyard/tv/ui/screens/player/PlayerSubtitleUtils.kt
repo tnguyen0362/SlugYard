@@ -134,4 +134,158 @@ internal object PlayerSubtitleUtils {
             else -> MimeTypes.APPLICATION_SUBRIP
         }
     }
+
+    /**
+     * Heuristic signs-and-songs / signs & songs detector. A signs-and-songs track translates
+     * on-screen text and song lyrics for a viewer who understands the audio language; it is
+     * not a full dialogue subtitle. Recognized name/label/id fragments include the common
+     * "signs and songs", "songs & signs", "signs/songs" forms plus the shorter "signs" /
+     * "songs" markers that anime groups use when paired together.
+     */
+    fun isSignsAndSongsTrack(texts: List<String?>): Boolean {
+        val haystack = texts.filterNotNull().joinToString(" ").lowercase()
+        if (haystack.isBlank()) return false
+        if (haystack.contains("sign") && haystack.contains("song")) return true
+        if (haystack.contains("signs & songs") || haystack.contains("signs and songs")) return true
+        if (haystack.contains("signs/songs") || haystack.contains("songs/signs")) return true
+        // "Signs only" / "Songs only" variants used by some groups.
+        if (haystack.contains("signs only") || haystack.contains("songs only")) return true
+        return false
+    }
+
+    /**
+     * Classify a subtitle's container/payload format using every available metadata layer:
+     * the derived codec label, the raw sample MIME type, the URL extension, and the track
+     * title / declared format string. Returns one of ASS, SSA, SRT, VTT, TTML, PGS, SUP,
+     * IDX, or `null` only when no signal exists (the UI then falls back to "Text").
+     *
+     * Layers are consulted in order of authority: MIME/codec first, then URL extension,
+     * then free-form title/format text. This avoids the "English Text" mislabel the audit
+     * found when only the language was known.
+     */
+    fun classifySubtitleFormat(
+        codecLabel: String? = null,
+        sampleMimeType: String? = null,
+        codecs: String? = null,
+        url: String? = null,
+        trackTitle: String? = null,
+        declaredFormat: String? = null
+    ): String? {
+        // Layer 1: derived codec label (already a human token like "ASS"/"SRT"/"PGS").
+        codecLabel?.trim()?.takeIf { it.isNotBlank() }?.let { label ->
+            normalizeFormatToken(label)?.let { return it }
+        }
+        // Layer 2: raw sample MIME type / codecs string.
+        for (mime in listOfNotNull(sampleMimeType, codecs)) {
+            normalizeFormatToken(mime)?.let { return it }
+        }
+        // Layer 3: URL extension.
+        if (!url.isNullOrBlank()) {
+            val withoutFragment = url.substringBefore('#')
+            val pathExt = withoutFragment.substringBefore('?').trimEnd('/')
+                .substringAfterLast('.', "").lowercase()
+            extensionToFormat(pathExt)?.let { return it }
+
+            // Subtitle services often put the real filename in a query parameter, e.g.
+            // `...?file=episode.srt`, rather than in the URL path.
+            withoutFragment.substringAfter('?', "")
+                .split('&')
+                .asSequence()
+                .map { it.substringAfterLast('.', "").lowercase() }
+                .mapNotNull(::extensionToFormat)
+                .firstOrNull()
+                ?.let { return it }
+        }
+        // Layer 4: track title / declared format string.
+        val titleHaystack = listOfNotNull(trackTitle, declaredFormat)
+            .joinToString(" ").lowercase()
+        if (titleHaystack.isNotBlank()) {
+            titleFormatMatch(titleHaystack)?.let { return it }
+        }
+        return null
+    }
+
+    private fun normalizeFormatToken(token: String): String? {
+        val lower = token.trim().lowercase()
+        if (lower.isBlank()) return null
+        return when {
+            // ASS / SSA
+            lower == "ass" || lower.endsWith("/ass") || lower.endsWith("/x-ass") ||
+                lower == "ssa" || lower.endsWith("/ssa") || lower.endsWith("/x-ssa") ||
+                lower == "s_text/ass" || lower == "s_text/ssa" -> "ASS"
+            // SRT / SubRip
+            lower == "srt" || lower.endsWith("/srt") || lower.endsWith("/x-srt") ||
+                lower.contains("subrip") -> "SRT"
+            // VTT / WebVTT
+            lower == "vtt" || lower.endsWith("/vtt") || lower.contains("webvtt") -> "VTT"
+            // TTML / IMSC
+            lower == "ttml" || lower.endsWith("/ttml") || lower.endsWith("+xml") ||
+                lower.contains("ttml") || lower.contains("dfxp") -> "TTML"
+            // PGS / SUP (HDMV presentation graphic stream)
+            lower == "pgs" || lower.endsWith("/pgs") || lower.endsWith("/x-pgs") ||
+                lower.contains("hdmv") || lower == "sup" -> "PGS"
+            // IDX / VobSub
+            lower == "idx" || lower.contains("vobsub") -> "IDX"
+            lower == "sub" && !lower.contains("subrip") -> "IDX"
+            // DVB
+            lower.contains("dvb") -> "DVB"
+            else -> null
+        }
+    }
+
+    private fun extensionToFormat(ext: String): String? = when (ext) {
+        "ass" -> "ASS"
+        "ssa" -> "ASS"
+        "srt" -> "SRT"
+        "vtt", "webvtt" -> "VTT"
+        "ttml", "dfxp" -> "TTML"
+        "pgs" -> "PGS"
+        "sup" -> "PGS"
+        "idx" -> "IDX"
+        "sub" -> "IDX"
+        else -> null
+    }
+
+    private fun titleFormatMatch(haystack: String): String? = when {
+        "ass" in haystack || "ssa" in haystack -> "ASS"
+        "subrip" in haystack || " srt" in haystack || haystack.endsWith(" srt") ||
+            haystack.startsWith("srt ") -> "SRT"
+        "webvtt" in haystack || " vtt" in haystack || haystack.endsWith(" vtt") ||
+            haystack.startsWith("vtt ") -> "VTT"
+        "ttml" in haystack || "dfxp" in haystack -> "TTML"
+        "pgs" in haystack || "hdmv" in haystack || " sup" in haystack ||
+            haystack.endsWith(" sup") -> "PGS"
+        "vobsub" in haystack || "idx" in haystack -> "IDX"
+        else -> null
+    }
+
+    /**
+     * Rank same-language subtitle candidates so a dialogue/full subtitle beats a
+     * signs-and-songs track, with the forced flag respected. Used by persisted-preference
+     * restore and engine-switch restore so the saved English dialogue track is preferred
+     * over an English signs-and-songs track that happens to share the same language code.
+     *
+     * @param tracks the full subtitle track list (indexes reference this list)
+     * @param candidates indexes within [tracks] that already match the target language
+     * @param preferForced when non-null, narrow to tracks whose [TrackInfo.isForced] matches
+     *   this value before ranking; `null` keeps the forced mix as-is
+     * @return the best candidate index, or -1 when no candidate remains after narrowing
+     */
+    fun rankSameLanguageSubtitleCandidates(
+        tracks: List<TrackInfo>,
+        candidates: List<Int>,
+        preferForced: Boolean? = null
+    ): Int {
+        if (candidates.isEmpty()) return -1
+        val narrowed = if (preferForced != null) {
+            candidates.filter { idx -> tracks.getOrNull(idx)?.isForced == preferForced }
+        } else {
+            candidates
+        }
+        if (narrowed.isEmpty()) return -1
+        if (narrowed.size == 1) return narrowed.first()
+        // Prefer dialogue/full (not signs-and-songs) over signs-and-songs.
+        val dialogue = narrowed.filter { idx -> tracks.getOrNull(idx)?.isSignsAndSongs != true }
+        return dialogue.firstOrNull() ?: narrowed.first()
+    }
 }

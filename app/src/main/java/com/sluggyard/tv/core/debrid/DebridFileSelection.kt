@@ -27,6 +27,29 @@ internal fun String.looksSpecificForDebridSelection(episodePatterns: List<String
     return lower.hasDebridVideoExtension() || episodePatterns.any { pattern -> lower.contains(pattern) }
 }
 
+/** Matches common episode filenames such as "- 01" while excluding specials and OP/ED assets. */
+internal fun String.matchesDebridEpisode(season: Int?, episode: Int?): Boolean {
+    if (season == null || episode == null) return false
+    val normalized = normalizedDebridFileName()
+    if (Regex("\\b(?:special|especial|ova|oad|creditless|opening|ending|op|ed)\\b")
+            .containsMatchIn(normalized)
+    ) {
+        return false
+    }
+    val seasonTwo = season.toString().padStart(2, '0')
+    val episodeTwo = episode.toString().padStart(2, '0')
+    val tokens = listOf(
+        "s${seasonTwo}e$episodeTwo",
+        "${season}x$episodeTwo",
+        "${season}x$episode",
+        episodeTwo,
+        episode.toString(),
+    ).distinct()
+    return tokens.any { token ->
+        Regex("(?:^|\\s)${Regex.escape(token)}(?:\\s|$)").containsMatchIn(normalized)
+    }
+}
+
 internal fun <T> List<T>.firstDebridNameMatch(
     names: List<String>,
     displayName: (T) -> String
@@ -45,6 +68,26 @@ internal fun buildDebridEpisodePatterns(season: Int?, episode: Int?): List<Strin
         "${season}x$episodeTwo",
         "${season}x$episode"
     )
+}
+
+/** Matches the common "- 01" pack naming style without treating specials or creditless assets as episodes. */
+internal fun String.matchesDebridEpisodeFile(season: Int?, episode: Int?): Boolean {
+    if (season == null || episode == null) return false
+    val normalized = normalizedDebridFileName()
+    if (Regex("\\b(?:special|especial|ova|oad|creditless|opening|ending|op|ed)\\b").containsMatchIn(normalized)) {
+        return false
+    }
+    val seasonTwo = season.toString().padStart(2, '0')
+    val episodeTwo = episode.toString().padStart(2, '0')
+    val standardPatterns = listOf(
+        "s${seasonTwo}e$episodeTwo",
+        "${season}x$episodeTwo",
+        "${season}x$episode",
+    )
+    if (standardPatterns.any { normalized.contains(it) }) return true
+    return listOf(episodeTwo, episode.toString()).distinct().any { token ->
+        Regex("(?:^|\\s)${Regex.escape(token)}(?:\\s|$)").containsMatchIn(normalized)
+    }
 }
 
 internal fun String.hasDebridVideoExtension(): Boolean =

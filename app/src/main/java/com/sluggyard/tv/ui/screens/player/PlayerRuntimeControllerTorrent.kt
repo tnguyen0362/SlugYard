@@ -7,6 +7,7 @@ import com.sluggyard.tv.domain.model.Stream
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 
 private const val TAG = "PlayerTorrent"
@@ -55,7 +56,7 @@ internal fun PlayerRuntimeController.stopTorrentStream() {
     torrentStateObserverJob = null
 
     if (isTorrentStream) {
-        torrentService.stopStream()
+        scope.launch(NonCancellable) { torrentService.stopStream() }
     }
 
     isTorrentStream = false

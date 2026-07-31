@@ -101,7 +101,8 @@ internal fun PlayerRuntimeController.updateAvailableTracks(tracks: Tracks) {
         PlayerRuntimeController.TAG,
         "TRACKS updated: internalSubs=${subtitleAccumulator.size}, selectedInternalIndex=$selectedSubtitleIndex, " +
             "selectedAddon=${_uiState.value.selectedAddonSubtitle?.lang}, " +
-            "pendingAddonLang=$pendingAddonSubtitleLanguage, pendingAddonTrackId=$pendingAddonSubtitleTrackId"
+            "pendingAddonLang=$pendingAddonSubtitleLanguage, pendingAddonTrackId=$pendingAddonSubtitleTrackId, " +
+            "internalDetails=[${subtitleAccumulator.describeSubtitleTracks()}]"
     )
 
     // Resolve any pending addon subtitle override now that text tracks are fresh.
@@ -348,7 +349,7 @@ private fun PlayerRuntimeController.scanTextGroup(
         val forcedFlag = (format.selectionFlags and C.SELECTION_FLAG_FORCED) != 0
         val texts = listOfNotNull(format.label, format.language, format.id)
         val nameHintsForced = texts.any { it.contains("forced", ignoreCase = true) }
-        val songsAndSigns = texts.any { it.contains("songs", ignoreCase = true) && it.contains("sign", ignoreCase = true) }
+        val songsAndSigns = PlayerSubtitleUtils.isSignsAndSongsTrack(texts)
 
         subtitleTracks += TrackInfo(
             index = subtitleTracks.size,
@@ -360,10 +361,19 @@ private fun PlayerRuntimeController.scanTextGroup(
                 ?: CustomDefaultTrackNameProvider.formatNameFromMime(format.codecs)
                 ?: format.codecs?.substringBefore(',')?.trim()?.takeIf { it.isNotBlank() },
             isForced = forcedFlag || nameHintsForced || songsAndSigns,
-            isSelected = isSelected
+            isSelected = isSelected,
+            isSignsAndSongs = songsAndSigns,
+            sampleMimeType = format.sampleMimeType
         )
     }
 }
+
+private fun List<TrackInfo>.describeSubtitleTracks(): String =
+    joinToString(" | ") { it.describeSubtitleTrack() }
+
+private fun TrackInfo.describeSubtitleTrack(selectedOverride: Boolean? = null): String =
+    "index=$index lang=${language ?: "und"} codec=${codec ?: "unknown"} " +
+        "mime=${sampleMimeType ?: "unknown"} selected=${selectedOverride ?: isSelected}"
 
 /**
  * Heuristic VC-1 detector. MIME type is authoritative; the codec/label haystack is checked
@@ -770,21 +780,48 @@ private fun PlayerRuntimeController.findLanguageFallbackTrackIndex(
         }
         // Forced hint narrows the candidate set so a non-forced track doesn't get restored
         // when the user had a forced track selected.
-        val filtered = if (target.isForcedHint == true) {
-            langCandidates.filter { idx -> tracks[idx].isForced }
-        } else {
-            langCandidates
-        }
+        val filtered = target.isForcedHint?.let { forcedHint ->
+            langCandidates.filter { idx -> tracks[idx].isForced == forcedHint }
+                .ifEmpty { langCandidates }
+        } ?: langCandidates
         when {
             filtered.size <= 1 -> filtered.firstOrNull() ?: -1
-            else -> filtered.firstOrNull { idx ->
-                val candidateVariant = PlayerSubtitleUtils.detectTrackLanguageVariant(
-                    language = tracks[idx].language,
-                    name = tracks[idx].name,
-                    trackId = tracks[idx].trackId
-                )
-                candidateVariant == targetVariant
-            } ?: filtered.first()
+            else -> {
+                // Prefer the track whose detected variant matches the target's variant.
+                val variantMatch = filtered.firstOrNull { idx ->
+                    val candidateVariant = PlayerSubtitleUtils.detectTrackLanguageVariant(
+                        language = tracks[idx].language,
+                        name = tracks[idx].name,
+                        trackId = tracks[idx].trackId
+                    )
+                    candidateVariant == targetVariant
+                }
+                if (variantMatch != null) {
+                    // Among same-variant candidates, rank dialogue over signs-and-songs.
+                    val sameVariant = filtered.filter { idx ->
+                        val candidateVariant = PlayerSubtitleUtils.detectTrackLanguageVariant(
+                            language = tracks[idx].language,
+                            name = tracks[idx].name,
+                            trackId = tracks[idx].trackId
+                        )
+                        candidateVariant == targetVariant
+                    }
+                    PlayerSubtitleUtils.rankSameLanguageSubtitleCandidates(
+                        tracks = tracks,
+                        candidates = sameVariant,
+                        preferForced = null
+                    ).takeIf { it >= 0 } ?: variantMatch
+                } else {
+                    // No variant match: rank dialogue over signs-and-songs across all
+                    // language candidates so a saved English dialogue track beats an English
+                    // signs-and-songs track that shares the same language code.
+                    PlayerSubtitleUtils.rankSameLanguageSubtitleCandidates(
+                        tracks = tracks,
+                        candidates = filtered,
+                        preferForced = null
+                    )
+                }
+            }
         }
     }
     logSwitchTrace(
@@ -1604,6 +1641,7 @@ internal fun PlayerRuntimeController.tryAutoSelectPreferredSubtitleFromAvailable
         PlayerRuntimeController.TAG,
         "AUTO_SUB eval: targets=$targets, forcedOnly=$forcedOnly, selectedAudio=${selectedAudioTrack?.language}/${selectedAudioTrack?.name}, scannedText=$hasScannedTextTracksOnce, " +
             "internalCount=${state.subtitleTracks.size}, selectedInternal=${state.selectedSubtitleTrackIndex}, " +
+            "selectedInternalDetails=${state.subtitleTracks.getOrNull(state.selectedSubtitleTrackIndex)?.describeSubtitleTrack(selectedOverride = true)}, " +
             "addonCount=${state.addonSubtitles.size}, selectedAddon=${state.selectedAddonSubtitle?.lang}"
     )
     if (useForcedSubtitles && selectedAudioTrack == null) {
@@ -1766,7 +1804,17 @@ internal fun PlayerRuntimeController.tryAutoSelectPreferredSubtitleFromAvailable
         Log.d(PlayerRuntimeController.TAG, "AUTO_SUB pick addon lang=${addonMatch.lang} id=${addonMatch.id}")
         selectAddonSubtitle(addonMatch)
     } else {
-        Log.d(PlayerRuntimeController.TAG, "AUTO_SUB no addon match for targets=$targets")
+        val internalSummary = state.subtitleTracks.joinToString(" | ") { track ->
+            "${track.index}:${track.language ?: "null"}/${track.name}:forced=${track.isForced}"
+        }
+        val addonSummary = state.addonSubtitles.joinToString(" | ") { subtitle ->
+            "${subtitle.id}:${subtitle.lang}:${subtitle.format ?: "unknown"}"
+        }
+        Log.d(
+            PlayerRuntimeController.TAG,
+            "AUTO_SUB no addon match for targets=$targets internalTracks=[$internalSummary] " +
+                "addonTracks=[$addonSummary]",
+        )
     }
 }
 
@@ -1859,7 +1907,9 @@ internal fun PlayerRuntimeController.applySubtitlePreferences(preferred: String,
             secondary = secondary,
             preferAss = shouldPreferAssSubtitles(),
         )
-        if (preferred == "none") {
+        // Anime has an explicit playback default: English ASS. Do not immediately undo the
+        // MPV fallback when the global subtitle preference is still unset/"none".
+        if (preferred == "none" && !shouldPreferAssSubtitles()) {
             mpvView?.disableSubtitles()
             _uiState.update { it.copy(selectedSubtitleTrackIndex = -1, selectedAddonSubtitle = null) }
         }

@@ -1,5 +1,6 @@
 package com.sluggyard.tv.ui.rewrite.settings
 
+import android.os.SystemClock
 import com.sluggyard.tv.core.sync.auth.SupabaseAuthGateway
 import com.sluggyard.tv.core.sync.auth.SupabaseSessionStore
 import com.sluggyard.tv.data.local.AddonPreferences
@@ -17,6 +18,7 @@ import com.sluggyard.tv.data.local.TraktSettingsDataStore
 import com.sluggyard.tv.data.local.MoreLikeThisSourcePreference
 import com.sluggyard.tv.data.repository.TraktAuthService
 import com.sluggyard.tv.data.repository.TraktTokenPollResult
+import com.sluggyard.tv.core.logging.ExperimentalDiagnostics
 import com.sluggyard.tv.data.remote.dto.trakt.TraktDeviceCodeResponseDto
 import com.sluggyard.tv.domain.model.DebridSettings
 import com.sluggyard.tv.domain.model.MDBListSettings
@@ -105,129 +107,131 @@ class DefaultRewriteSettingsFacade @Inject constructor(
     override val openSubtitlesApiKey: Flow<String> = playerStore.openSubtitlesApiKey
     override val openSubtitlesAutoDownload: Flow<Boolean> = playerStore.openSubtitlesAutoDownload
 
+    private suspend fun <T> trackSetting(
+        name: String,
+        value: Any? = null,
+        operation: suspend () -> T,
+    ): T {
+        val startedAt = SystemClock.elapsedRealtime()
+        return try {
+            val result = operation()
+            ExperimentalDiagnostics.settingMutation(
+                setting = name,
+                success = true,
+                durationMs = SystemClock.elapsedRealtime() - startedAt,
+                value = value,
+            )
+            result
+        } catch (failure: Throwable) {
+            ExperimentalDiagnostics.failure(
+                "settings",
+                "mutation_failed",
+                failure,
+                "setting" to name,
+                "durationMs" to SystemClock.elapsedRealtime() - startedAt,
+            )
+            throw failure
+        }
+    }
+
     override suspend fun startTraktDeviceAuth(): Result<TraktDeviceCodeResponseDto> =
-        traktAuthService.startDeviceAuth()
+        trackSetting("trakt.start_device_auth") { traktAuthService.startDeviceAuth() }
 
     override suspend fun pollTraktDeviceAuth(): TraktTokenPollResult =
-        traktAuthService.pollDeviceToken()
+        trackSetting("trakt.poll_device_auth") { traktAuthService.pollDeviceToken() }
 
-    override suspend fun disconnectTrakt() {
+    override suspend fun disconnectTrakt() = trackSetting("trakt.disconnect") {
         traktAuthDataStore.clearAuth()
     }
 
-    override suspend fun setMoreLikeThisSource(source: MoreLikeThisSourcePreference) {
-        traktSettings.setMoreLikeThisSource(source)
-    }
+    override suspend fun setMoreLikeThisSource(source: MoreLikeThisSourcePreference) =
+        trackSetting("trakt.more_like_this_source", source) { traktSettings.setMoreLikeThisSource(source) }
 
     override suspend fun setTmdbEnabled(enabled: Boolean) {
-        tmdbStore.setEnabled(enabled)
+        trackSetting("tmdb.enabled", enabled) { tmdbStore.setEnabled(enabled) }
     }
 
     override suspend fun setTmdbEnrichContinueWatching(enabled: Boolean) {
-        tmdbStore.setEnrichContinueWatching(enabled)
+        trackSetting("tmdb.enrich_continue_watching", enabled) { tmdbStore.setEnrichContinueWatching(enabled) }
     }
 
     override suspend fun setMdblistEnabled(enabled: Boolean) {
-        mdblistStore.setEnabled(enabled)
+        trackSetting("mdblist.enabled", enabled) { mdblistStore.setEnabled(enabled) }
     }
 
     override suspend fun setMdblistApiKey(apiKey: String) {
-        mdblistStore.setApiKey(apiKey)
+        trackSetting("mdblist.api_key", "<redacted>") { mdblistStore.setApiKey(apiKey) }
     }
 
-    override suspend fun setDebridEnabled(enabled: Boolean) {
-        debridStore.setEnabled(enabled)
-    }
+    override suspend fun setDebridEnabled(enabled: Boolean) =
+        trackSetting("debrid.enabled", enabled) { debridStore.setEnabled(enabled) }
 
-    override suspend fun setCommunityAddonEnabled(enabled: Boolean) {
-        debridStore.setCommunityAddonEnabled(enabled)
-    }
+    override suspend fun setCommunityAddonEnabled(enabled: Boolean) =
+        trackSetting("community_addons.enabled", enabled) { debridStore.setCommunityAddonEnabled(enabled) }
 
-    override suspend fun setFrameRateMatchingMode(mode: FrameRateMatchingMode) {
-        playerStore.setFrameRateMatchingMode(mode)
-    }
+    override suspend fun setFrameRateMatchingMode(mode: FrameRateMatchingMode) =
+        trackSetting("player.frame_rate_matching", mode) { playerStore.setFrameRateMatchingMode(mode) }
 
-    override suspend fun setResolutionMatchingEnabled(enabled: Boolean) {
-        playerStore.setResolutionMatchingEnabled(enabled)
-    }
+    override suspend fun setResolutionMatchingEnabled(enabled: Boolean) =
+        trackSetting("player.resolution_matching", enabled) { playerStore.setResolutionMatchingEnabled(enabled) }
 
-    override suspend fun setAudioOutputChannels(channels: AudioOutputChannels) {
-        playerStore.setAudioOutputChannels(channels)
-    }
+    override suspend fun setAudioOutputChannels(channels: AudioOutputChannels) =
+        trackSetting("player.audio_output_channels", channels) { playerStore.setAudioOutputChannels(channels) }
 
-    override suspend fun setResizeMode(mode: Int) {
-        playerStore.setResizeMode(mode)
-    }
+    override suspend fun setResizeMode(mode: Int) =
+        trackSetting("player.resize_mode", mode) { playerStore.setResizeMode(mode) }
 
-    override suspend fun setSubtitlePreferredLanguage(language: String) {
-        playerStore.setSubtitlePreferredLanguage(language)
-    }
+    override suspend fun setSubtitlePreferredLanguage(language: String) =
+        trackSetting("player.subtitle_preferred_language", language) { playerStore.setSubtitlePreferredLanguage(language) }
 
-    override suspend fun setSubtitleSecondaryLanguage(language: String?) {
-        playerStore.setSubtitleSecondaryLanguage(language)
-    }
+    override suspend fun setSubtitleSecondaryLanguage(language: String?) =
+        trackSetting("player.subtitle_secondary_language", language) { playerStore.setSubtitleSecondaryLanguage(language) }
 
-    override suspend fun setUseForcedSubtitles(enabled: Boolean) {
-        playerStore.setUseForcedSubtitles(enabled)
-    }
+    override suspend fun setUseForcedSubtitles(enabled: Boolean) =
+        trackSetting("player.forced_subtitles", enabled) { playerStore.setUseForcedSubtitles(enabled) }
 
-    override suspend fun setSubtitleShowOnlyPreferredLanguages(enabled: Boolean) {
-        playerStore.setSubtitleShowOnlyPreferredLanguages(enabled)
-    }
+    override suspend fun setSubtitleShowOnlyPreferredLanguages(enabled: Boolean) =
+        trackSetting("player.subtitle_preferred_only", enabled) { playerStore.setSubtitleShowOnlyPreferredLanguages(enabled) }
 
-    override suspend fun setSubtitleSize(size: Int) {
-        playerStore.setSubtitleSize(size)
-    }
+    override suspend fun setSubtitleSize(size: Int) =
+        trackSetting("player.subtitle_size", size) { playerStore.setSubtitleSize(size) }
 
-    override suspend fun setSubtitleVerticalOffset(offset: Int) {
-        playerStore.setSubtitleVerticalOffset(offset)
-    }
+    override suspend fun setSubtitleVerticalOffset(offset: Int) =
+        trackSetting("player.subtitle_vertical_offset", offset) { playerStore.setSubtitleVerticalOffset(offset) }
 
-    override suspend fun setSubtitleBold(enabled: Boolean) {
-        playerStore.setSubtitleBold(enabled)
-    }
+    override suspend fun setSubtitleBold(enabled: Boolean) =
+        trackSetting("player.subtitle_bold", enabled) { playerStore.setSubtitleBold(enabled) }
 
-    override suspend fun setSubtitleOutlineEnabled(enabled: Boolean) {
-        playerStore.setSubtitleOutlineEnabled(enabled)
-    }
+    override suspend fun setSubtitleOutlineEnabled(enabled: Boolean) =
+        trackSetting("player.subtitle_outline", enabled) { playerStore.setSubtitleOutlineEnabled(enabled) }
 
-    override suspend fun setSubtitleOutlineWidth(width: Int) {
-        playerStore.setSubtitleOutlineWidth(width)
-    }
+    override suspend fun setSubtitleOutlineWidth(width: Int) =
+        trackSetting("player.subtitle_outline_width", width) { playerStore.setSubtitleOutlineWidth(width) }
 
-    override suspend fun setPreferredAudioLanguage(language: String) {
-        playerStore.setPreferredAudioLanguage(language)
-    }
+    override suspend fun setPreferredAudioLanguage(language: String) =
+        trackSetting("player.audio_preferred_language", language) { playerStore.setPreferredAudioLanguage(language) }
 
-    override suspend fun setSecondaryPreferredAudioLanguage(language: String?) {
-        playerStore.setSecondaryPreferredAudioLanguage(language)
-    }
+    override suspend fun setSecondaryPreferredAudioLanguage(language: String?) =
+        trackSetting("player.audio_secondary_language", language) { playerStore.setSecondaryPreferredAudioLanguage(language) }
 
-    override suspend fun setDownmixEnabled(enabled: Boolean) {
-        playerStore.setDownmixEnabled(enabled)
-    }
+    override suspend fun setDownmixEnabled(enabled: Boolean) =
+        trackSetting("player.downmix", enabled) { playerStore.setDownmixEnabled(enabled) }
 
-    override suspend fun setMaintainOriginalAudioOnDownmix(enabled: Boolean) {
-        playerStore.setMaintainOriginalAudioOnDownmix(enabled)
-    }
+    override suspend fun setMaintainOriginalAudioOnDownmix(enabled: Boolean) =
+        trackSetting("player.maintain_original_mix", enabled) { playerStore.setMaintainOriginalAudioOnDownmix(enabled) }
 
-    override suspend fun setTunnelingEnabled(enabled: Boolean) {
-        playerStore.setTunnelingEnabled(enabled)
-    }
+    override suspend fun setTunnelingEnabled(enabled: Boolean) =
+        trackSetting("player.tunneling", enabled) { playerStore.setTunnelingEnabled(enabled) }
 
-    override suspend fun setForceOpticalPassthrough(enabled: Boolean) {
-        playerStore.setForceOpticalPassthrough(enabled)
-    }
+    override suspend fun setForceOpticalPassthrough(enabled: Boolean) =
+        trackSetting("player.optical_passthrough", enabled) { playerStore.setForceOpticalPassthrough(enabled) }
 
-    override suspend fun setOpenSubtitlesEnabled(enabled: Boolean) {
-        playerStore.setOpenSubtitlesEnabled(enabled)
-    }
+    override suspend fun setOpenSubtitlesEnabled(enabled: Boolean) =
+        trackSetting("opensubtitles.enabled", enabled) { playerStore.setOpenSubtitlesEnabled(enabled) }
 
-    override suspend fun setOpenSubtitlesApiKey(apiKey: String) {
-        playerStore.setOpenSubtitlesApiKey(apiKey)
-    }
+    override suspend fun setOpenSubtitlesApiKey(apiKey: String) =
+        trackSetting("opensubtitles.api_key", "<redacted>") { playerStore.setOpenSubtitlesApiKey(apiKey) }
 
-    override suspend fun setOpenSubtitlesAutoDownload(enabled: Boolean) {
-        playerStore.setOpenSubtitlesAutoDownload(enabled)
-    }
+    override suspend fun setOpenSubtitlesAutoDownload(enabled: Boolean) =
+        trackSetting("opensubtitles.auto_download", enabled) { playerStore.setOpenSubtitlesAutoDownload(enabled) }
 }

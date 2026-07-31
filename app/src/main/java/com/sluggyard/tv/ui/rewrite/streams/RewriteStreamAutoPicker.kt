@@ -1,6 +1,9 @@
 package com.sluggyard.tv.ui.rewrite.streams
 
+import android.util.Log
 import com.sluggyard.tv.core.streamresolution.StreamCacheState
+
+private const val AUTO_PICK_TAG = "SlugYardAutoPick"
 
 /**
  * Rewrite-owned auto-pick boundary. Candidate validation/deduplication stays here; quality,
@@ -20,10 +23,54 @@ internal fun selectRewriteAutoPlayCandidate(
         .filterNot { it.id in excludedCandidateIds }
         .distinctBy { it.dedupeKey() }
 
-    return RewriteStreamScoringEngine.choose(
-        candidates,
-        context,
+    val ranked = RewriteStreamScoringEngine.rankedCandidates(candidates, context)
+    val winner = RewriteStreamScoringEngine.choose(candidates, context)
+
+    val groupSummary = groups.joinToString(" | ") { group ->
+        val content = (group.state as? RewriteStreamGroupState.Content)?.streams.orEmpty()
+        val cached = content.count { it.cacheState == StreamCacheState.CACHED }
+        val total = content.size
+        "${group.addonName}:$total/${cached}c"
+    }
+    Log.i(
+        AUTO_PICK_TAG,
+        "pick title='${context.title}' type=${context.contentType} " +
+            "kind=${RewriteStreamScoringEngine.contentKind(context)} " +
+            "genres=${context.genres} lang=${context.language} " +
+            "preferredSub=${context.preferredSubtitleLanguage} " +
+            "candidates=${candidates.size} eligibleRanked=${ranked.count { it.isAutoPlayEligibleForLog() }} " +
+            "groups=[$groupSummary]",
     )
+    ranked.take(12).forEachIndexed { index, candidate ->
+        val rank = RewriteStreamScoringEngine.rank(candidate, context)
+        val label = candidate.title.replace('\n', ' ').take(120)
+        Log.i(
+            AUTO_PICK_TAG,
+            "#$index src=${candidate.sourceLabel} cache=${candidate.cacheState} " +
+                "soft=${rank.softsubFit} dual=${rank.dualFit} seeds=${rank.seeders} " +
+                "dec=${rank.decodeFit} q=${rank.quality} sizeFit=${rank.sizeFit} " +
+                "bytes=${candidate.videoSizeBytes ?: -1} " +
+                "title='$label'",
+        )
+    }
+    val winnerRank = winner?.let { RewriteStreamScoringEngine.rank(it, context) }
+    Log.i(
+        AUTO_PICK_TAG,
+        "winner src=${winner?.sourceLabel} cache=${winner?.cacheState} " +
+            "soft=${winnerRank?.softsubFit} dual=${winnerRank?.dualFit} seeds=${winnerRank?.seeders} " +
+            "title='${winner?.title?.replace('\n', ' ')?.take(160)}'",
+    )
+
+    return winner
+}
+
+private fun RewriteStreamCandidate.isAutoPlayEligibleForLog(): Boolean {
+    val hash = infoHash?.trim().orEmpty()
+    if (hash.isNotBlank()) {
+        return cacheState == StreamCacheState.CACHED ||
+            cacheState == StreamCacheState.NOT_APPLICABLE
+    }
+    return !directUrl.isNullOrBlank()
 }
 
 internal fun hasRewritePendingCacheChecks(groups: List<RewriteStreamGroup>): Boolean =

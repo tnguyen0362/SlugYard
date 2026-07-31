@@ -18,10 +18,16 @@ private fun languageOptionLabel(code: String): String = when (code) {
     else -> languageCodeToName(code)
 }
 
+private fun FrameRateMatchingMode.label(): String = when (this) {
+    FrameRateMatchingMode.OFF -> "Off"
+    FrameRateMatchingMode.START -> "Match on start"
+    FrameRateMatchingMode.START_STOP -> "Match frame rate"
+}
+
 @Composable
 internal fun DisplaySettings(facade: RewriteSettingsFacade, player: PlayerSettings, scope: CoroutineScope) {
     RewriteSettingsGroup("Display matching") {
-        RewriteCycleRow("Frame-rate matching", player.frameRateMatchingMode.name, FrameRateMatchingMode.entries.map { it.name }) { value -> scope.launch { facade.setFrameRateMatchingMode(FrameRateMatchingMode.valueOf(value)) } }
+        RewriteCycleRow("Frame-rate matching", player.frameRateMatchingMode.label(), FrameRateMatchingMode.entries.map { it.label() }) { value -> scope.launch { facade.setFrameRateMatchingMode(FrameRateMatchingMode.entries.first { it.label() == value }) } }
         RewriteToggleRow("Resolution matching", "Match the display to the source resolution when supported.", player.resolutionMatchingEnabled) { scope.launch { facade.setResolutionMatchingEnabled(it) } }
         RewriteCycleRow("Resize mode", resizeModeLabel(player.resizeMode), listOf("Fit", "Fill", "Stretch", "Center", "Automatic")) { value -> scope.launch { facade.setResizeMode(listOf(0, 1, 2, 3, 4)[listOf("Fit", "Fill", "Stretch", "Center", "Automatic").indexOf(value)]) } }
     }
@@ -78,8 +84,7 @@ internal fun AboutSettings() {
     RewriteSettingsGroup("About SlugYard") {
         RewriteValueRow("Application", "SlugYard TV")
         RewriteValueRow("Version", com.sluggyard.tv.BuildConfig.VERSION_NAME)
-        RewriteValueRow("Settings model", "Locked-down SlugYard TV")
         RewriteValueRow("Playback", "Automatic dual-player fallback")
-        RewriteValueRow("Privacy", "Credentials remain on this device profile")
+        RewriteValueRow("Privacy", "Credentials are stored securely on this device.")
     }
 }

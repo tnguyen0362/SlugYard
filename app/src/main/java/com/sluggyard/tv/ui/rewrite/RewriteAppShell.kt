@@ -60,6 +60,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
@@ -150,6 +151,7 @@ import com.sluggyard.tv.ui.rewrite.debrid.RewriteDebridConnection
 import com.sluggyard.tv.ui.rewrite.debrid.RewriteDebridCredentialStore
 import com.sluggyard.tv.ui.rewrite.debrid.RewriteCloudManagerScreen
 import com.sluggyard.tv.core.addonprotocol.SlugYardCommunitySourcePolicy
+import com.sluggyard.tv.core.logging.ExperimentalDiagnostics
 import com.sluggyard.tv.ui.rewrite.watchhub.RewriteWatchHubDataSource
 import com.sluggyard.tv.ui.rewrite.watchhub.RewriteWatchHubPlatform
 import com.sluggyard.tv.ui.rewrite.watchhub.RewriteWatchHubScreen
@@ -255,10 +257,22 @@ class RewriteAppGraph(
      */
     suspend fun provisionCommunitySources(debridConfigured: Boolean = true) {
         val configured = if (debridConfigured) debridRuntime.configuredAddonUrls() else null
-        _communityProvisioningReport.value = communityProvisioner.provision(
-            configured = configured,
-            debridConfigured = configured != null,
-        )
+        val hasConfiguredContentSources = configured != null
+        // Provisioning touches the network and manifest validation; a thrown exception would
+        // crash the calling coroutine silently and leave the UI with no status message.
+        // Catch here so the report always reflects the outcome (even a total failure).
+        _communityProvisioningReport.value = runCatching {
+            communityProvisioner.provision(
+                configured = configured,
+                debridConfigured = hasConfiguredContentSources,
+            )
+        }.getOrElse {
+            CommunityProvisioningReport(
+                installedCount = 0,
+                unavailableCount = SlugYardCommunitySourcePolicy.provisionManifestUrls(hasConfiguredContentSources).size,
+                unavailableReasons = listOf("provisioning failed: ${it::class.simpleName ?: "unknown error"}"),
+            )
+        }
     }
 
     suspend fun uninstallCommunitySources() {
@@ -579,6 +593,9 @@ private fun RewriteAppContent(
     val tmdbSettings by settingsFacade.tmdbSettings.collectAsState(initial = com.sluggyard.tv.domain.model.TmdbSettings())
     val smoothFocusMovement by settingsFacade.layoutPreferences.smoothBringIntoViewEnabled.collectAsState(initial = true)
     val fastHorizontalNavigation by settingsFacade.layoutPreferences.fastHorizontalNavigationEnabled.collectAsState(initial = false)
+    val playerSettings by settingsFacade.playerSettings.collectAsState(
+        initial = com.sluggyard.tv.data.local.PlayerSettings(),
+    )
     val debridConnection by graph.debridRuntime.connection.collectAsState(initial = RewriteDebridConnection())
     val destination = routeStack.last()
     var catalogState by remember { mutableStateOf(RewriteHomeCatalogState(emptyList())) }
@@ -620,6 +637,22 @@ private fun RewriteAppContent(
     var watchHubMessage by remember { mutableStateOf<String?>(null) }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val hasActiveDebrid = debridSettings.enabled && debridConnection.activeService != null
+    val context = LocalContext.current
+
+    LaunchedEffect(Unit) {
+        ExperimentalDiagnostics.logDeviceSnapshot(context)
+        ExperimentalDiagnostics.event("app", "composition_started", mapOf("destination" to destination.javaClass.simpleName))
+    }
+    LaunchedEffect(destination) {
+        ExperimentalDiagnostics.event(
+            "navigation",
+            "destination_changed",
+            mapOf(
+                "destination" to destination.javaClass.simpleName,
+                "routeDepth" to routeStack.size,
+            ),
+        )
+    }
 
     fun resumeFor(contentId: String, season: Int? = null, episode: Int? = null): Long =
         playbackCheckpoints.firstOrNull {
@@ -627,6 +660,7 @@ private fun RewriteAppContent(
         }?.positionMs ?: 0L
 
     fun openRoot(next: RewriteRootDestination) {
+        ExperimentalDiagnostics.event("navigation", "open_root", mapOf("destination" to next.javaClass.simpleName))
         onRouteStackChange(listOf(next))
         navigationRoot = when (next) {
             is RewriteRootDestination.Details,
@@ -638,14 +672,31 @@ private fun RewriteAppContent(
     }
 
     fun push(next: RewriteRootDestination) {
+        ExperimentalDiagnostics.event(
+            "navigation",
+            "push",
+            mapOf(
+                "destination" to next.javaClass.simpleName,
+                "previousDepth" to routeStack.size,
+            ),
+        )
         onRouteStackChange(routeStack + next)
     }
 
     fun replaceCurrent(next: RewriteRootDestination) {
+        ExperimentalDiagnostics.event(
+            "navigation",
+            "replace_current",
+            mapOf(
+                "destination" to next.javaClass.simpleName,
+                "previousDepth" to routeStack.size,
+            ),
+        )
         onRouteStackChange(routeStack.dropLast(1) + next)
     }
 
     fun popRoute() {
+        ExperimentalDiagnostics.event("navigation", "pop", mapOf("previousDepth" to routeStack.size))
         if (routeStack.size > 1) onRouteStackChange(routeStack.dropLast(1))
         else openRoot(RewriteRootDestination.Home)
     }
@@ -897,9 +948,13 @@ private fun RewriteAppContent(
         ?.takeIf { it.unavailableCount > 0 }
         ?.let { report ->
             if (report.installedCount == 0) {
-                "Community sources are unavailable. Check Debrid settings or retry."
+                report.unavailableReasons.firstOrNull()?.let { reason ->
+                    "Community sources are unavailable: $reason"
+                } ?: "Community sources are unavailable. Check Debrid settings or retry."
             } else {
-                "${report.unavailableCount} community source${if (report.unavailableCount == 1) "" else "s"} unavailable."
+                report.unavailableReasons.firstOrNull()?.let { reason ->
+                    "${report.unavailableCount} community source${if (report.unavailableCount == 1) "" else "s"} unavailable: $reason"
+                } ?: "${report.unavailableCount} community source${if (report.unavailableCount == 1) "" else "s"} unavailable."
             }
         }
     val integrityStatusMessage = dataCorruptionNotices.takeIf { it.isNotEmpty() }?.let {
@@ -1020,13 +1075,32 @@ private fun RewriteAppContent(
         }
         detailsRelatedLoading = false
     }
-    LaunchedEffect(destination, registry.addons, debridSettings.enabled, debridConnection.activeService) {
+    // Key only on the Streams target + debrid — NOT registry.addons. Community provision
+    // mutates the addon list while Play is already finding streams; restarting this effect
+    // resets streamDiscoveryComplete=false after the 20s ceiling has already fired once,
+    // which left the UI stuck on "Finding a playable stream…" forever.
+    val streamsDiscoveryKey = remember(destination, debridSettings.enabled, debridConnection.activeService) {
+        val streams = destination as? RewriteRootDestination.Streams
+        listOf(
+            streams?.type,
+            streams?.id,
+            streams?.season,
+            streams?.episode,
+            debridSettings.enabled,
+            debridConnection.activeService,
+        )
+    }
+    LaunchedEffect(streamsDiscoveryKey) {
         val streams = destination as? RewriteRootDestination.Streams ?: return@LaunchedEffect
         streamGroups = emptyList()
         streamDiscoveryComplete = false
         streamMessage = null
         autoPickFinishedFor = null
         autoPickRejectedIds = emptySet()
+        // After install/force-stop the curated stream addons can be missing until provision runs.
+        if (hasActiveDebrid) {
+            runCatching { graph.provisionCommunitySources(true) }
+        }
         graph.streamsDataSource.streamGroups(
             streams.type,
             streams.id,
@@ -1047,8 +1121,8 @@ private fun RewriteAppContent(
 
     // Cap how long we wait on CHECKING badges (auto-pick AND the Sources list) so a slow/broken
     // cache API cannot leave Play stuck on "Finding…" or Sources stuck on "Checking".
-    var cacheWaitExpired by remember(destination) { mutableStateOf(false) }
-    LaunchedEffect(destination, streamDiscoveryComplete) {
+    var cacheWaitExpired by remember(streamsDiscoveryKey) { mutableStateOf(false) }
+    LaunchedEffect(streamsDiscoveryKey, streamDiscoveryComplete) {
         cacheWaitExpired = false
         val streams = destination as? RewriteRootDestination.Streams ?: return@LaunchedEffect
         if (!streamDiscoveryComplete) return@LaunchedEffect
@@ -1056,7 +1130,8 @@ private fun RewriteAppContent(
         cacheWaitExpired = true
     }
     // Hard ceiling: if an addon never leaves Loading, still unblock the building screen.
-    LaunchedEffect(destination) {
+    // Must share streamsDiscoveryKey so a rediscovery restart also re-arms the timer.
+    LaunchedEffect(streamsDiscoveryKey) {
         val streams = destination as? RewriteRootDestination.Streams ?: return@LaunchedEffect
         delay(20_000)
         if (destination == streams) streamDiscoveryComplete = true
@@ -1067,7 +1142,17 @@ private fun RewriteAppContent(
 
     fun resolveStreamCandidate(candidate: RewriteStreamCandidate, streams: RewriteRootDestination.Streams) {
         if (resolvingCandidateId != null) return
+        // Auto-pick: stop after a few failed resolves so debrid timeouts cannot look like an
+        // infinite "Finding a playable stream…" spinner.
+        if (streams.autoPick && autoPickRejectedIds.size >= MaxAutoPickResolveAttempts) {
+            autoPickFinishedFor = streams.id
+            if (streamMessage.isNullOrBlank()) {
+                streamMessage = "No cached playable stream was found. Open Sources and pick an Instant/Cached option."
+            }
+            return
+        }
         resolvingCandidateId = candidate.id
+        if (streams.autoPick) streamMessage = null
         streamResolutionJob = scope.launch {
             try {
                 when (val result = withTimeout(45_000L) {
@@ -1135,25 +1220,56 @@ private fun RewriteAppContent(
     LaunchedEffect(destination, streamGroups, streamDiscoveryComplete, autoPickRejectedIds, cacheWaitExpired, displayStreamGroups) {
         val streams = destination as? RewriteRootDestination.Streams ?: return@LaunchedEffect
         if (!streams.autoPick || autoPickFinishedFor == streams.id || resolvingCandidateId != null) return@LaunchedEffect
+        if (autoPickRejectedIds.size >= MaxAutoPickResolveAttempts) {
+            autoPickFinishedFor = streams.id
+            if (streamMessage.isNullOrBlank()) {
+                streamMessage = "No cached playable stream was found. Open Sources and pick an Instant/Cached option."
+            }
+            return@LaunchedEffect
+        }
+        val hasCachedAlready = streamGroups
+            .flatMap { (it.state as? com.sluggyard.tv.ui.rewrite.streams.RewriteStreamGroupState.Content)?.streams.orEmpty() }
+            .any {
+                it.cacheState == com.sluggyard.tv.core.streamresolution.StreamCacheState.CACHED ||
+                    (!it.directUrl.isNullOrBlank() && it.infoHash.isNullOrBlank())
+            }
+        // Always wait for every enabled addon to leave Loading before choosing a winner. A cached
+        // result from one provider must not hide a slower source that can return better streams.
         if (!streamDiscoveryComplete) return@LaunchedEffect
-        // Wait for cache probes unless the timeout elapsed — then proceed with what we know.
-        if (!cacheWaitExpired && hasRewritePendingCacheChecks(streamGroups)) return@LaunchedEffect
+        // Once addon fanout has settled, a confirmed cached hit can bypass the separate cache-probe
+        // wait without delaying auto-pick for unrelated uncached candidates.
+        if (!cacheWaitExpired && !hasCachedAlready && hasRewritePendingCacheChecks(streamGroups)) {
+            return@LaunchedEffect
+        }
         val groupsForPick = if (cacheWaitExpired) displayStreamGroups else streamGroups
+        val genreList = streams.contentGenres
+            ?.split(',', '|', '/')
+            ?.map { it.trim() }
+            ?.filter { it.isNotEmpty() }
+            .orEmpty()
+            .ifEmpty { detailsState?.genres.orEmpty() }
         val candidate = selectRewriteAutoPlayCandidate(
             groups = groupsForPick,
             context = com.sluggyard.tv.ui.rewrite.streams.RewriteStreamScoringEngine.Context(
                 title = streams.title,
                 contentType = streams.type,
-                genres = detailsState?.genres.orEmpty(),
+                genres = genreList,
+                language = streams.contentLanguage ?: detailsState?.contentLanguage,
+                preferredSubtitleLanguage = playerSettings.subtitleStyle.preferredLanguage,
             ),
             excludedCandidateIds = autoPickRejectedIds,
         )
         if (candidate == null) {
-            if (streamGroups.isEmpty() && !streamDiscoveryComplete) return@LaunchedEffect
-            if (!cacheWaitExpired && (
-                    streamGroups.any { it.state is com.sluggyard.tv.ui.rewrite.streams.RewriteStreamGroupState.Loading } ||
-                        hasRewritePendingCacheChecks(streamGroups)
-                    )
+            if (!streamDiscoveryComplete) return@LaunchedEffect
+            // Empty group list = stream addons not in registry yet (not "no cached torrents").
+            // Giving up here was a false "No playable stream" right after install/force-stop.
+            if (streamGroups.isEmpty()) return@LaunchedEffect
+            // Unconditional settled-state guard: never finalize failure while probes or addon
+            // results are still pending, even after cacheWaitExpired remaps display-only CHECKING
+            // states to UNKNOWN. The original (unremapped) streamGroups is used here so late
+            // CACHED emissions can still win; the latch is only set once truly settled.
+            if (streamGroups.any { it.state is com.sluggyard.tv.ui.rewrite.streams.RewriteStreamGroupState.Loading } ||
+                hasRewritePendingCacheChecks(streamGroups)
             ) {
                 return@LaunchedEffect
             }
@@ -1192,7 +1308,23 @@ private fun RewriteAppContent(
         // Home: Netflix-style floating nav over the hero. Other tabs keep a reserved top inset
         // so list content never sits under the icons.
         val immersiveHomeNav = destination == RewriteRootDestination.Home
-        Box(modifier = modifier.fillMaxSize().background(SlugYardPalette.Canvas)) {
+        Box(
+            modifier = modifier
+                .fillMaxSize()
+                .background(SlugYardPalette.Canvas)
+                .onPreviewKeyEvent { event ->
+                    ExperimentalDiagnostics.event(
+                        "input",
+                        "key_event",
+                        mapOf(
+                            "destination" to destination.javaClass.simpleName,
+                            "type" to event.type,
+                            "key" to event.key,
+                        ),
+                    )
+                    false
+                },
+        ) {
             Column(modifier = Modifier.fillMaxSize()) {
                 if (showRootNav && !immersiveHomeNav) {
                     Spacer(modifier = Modifier.height(SlugYardTvMetrics.RootNavBarHeight))
@@ -1206,6 +1338,17 @@ private fun RewriteAppContent(
             // carry a catalog addonId go to Details, resume tiles/search hits without one route
             // straight to Streams (see the branch comment below for why).
             val onHomePosterSelected: (com.sluggyard.tv.ui.rewrite.home.RewriteHomePoster) -> Unit = { poster ->
+                ExperimentalDiagnostics.event(
+                    "home",
+                    "poster_selected",
+                    mapOf(
+                        "contentType" to poster.contentType,
+                        "season" to poster.season,
+                        "episode" to poster.episode,
+                        "hasAddon" to (poster.addonId != null),
+                        "hasResume" to (poster.resumePositionMs > 0L),
+                    ),
+                )
                 poster.addonId?.let { addonId ->
                     push(RewriteRootDestination.Details(
                         addonId = addonId,
@@ -1229,11 +1372,26 @@ private fun RewriteAppContent(
                 }
             }
             val onContinueWatchingResume: (com.sluggyard.tv.ui.rewrite.home.RewriteHomePoster) -> Unit = { poster ->
+                ExperimentalDiagnostics.event(
+                    "home",
+                    "continue_watching_selected",
+                    mapOf(
+                        "contentType" to poster.contentType,
+                        "season" to poster.season,
+                        "episode" to poster.episode,
+                        "resumePositionMs" to poster.resumePositionMs,
+                    ),
+                )
+                val isEpisode = poster.season != null || poster.episode != null
                 val parentId = poster.parentId
                     ?: inferSeriesParentId(poster.id, poster.season, poster.episode)
                 val addonId = poster.addonId ?: resolveMetadataAddonId(registry)
                 pushPlayOrWatchHub(
-                    type = poster.contentType ?: "movie",
+                    // Checkpoints created by older entry points can carry the episode id with a
+                    // movie/episode content type. Episode playback always uses the series stream
+                    // endpoint; sending that id through the movie endpoint is what makes Continue
+                    // Watching diverge from the same episode opened from Search/Details.
+                    type = if (isEpisode) "series" else poster.contentType ?: "movie",
                     id = poster.id,
                     title = poster.title,
                     posterUrl = poster.imageUrl,
@@ -1242,9 +1400,7 @@ private fun RewriteAppContent(
                     episode = poster.episode,
                     addonId = addonId,
                     parentId = parentId,
-                    parentType = poster.parentType
-                        ?: poster.contentType?.takeIf { poster.season != null || poster.episode != null }
-                            ?.let { "series" },
+                    parentType = if (isEpisode) "series" else poster.parentType,
                     resumePositionMs = poster.resumePositionMs.takeIf { it > 0L }
                         ?: resumeFor(poster.id, poster.season, poster.episode),
                     contentGenres = poster.contentGenres,
@@ -1848,11 +2004,13 @@ private fun RewriteBuildingPlayerScreen(
     BackHandler(onBack = onBack)
     val backFocusRequester = remember { FocusRequester() }
     val chooseSourceFocusRequester = remember { FocusRequester() }
-    val showChooser = !statusMessage.isNullOrBlank() &&
-        !statusMessage.contains("Finding a playable stream", ignoreCase = true) &&
-        !statusMessage.contains("Building", ignoreCase = true) &&
-        !statusMessage.contains("Buffering", ignoreCase = true) &&
-        !statusMessage.contains("Preparing", ignoreCase = true)
+    val effectiveStatus = statusMessage
+        ?: "Finding a playable stream..."
+    val showChooser = effectiveStatus.isNotBlank() &&
+        !effectiveStatus.contains("Finding a playable stream", ignoreCase = true) &&
+        !effectiveStatus.contains("Building", ignoreCase = true) &&
+        !effectiveStatus.contains("Buffering", ignoreCase = true) &&
+        !effectiveStatus.contains("Preparing", ignoreCase = true)
     LaunchedEffect(showChooser) {
         runCatching {
             if (showChooser) chooseSourceFocusRequester.requestFocus()
@@ -1862,7 +2020,7 @@ private fun RewriteBuildingPlayerScreen(
     RewritePlayPreparingSurface(
         artUrl = artUrl,
         title = title,
-        statusMessage = statusMessage ?: "Finding a playable stream...",
+        statusMessage = effectiveStatus,
         showChooser = showChooser,
         availability = availability,
         onChooseSource = onChooseSource,
@@ -2008,7 +2166,10 @@ private fun RewriteRootNavigation(
                 .clickable(
                     interactionSource = avatarInteraction,
                     indication = null,
-                    onClick = { onDestinationChanged(RewriteRootDestination.Profiles) },
+                    onClick = {
+                        ExperimentalDiagnostics.event("navigation", "profile_button_clicked")
+                        onDestinationChanged(RewriteRootDestination.Profiles)
+                    },
                 )
                 .semantics { contentDescription = "Switch profile"; role = Role.Button },
             contentAlignment = Alignment.Center,
@@ -2106,7 +2267,14 @@ private fun RewriteRootIconItem(
                     else -> Modifier
                 },
             )
-            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+                onClick = {
+                    ExperimentalDiagnostics.event("navigation", "root_button_clicked", mapOf("label" to label))
+                    onClick()
+                },
+            )
             .semantics { contentDescription = label; role = Role.Button },
         contentAlignment = Alignment.Center,
     ) {
@@ -2159,7 +2327,14 @@ private fun RewriteRootNavigationItem(
                     else -> Modifier
                 },
             )
-            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+                onClick = {
+                    ExperimentalDiagnostics.event("navigation", "root_button_clicked", mapOf("label" to label))
+                    onClick()
+                },
+            )
             .padding(horizontal = 16.dp, vertical = 8.dp),
         contentAlignment = Alignment.Center,
     ) {
@@ -2202,6 +2377,8 @@ private fun inferSeriesParentId(contentId: String, season: Int?, episode: Int?):
 }
 
 private const val MaxHomeRowPosters = 32
+/** Cap how many debrid resolve attempts auto-pick will burn before surfacing Sources. */
+private const val MaxAutoPickResolveAttempts = 3
 
 /** Home cold-start splash: let TMDB/addon fanout finish before focus hits a partial shelf list. */
 private const val HomeSplashMinDurationMs = 1_800L
@@ -2268,6 +2445,8 @@ private fun RewriteHomeCatalogState.toScreenState(
                             id = checkpoint.contentId,
                             title = catalogMatch?.title ?: checkpoint.title,
                             imageUrl = checkpoint.posterUrl ?: catalogMatch?.imageUrl,
+                            // Continue Watching stays portrait — never landscape-expand on focus.
+                            backdropUrl = null,
                             progressFraction = checkpoint.progressFraction?.toFloat(),
                             contentType = checkpoint.contentType,
                             addonId = checkpoint.addonId ?: catalogMatch?.addonId,

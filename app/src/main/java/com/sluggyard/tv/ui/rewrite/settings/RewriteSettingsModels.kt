@@ -14,6 +14,7 @@ enum class RewriteSettingsCategory(
     Display("Display", "Frame rate, resolution, and aspect mode"),
     Subtitles("Subtitles", "Language, visibility, and subtitle style"),
     Audio("Audio", "Language, channels, and output behavior"),
+    Advanced("Advanced", "Engine, buffering, and playback internals"),
     About("About", "Version and project information"),
 }
 
@@ -64,6 +65,7 @@ object RewriteSettingsPolicy {
         RewriteSettingsCategory.Display,
         RewriteSettingsCategory.Subtitles,
         RewriteSettingsCategory.Audio,
+        RewriteSettingsCategory.Advanced,
         RewriteSettingsCategory.About,
     )
 

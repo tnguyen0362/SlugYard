@@ -8,6 +8,7 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -30,6 +31,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -40,6 +42,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
@@ -49,6 +52,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.sluggyard.tv.ui.design.SlugYardPalette
 import com.sluggyard.tv.ui.design.SlugYardTvMetrics
 import com.sluggyard.tv.ui.rewrite.details.RewriteDetailsEpisode
@@ -164,9 +169,6 @@ fun RewritePlayerSecondaryOverlayV2(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                if (state.panel == RewritePlayerSecondaryPanel.EPISODE_SOURCES) {
-                    OutlinedButton(onClick = actions.onBackToEpisodes) { Text("Back") }
-                }
                 if (state.panel == RewritePlayerSecondaryPanel.EPISODES) {
                     OutlinedButton(
                         onClick = actions.onReloadEpisodes,
@@ -197,7 +199,7 @@ fun RewritePlayerSecondaryOverlayV2(
 }
 
 @Composable
-private fun SourceContent(
+private fun ColumnScope.SourceContent(
     state: RewritePlayerSecondaryState,
     actions: RewritePlayerSecondaryActionsV2,
     firstFocusRequester: FocusRequester,
@@ -222,28 +224,51 @@ private fun SourceContent(
         }
     }
 
-    val candidates = state.sourceGroups
-        .filter { state.selectedSourceAddon == null || it.addonName == state.selectedSourceAddon }
-        .flatMap { group ->
-            (group.state as? RewriteStreamGroupState.Content)?.streams.orEmpty()
-        }
-        .filterNot { it.id in state.failedSourceIds }
-        .let { values ->
-            com.sluggyard.tv.ui.rewrite.streams.RewriteStreamScoringEngine.rankedCandidates(
-                values,
-                com.sluggyard.tv.ui.rewrite.streams.RewriteStreamScoringEngine.Context(
-                    title = state.title,
-                    contentType = state.contentType,
-                ),
-            )
-        }
+    val candidates by produceState(
+        emptyList<RewriteStreamCandidate>(),
+        state.sourceGroups,
+        state.selectedSourceAddon,
+        state.failedSourceIds,
+        state.title,
+        state.contentType,
+    ) {
+        value = withContext(Dispatchers.Default) {
+            state.sourceGroups
+                .filter { state.selectedSourceAddon == null || it.addonName == state.selectedSourceAddon }
+                .flatMap { group ->
+                    (group.state as? RewriteStreamGroupState.Content)?.streams.orEmpty()
+                }
+                .filterNot { it.id in state.failedSourceIds }
+                .let { values ->
+                    com.sluggyard.tv.ui.rewrite.streams.RewriteStreamScoringEngine.rankedCandidates(
+                        values,
+                        com.sluggyard.tv.ui.rewrite.streams.RewriteStreamScoringEngine.Context(
+                            title = state.title,
+                            contentType = state.contentType,
+                        ),
+                    )
+                }
+            }
+    }
+    var firstItemPlaced by remember(state.panel, candidates.firstOrNull()?.id) { mutableStateOf(false) }
     if (candidates.isNotEmpty()) {
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        LazyColumn(
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             itemsIndexed(candidates, key = { index, candidate -> "$index:${candidate.id}" }) { index, candidate ->
                 StreamCandidateButton(
                     candidate = candidate,
                     onClick = { actions.onSelectSource(candidate) },
                     focusRequester = if (index == 0) firstFocusRequester else null,
+                    onPlaced = if (index == 0) {
+                        {
+                            if (!firstItemPlaced) {
+                                firstItemPlaced = true
+                                runCatching { firstFocusRequester.requestFocus() }
+                            }
+                        }
+                    } else null,
                 )
             }
         }
@@ -281,6 +306,15 @@ private fun EpisodeContent(
         style = MaterialTheme.typography.titleMedium,
         color = SlugYardPalette.OnCanvasMuted,
     )
+    if (state.episodeSourceId != null && (state.sourceLoading || state.sourceError != null)) {
+        Text(
+            text = when {
+                state.sourceLoading -> "Finding a playable source..."
+                else -> state.sourceError ?: "Episode playback could not start"
+            },
+            color = if (state.sourceError != null) SlugYardPalette.Danger else SlugYardPalette.OnCanvasMuted,
+        )
+    }
     if (state.episodes.isNotEmpty()) {
         LazyColumn(verticalArrangement = Arrangement.spacedBy(18.dp)) {
             itemsIndexed(state.episodes, key = { index, episode -> "$index:${episode.id}" }) { index, episode ->
@@ -308,6 +342,7 @@ private fun StreamCandidateButton(
     candidate: RewriteStreamCandidate,
     onClick: () -> Unit,
     focusRequester: FocusRequester?,
+    onPlaced: (() -> Unit)? = null,
 ) {
     var focused by remember(candidate.id) { mutableStateOf(false) }
     val shape = RoundedCornerShape(8.dp)
@@ -330,6 +365,7 @@ private fun StreamCandidateButton(
             )
             .clickable(onClick = onClick)
             .focusable()
+            .onGloballyPositioned { onPlaced?.invoke() }
             .semantics {
                 contentDescription = candidate.title
                 role = Role.Button

@@ -2,12 +2,18 @@ package com.sluggyard.tv.ui.rewrite.data
 
 import com.sluggyard.tv.core.streamresolution.DebridService
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.putJsonObject
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
+import java.util.Base64
 
 internal const val TorrentioManifestUrl = "https://torrentio.strem.fun/manifest.json"
+internal const val CometManifestHost = "https://comet.elfhosted.com"
+internal const val CometManifestUrl = "$CometManifestHost/manifest.json"
 internal const val MediaFusionManifestHost = "https://mediafusionfortheweebs.midnightignite.me"
 /** Keyless catalog bootstrap — never embeds a debrid token. */
 internal const val MediaFusionBootstrapManifestUrl = "$MediaFusionManifestHost/manifest.json"
@@ -15,6 +21,7 @@ internal const val MediaFusionBootstrapManifestUrl = "$MediaFusionManifestHost/m
 data class RewriteConfiguredAddonUrls(
     val torrentioManifestUrl: String,
     val mediaFusionManifestUrl: String?,
+    val cometManifestUrl: String? = null,
 )
 
 internal fun torrentioProviderKey(service: DebridService): String = when (service) {
@@ -23,11 +30,62 @@ internal fun torrentioProviderKey(service: DebridService): String = when (servic
     DebridService.PREMIUMIZE -> "premiumize"
 }
 
+internal fun cometProviderKey(service: DebridService): String = torrentioProviderKey(service)
+
 internal fun buildTorrentioManifestUrl(service: DebridService, apiKey: String): String {
     val normalized = apiKey.trim()
     require(normalized.isNotBlank()) { "A Debrid API key is required to configure Torrentio" }
     val encoded = URLEncoder.encode(normalized, StandardCharsets.UTF_8.name()).replace("+", "%20")
-    return "${TorrentioManifestUrl.removeSuffix("/manifest.json")}/${torrentioProviderKey(service)}=$encoded/manifest.json"
+    // nodownloadlinks = cache/instant only — skips "download to debrid" torrents so Play/Sources
+    // return fewer, faster results (Torrentio configure: "Don't show download to Debrid links").
+    return "${TorrentioManifestUrl.removeSuffix("/manifest.json")}/" +
+        "debridoptions=nodownloadlinks%7C" +
+        "${torrentioProviderKey(service)}=$encoded/manifest.json"
+}
+
+/**
+ * Comet cache-only manifest with the active debrid key injected.
+ * Matches the user's preferred ElfHosted Comet settings (cachedOnly, no P2P torrents).
+ */
+internal fun buildCometManifestUrl(service: DebridService, apiKey: String): String {
+    val normalized = apiKey.trim()
+    require(normalized.isNotBlank()) { "A Debrid API key is required to configure Comet" }
+    val config = buildJsonObject {
+        put("maxResultsPerResolution", 0)
+        put("maxSize", 0)
+        put("cachedOnly", true)
+        put("sortCachedUncachedTogether", false)
+        put("removeTrash", true)
+        putJsonArray("resultFormat") { add("all") }
+        putJsonArray("debridServices") {
+            add(
+                buildJsonObject {
+                    put("service", cometProviderKey(service))
+                    put("apiKey", normalized)
+                },
+            )
+        }
+        put("enableTorrent", false)
+        put("deduplicateStreams", false)
+        put("scrapeDebridAccountTorrents", false)
+        put("debridStreamProxyPassword", "")
+        putJsonObject("languages") {
+            putJsonArray("required") {}
+            putJsonArray("allowed") {}
+            putJsonArray("exclude") {}
+            putJsonArray("preferred") {}
+        }
+        putJsonObject("resolutions") {}
+        putJsonObject("options") {
+            put("remove_ranks_under", -10000000000.0)
+            put("allow_english_in_languages", false)
+            put("remove_unknown_languages", false)
+        }
+    }
+    val encoded = Base64.getEncoder().encodeToString(
+        config.toString().toByteArray(StandardCharsets.UTF_8),
+    )
+    return "$CometManifestHost/$encoded/manifest.json"
 }
 
 /**

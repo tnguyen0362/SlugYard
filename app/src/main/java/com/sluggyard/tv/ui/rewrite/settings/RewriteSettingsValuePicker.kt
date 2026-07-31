@@ -32,6 +32,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.sluggyard.tv.core.logging.ExperimentalDiagnostics
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.sluggyard.tv.ui.design.SlugYardPalette
@@ -49,6 +50,13 @@ fun RewriteSettingsValuePicker(
     onValueSelected: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    LaunchedEffect(Unit) {
+        ExperimentalDiagnostics.event(
+            "settings",
+            "value_picker_opened",
+            mapOf("setting" to title, "optionCount" to values.size, "selected" to selected),
+        )
+    }
     val selectedIndex = values.indexOf(selected).takeIf { it >= 0 } ?: 0
     val listState = rememberLazyListState()
     val focusRequester = remember { FocusRequester() }

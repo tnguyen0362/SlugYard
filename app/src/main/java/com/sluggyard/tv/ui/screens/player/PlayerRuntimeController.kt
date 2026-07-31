@@ -127,7 +127,15 @@ class PlayerRuntimeController(
         val trackId: String? = null,
         val indexHint: Int? = null,
         val languageIndexHint: Int? = null,
-        val isForcedHint: Boolean? = null
+        val isForcedHint: Boolean? = null,
+        /**
+         * Captured role of the saved subtitle track: `true` when it was a signs-and-songs
+         * track, `false` when it was a dialogue/full subtitle, `null` when unknown. Used by
+         * engine-switch restore so a saved English dialogue track is preferred over an
+         * English signs-and-songs track even when MPV reorders tracks and the raw
+         * [indexHint] would otherwise land on the wrong role.
+         */
+        val isSignsAndSongsHint: Boolean? = null
     )
 
     internal sealed class RememberedSubtitleSelection {

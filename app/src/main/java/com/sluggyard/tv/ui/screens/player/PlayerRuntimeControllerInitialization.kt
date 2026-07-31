@@ -56,7 +56,6 @@ import androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory
 import androidx.media3.extractor.ts.TsExtractor
 import androidx.media3.session.MediaSession
 import com.sluggyard.tv.R
-import com.sluggyard.tv.core.logging.urlForLog
 import com.sluggyard.tv.core.player.BitrateAwareLoadControl
 import com.sluggyard.tv.core.player.DolbyVisionBaseLayerPolicy
 import com.sluggyard.tv.core.player.DolbyVisionCodecFallback
@@ -109,30 +108,155 @@ internal data class StartupSubtitlePreparation(
 )
 
 /**
- * Resolves and caches the MIME type for the current stream. A cached value is
- * reused; otherwise the media source factory probes the URL/response headers.
+ * Resolves and caches the MIME type for the current stream. Filename and URL
+ * inference is only a fallback for progressive HTTP sources because a provider
+ * can return a different representation after redirects.
  */
 private suspend fun PlayerRuntimeController.resolveCurrentStreamMimeType(
     url: String,
     headers: Map<String, String>
 ) {
-    currentStreamMimeType?.let { resolved ->
-        Log.d(
-            PlayerRuntimeController.TAG,
-            "Resolved stream mimeType=$resolved for url=${url.urlForLog()}"
-        )
-        return
-    }
-    currentStreamMimeType = PlayerMediaSourceFactory.probeMimeType(
+    val inferredMimeType = PlayerMediaSourceFactory.probeMimeType(
         url = url,
         headers = headers,
         filename = currentFilename,
         responseHeaders = currentStreamResponseHeaders
     )
+    currentStreamMimeType = inferredMimeType ?: currentStreamMimeType
+    if (isProgressiveFileMime(currentStreamMimeType)) {
+        val validation = validateProgressivePayloadBeforeExoStartupOrThrow(url = url, headers = headers)
+        if (validation?.verdict == PayloadVerdict.Valid) {
+            Log.i(
+                PlayerRuntimeController.TAG,
+                "Using validated progressive payload " +
+                    "resolvedHost=${validation.resolvedUrl?.safeHost() ?: "unknown"} " +
+                    "mime=${currentStreamMimeType ?: "unknown"}"
+            )
+            return
+        }
+    }
+    val responseProbe = if (shouldProbeProgressivePayload(url, inferredMimeType)) {
+        withTimeoutOrNull(StreamPayloadValidator.PROBE_TIMEOUT_MS) {
+            PlayerPlaybackNetworking.probePlaybackResponse(url = url, headers = headers)
+        }
+    } else {
+        null
+    }
+    val responseMimeType = responseProbe?.let { probe ->
+        PlayerMediaSourceFactory.normalizeMimeType(probe.contentType)
+            ?: PlayerMediaSourceFactory.sniffManifestMimeType(
+                String(probe.initialBytes, Charsets.US_ASCII)
+            )
+    }
+    currentStreamMimeType = responseMimeType ?: inferredMimeType ?: currentStreamMimeType
+    responseProbe?.let { probe ->
+        Log.d(
+            PlayerRuntimeController.TAG,
+            "Playback response mime probe host=${url.safeHost()} status=${probe.status} " +
+                "contentType=${probe.contentType ?: "none"} finalHost=${probe.finalHost} " +
+                "sniffedMime=${responseMimeType ?: "unknown"} bytes=${probe.initialBytes.size}"
+        )
+    }
     Log.d(
         PlayerRuntimeController.TAG,
-        "Resolved stream mimeType=${currentStreamMimeType ?: "unknown"} for url=${url.urlForLog()}"
+        "Resolved stream mimeType=${currentStreamMimeType ?: "unknown"} host=${url.safeHost()}"
     )
+}
+
+/**
+ * Phase 1 gate: probes a progressive HTTP(S) stream before ExoPlayer extractor startup and
+ * throws [InvalidStreamPayloadException] when the response is clearly not a playable media
+ * payload (the diagnosed Comet invalid-payload case). The throw is caught by
+ * [handleInitializePlayerException] and routed into the existing Exo -> MPV dual-player
+ * failover, so MPV and the fallback path are untouched.
+ *
+ * Adaptive manifests (HLS/DASH/SS) and non-HTTP schemes (torrent/local) are skipped — they
+ * have their own load/sniff paths and must not pay the probe cost. Any probe failure returns
+ * [PayloadVerdict.Indeterminate] and playback proceeds normally.
+ */
+private suspend fun PlayerRuntimeController.validateProgressivePayloadBeforeExoStartupOrThrow(
+    url: String,
+    headers: Map<String, String>
+): ProgressivePayloadValidation? {
+    mediaSourceFactory.progressiveRangeOverride = null
+    mediaSourceFactory.progressiveUrlOverride = null
+    val mime = currentStreamMimeType
+    if (!shouldProbeProgressivePayload(url, mime)) return null
+    val validation = StreamPayloadValidator.validateProgressiveHttpPayloadWithDetails(
+        url = url,
+        headers = headers,
+        expectedMimeType = mime
+    )
+    when (val verdict = validation.verdict) {
+        is PayloadVerdict.Invalid -> {
+            Log.w(
+                PlayerRuntimeController.TAG,
+                "Stream payload rejected before Exo startup: reason=${verdict.reason} " +
+                    "host=${url.safeHost()} mime=${mime ?: "unknown"}"
+            )
+            throw InvalidStreamPayloadException(verdict.reason)
+        }
+        is PayloadVerdict.Indeterminate -> {
+            Log.d(
+                PlayerRuntimeController.TAG,
+                "Stream payload probe indeterminate: reason=${verdict.reason} host=${url.safeHost()}"
+            )
+        }
+        PayloadVerdict.Valid -> {
+            // The resolved endpoint is the original file. Do not carry the bounded probe's
+            // fixed full-file Range into every later DataSpec; ExoPlayer must own seek ranges.
+            mediaSourceFactory.progressiveRangeOverride = null
+            mediaSourceFactory.progressiveUrlOverride = validation.resolvedUrl
+            Log.d(
+                PlayerRuntimeController.TAG,
+                "Stream payload probe accepted host=${url.safeHost()} " +
+                    "resolvedFile=${validation.resolvedUrl != null} " +
+                    "resolvedHost=${validation.resolvedUrl?.safeHost() ?: "unknown"}"
+            )
+        }
+    }
+    return validation
+}
+
+private fun isProgressiveFileMime(mime: String?): Boolean = mime?.lowercase() in setOf(
+    MimeTypes.VIDEO_MATROSKA,
+    MimeTypes.VIDEO_WEBM,
+    "audio/x-matroska",
+    "video/mkv",
+    "audio/mkv",
+    "audio/webm"
+)
+
+private fun shouldProbeProgressivePayload(url: String, mime: String?): Boolean {
+    val scheme = Uri.parse(url).scheme?.lowercase()
+    if (scheme != "https" && scheme != "http") return false
+    // Skip adaptive manifests by URL path — HLS (.m3u8), DASH (.mpd), and Smooth
+    // Streaming (/Manifest) have their own manifest sniffing / load path and must not be
+    // rejected by a single byte-range probe. Matched case-insensitively on the path with
+    // any query string ignored, in addition to the existing MIME gates below.
+    if (isAdaptiveManifestUrlPath(url)) return false
+    if (mime == null) return true
+    val m = mime.lowercase()
+    // Skip adaptive manifests — they have their own manifest sniffing / load path and must
+    // not be rejected by a single byte-range probe.
+    if (m == "application/vnd.apple.mpegurl" || m == "application/x-mpegurl" ||
+        m == "application/m3u8" || m.contains("mpegurl") || m.contains("m3u8") ||
+        m == "application/dash+xml" || m.contains("mpd") ||
+        m == "application/vnd.ms-sstr+xml"
+    ) return false
+    return true
+}
+
+/**
+ * Returns true when the URL's path (query ignored, case-insensitive) ends with a known
+ * adaptive-manifest extension/marker: `.m3u8` (HLS), `.mpd` (DASH), or `/Manifest`
+ * (Smooth Streaming). Used to skip the progressive payload probe for manifest URLs even
+ * when the inferred MIME type is missing or generic.
+ */
+private fun isAdaptiveManifestUrlPath(url: String): Boolean {
+    val path = runCatching { Uri.parse(url).path?.lowercase() }.getOrNull() ?: return false
+    if (path.isEmpty()) return false
+    return path.endsWith(".m3u8") || path.endsWith(".mpd") || path.endsWith("/manifest")
 }
 
 /**
@@ -1993,11 +2117,16 @@ private fun PlayerRuntimeController.attachAnalyticsListener(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Resolves the AUTO engine selection for the current stream. Only Dolby Vision
- * content is routed to ExoPlayer (its forked extractor pipeline handles
- * DV7→DV8.1 conversion via DoviBridge). Everything else goes to MPV which
- * handles HDR10, HDR10+, HLG natively with libplacebo tone-mapping. Specific
- * patterns avoid false positives (e.g., "DVD", "ADV", movie titles).
+ * Resolves the AUTO engine selection for the current stream.
+ *
+ * - Dolby Vision → ExoPlayer (forked extractor / DoviBridge DV7→DV8.1).
+ * - Anime (genre, catalog id, Animation+Japan, or series+Animation hint) → MPV
+ *   for native libass softsubs — even when the stream title never says ASS.
+ * - Explicit ASS/SSA in stream metadata → MPV.
+ * - Everything else (mainstream remuxes, non-anime) → ExoPlayer (HW HEVC path).
+ *
+ * AUTO does **not** guarantee lag-free playback: anime always forces MPV today,
+ * and Hi10/AVC10 encodes may still software-decode on leanback SoCs.
  */
 internal fun PlayerRuntimeController.resolveAutoInternalPlayerEngine(): InternalPlayerEngine {
     val streamMetadataText = buildString {
@@ -2030,8 +2159,20 @@ internal fun PlayerRuntimeController.resolveAutoInternalPlayerEngine(): Internal
     )
     val needsAssRenderer = Regex("""(?i)\b(ass|ssa)\b""").containsMatchIn(streamMetadataText)
     return if (!isDolbyVision && (isAnime || needsAssRenderer)) {
+        Log.i(
+            "SlugYardAutoPick",
+            "engine=MPV isAnime=$isAnime assHint=$needsAssRenderer " +
+                "genres=${effectiveContentGenres()} lang=$contentLanguage " +
+                "type=$contentType stream='${streamName?.take(120)}' file='${currentFilename?.take(120)}'",
+        )
         InternalPlayerEngine.MVP_PLAYER
     } else {
+        Log.i(
+            "SlugYardAutoPick",
+            "engine=EXO isAnime=$isAnime dv=$isDolbyVision " +
+                "genres=${effectiveContentGenres()} lang=$contentLanguage " +
+                "type=$contentType stream='${streamName?.take(120)}' file='${currentFilename?.take(120)}'",
+        )
         InternalPlayerEngine.EXOPLAYER
     }
 }

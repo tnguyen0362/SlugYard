@@ -1,5 +1,6 @@
 ﻿package com.sluggyard.tv.ui.rewrite.search
 
+import android.os.SystemClock
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -51,6 +52,7 @@ import com.sluggyard.tv.ui.rewrite.home.RewritePosterCard
 import com.sluggyard.tv.ui.rewrite.requestFocusReliably
 import com.sluggyard.tv.ui.rewrite.rewriteIsMovieType
 import com.sluggyard.tv.ui.rewrite.rewriteIsSeriesType
+import com.sluggyard.tv.core.logging.ExperimentalDiagnostics
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -59,8 +61,9 @@ import kotlinx.coroutines.launch
  * request across every enabled addon search catalog. */
 private const val SEARCH_DEBOUNCE_MS = 450L
 
-private val SearchPosterWidth = 152.dp
-private val SearchPosterHeight = 228.dp
+// Match Home poster dimensions (176x264dp) so search results read at the same scale on TV.
+private val SearchPosterWidth = 176.dp
+private val SearchPosterHeight = 264.dp
 
 sealed interface RewriteSearchResultState {
     data object Idle : RewriteSearchResultState
@@ -100,12 +103,41 @@ fun RewriteSearchScreen(
         }
         resultState = RewriteSearchResultState.Loading
         delay(SEARCH_DEBOUNCE_MS)
+        val startedAt = SystemClock.elapsedRealtime()
+        ExperimentalDiagnostics.event(
+            "search",
+            "request_started",
+            mapOf(
+                "queryLength" to trimmed.length,
+                "queryHash" to trimmed.hashCode().toUInt().toString(16),
+                "retry" to retryNonce,
+            ),
+        )
         try {
-            resultState = RewriteSearchResultState.Loaded(search(trimmed))
+            val posters = search(trimmed)
+            resultState = RewriteSearchResultState.Loaded(posters)
+            ExperimentalDiagnostics.event(
+                "search",
+                "request_completed",
+                mapOf(
+                    "durationMs" to SystemClock.elapsedRealtime() - startedAt,
+                    "resultCount" to posters.size,
+                    "queryLength" to trimmed.length,
+                ),
+            )
         } catch (cancelled: CancellationException) {
             throw cancelled
-        } catch (_: Throwable) {
+        } catch (failure: Throwable) {
             resultState = RewriteSearchResultState.Error("Search could not load. Check your connection and try again.")
+            ExperimentalDiagnostics.failure(
+                "search",
+                "request_failed",
+                failure,
+                *mapOf(
+                    "durationMs" to SystemClock.elapsedRealtime() - startedAt,
+                    "queryLength" to trimmed.length,
+                ).toList().toTypedArray(),
+            )
         }
     }
 
@@ -118,7 +150,10 @@ fun RewriteSearchScreen(
     ) {
         OutlinedTextField(
             value = query,
-            onValueChange = { query = it },
+            onValueChange = {
+                query = it
+                ExperimentalDiagnostics.event("search", "query_changed", mapOf("queryLength" to it.length))
+            },
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = SlugYardTvMetrics.ScreenHorizontalInset)
@@ -183,13 +218,28 @@ fun RewriteSearchScreen(
             when (val state = resultState) {
                 is RewriteSearchResultState.Idle -> SearchHint()
                 is RewriteSearchResultState.Loading -> SearchLoading()
-                is RewriteSearchResultState.Error -> SearchError(state.message) { retryNonce++ }
+                is RewriteSearchResultState.Error -> SearchError(state.message) {
+                    ExperimentalDiagnostics.event("search", "retry_clicked", mapOf("queryLength" to query.length))
+                    retryNonce++
+                }
                 is RewriteSearchResultState.Loaded -> if (state.posters.isEmpty()) {
                     SearchEmpty(query)
                 } else {
                     SearchResultsSections(
                         posters = state.posters,
-                        onPosterSelected = onPosterSelected,
+                        onPosterSelected = { poster ->
+                            ExperimentalDiagnostics.event(
+                                "search",
+                                "result_selected",
+                                mapOf(
+                                    "contentType" to poster.contentType,
+                                    "season" to poster.season,
+                                    "episode" to poster.episode,
+                                    "hasAddon" to (poster.addonId != null),
+                                ),
+                            )
+                            onPosterSelected(poster)
+                        },
                         firstFocusRequester = firstResultFocusRequester,
                         queryFieldFocusRequester = initialFocusRequester,
                     )
@@ -320,8 +370,8 @@ private fun SearchPosterRow(
                 poster = poster,
                 smoothFocusMovement = false,
                 onClick = { onPosterSelected(poster) },
-                showTypeBadge = false,
-                expandOnFocus = false,
+                showTypeBadge = true,
+                expandOnFocus = true,
                 cardWidth = SearchPosterWidth,
                 cardHeight = SearchPosterHeight,
                 focusRequester = if (index == 0) firstFocusRequester else null,

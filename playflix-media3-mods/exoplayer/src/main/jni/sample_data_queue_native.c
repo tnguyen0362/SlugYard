@@ -1,6 +1,6 @@
 /* sample_data_queue_native.c
  * JNI implementation for zero-copy buffer operations.
- * Fork addition for NuvioEngineConfig performance mode.
+ * Fork addition for SlugYardEngineConfig performance mode.
  */
 #include <jni.h>
 #include <string.h>

@@ -58,7 +58,7 @@ class TraktPublicListSourceResolverTest {
 
         assertEquals(123L, resolver.parseTraktListId("123"))
         assertEquals(456L, resolver.parseTraktListId("https://trakt.tv/lists/456"))
-        assertEquals(null, resolver.parseTraktListId("https://trakt.tv/users/nuvio/lists/weekend"))
+        assertEquals(null, resolver.parseTraktListId("https://trakt.tv/users/slugyard/lists/weekend"))
     }
 
     @Test
@@ -73,7 +73,7 @@ class TraktPublicListSourceResolverTest {
         )
         val resolver = resolver(api, authenticated = true)
 
-        val metadata = resolver.listImportMetadata("https://trakt.tv/users/nuvio/lists/weekend")
+        val metadata = resolver.listImportMetadata("https://trakt.tv/users/slugyard/lists/weekend")
 
         assertEquals("Weekend", metadata.title)
         assertEquals(88L, metadata.traktListId)
@@ -203,7 +203,7 @@ class TraktPublicListSourceResolverTest {
                         likes = 7,
                         commentCount = 3,
                         ids = TraktListIdsDto(trakt = 12L, slug = "award-winners"),
-                        user = TraktUserDto(username = "nuvio")
+                        user = TraktUserDto(username = "slugyard")
                     )
                 )
             )
@@ -214,7 +214,7 @@ class TraktPublicListSourceResolverTest {
 
         assertEquals(12L, result.traktListId)
         assertEquals("Award Winners", result.title)
-        assertTrue(result.subtitle, result.subtitle.contains("nuvio"))
+        assertTrue(result.subtitle, result.subtitle.contains("slugyard"))
         assertTrue(result.subtitle, result.subtitle.contains("42 items"))
     }
 

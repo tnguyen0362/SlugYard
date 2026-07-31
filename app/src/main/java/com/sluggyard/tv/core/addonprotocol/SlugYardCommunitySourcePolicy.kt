@@ -17,6 +17,8 @@ object SlugYardCommunitySourcePolicy {
         "https://torrentio.strem.fun/manifest.json",
         // Keyless catalog only — never a pre-baked encrypted user path with embedded credentials.
         "https://mediafusionfortheweebs.midnightignite.me/manifest.json",
+        // Comet cache-first scraper; debrid key injected into configuredManifestUrl on connect.
+        "https://comet.elfhosted.com/manifest.json",
     )
 
     val watchHubManifestUrl: String =
@@ -39,7 +41,16 @@ object SlugYardCommunitySourcePolicy {
 
     fun isContentSourceManifest(url: String): Boolean {
         val normalized = url.lowercase()
-        return "torrentio" in normalized || "mediafusion" in normalized
+        return "torrentio" in normalized || "mediafusion" in normalized || "comet" in normalized
+    }
+
+    fun isConfiguredEnabledStreamAddon(addon: ManagedAddon): Boolean =
+        addon.enabled &&
+            AddonResource.STREAM in addon.manifest.resources &&
+            !addon.configuredManifestUrl.isNullOrBlank()
+
+    fun isTorrentioReady(addons: List<ManagedAddon>): Boolean = addons.any { addon ->
+        isConfiguredEnabledStreamAddon(addon) && addon.manifestUrl.contains("torrentio", ignoreCase = true)
     }
 
     fun isInfrastructureManifest(url: String): Boolean =

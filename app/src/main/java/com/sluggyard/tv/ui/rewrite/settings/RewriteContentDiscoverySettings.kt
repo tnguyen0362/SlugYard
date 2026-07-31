@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import com.sluggyard.tv.core.addonprotocol.ManagedAddon
 import com.sluggyard.tv.core.addonprotocol.SlugYardCommunitySourcePolicy
 import com.sluggyard.tv.domain.model.TmdbSettings
+import com.sluggyard.tv.core.logging.ExperimentalDiagnostics
 import kotlinx.coroutines.launch
 
 @Composable
@@ -43,10 +44,8 @@ internal fun ContentDiscoverySettings(
     var uninstallConfirm by remember { mutableStateOf(false) }
     val packInstalled = SlugYardCommunitySourcePolicy.isCommunityPackInstalled(rewriteAddons)
     val watchHubInstalled = SlugYardCommunitySourcePolicy.isWatchHubInstalled(rewriteAddons)
-    val contentSourcesReady = rewriteAddons.any { addon ->
-        SlugYardCommunitySourcePolicy.isContentSourceManifest(addon.manifestUrl) &&
-            !addon.configuredManifestUrl.isNullOrBlank()
-    }
+    val contentSourcesReady = rewriteAddons.any(SlugYardCommunitySourcePolicy::isConfiguredEnabledStreamAddon)
+    val torrentioReady = SlugYardCommunitySourcePolicy.isTorrentioReady(rewriteAddons)
     val catalogAddons = rewriteAddons.filter { addon ->
         !SlugYardCommunitySourcePolicy.isContentSourceManifest(addon.manifestUrl) &&
             !SlugYardCommunitySourcePolicy.isWatchHubManifest(addon.manifestUrl)
@@ -59,7 +58,11 @@ internal fun ContentDiscoverySettings(
         Text(
             when {
                 debridConnected && packInstalled ->
-                    "SlugYard Sources are installed. Debrid stream addons are configured for your provider."
+                    if (torrentioReady) {
+                        "SlugYard Sources are installed. Torrentio and the configured stream addons are enabled."
+                    } else {
+                        "SlugYard Sources are installed, but Torrentio is not currently configured as an enabled stream source."
+                    }
                 debridConnected ->
                     "Your debrid key is connected. Install community addons for catalogs, WatchHub, and stream sources."
                 packInstalled && watchHubInstalled ->
@@ -73,13 +76,15 @@ internal fun ContentDiscoverySettings(
         RewriteActionRow(
             title = "SlugYard Sources",
             description = when {
-                packInstalled && debridConnected && contentSourcesReady -> "Installed with debrid stream sources."
+                packInstalled && debridConnected && torrentioReady && contentSourcesReady -> "Installed with Torrentio and debrid stream sources."
+                packInstalled && debridConnected && contentSourcesReady -> "Installed with debrid stream sources; Torrentio is not ready."
                 packInstalled && watchHubInstalled -> "Installed (WatchHub + catalogs)."
                 packInstalled -> "Installed."
                 else -> "Install the bundled community addon pack (catalogs, WatchHub, stream sources)."
             },
             actionLabel = if (packInstalled) "Reinstall" else "Install",
             onClick = {
+                ExperimentalDiagnostics.event("settings", "community_addons_setup_opened", mapOf("installed" to packInstalled))
                 setupMessage = null
                 showSetupDialog = true
             },
@@ -122,18 +127,23 @@ internal fun ContentDiscoverySettings(
             debridConnected = debridConnected,
             installed = packInstalled,
             onConfirm = {
+                ExperimentalDiagnostics.event("settings", "community_addons_install_confirmed", mapOf("debridConnected" to debridConnected))
                 setupBusy = true
                 setupMessage = null
                 scope.launch {
                     runCatching { onInstallCommunityAddons() }
                         .onSuccess {
+                            ExperimentalDiagnostics.event("settings", "community_addons_install_succeeded")
                             setupMessage = if (debridConnected) {
                                 "Community addons installed. Stream sources are ready."
                             } else {
                                 "Community addons installed. WatchHub is ready without debrid."
                             }
                         }
-                        .onFailure { setupMessage = it.message ?: "Could not install community addons." }
+                        .onFailure {
+                            ExperimentalDiagnostics.failure("settings", "community_addons_install_failed", it)
+                            setupMessage = it.message ?: "Could not install community addons."
+                        }
                     setupBusy = false
                 }
             },
@@ -150,16 +160,19 @@ internal fun ContentDiscoverySettings(
             busy = setupBusy,
             message = setupMessage,
             onConfirm = {
+                ExperimentalDiagnostics.event("settings", "community_addons_uninstall_confirmed")
                 setupBusy = true
                 setupMessage = null
                 scope.launch {
                     runCatching { onUninstallCommunityAddons() }
                         .onSuccess {
+                            ExperimentalDiagnostics.event("settings", "community_addons_uninstall_succeeded")
                             setupMessage = "Community addons removed."
                             uninstallConfirm = false
                             setupBusy = false
                         }
                         .onFailure {
+                            ExperimentalDiagnostics.failure("settings", "community_addons_uninstall_failed", it)
                             setupMessage = it.message ?: "Could not uninstall community addons."
                             setupBusy = false
                         }

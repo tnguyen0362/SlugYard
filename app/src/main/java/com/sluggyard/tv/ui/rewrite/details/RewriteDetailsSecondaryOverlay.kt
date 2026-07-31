@@ -172,6 +172,7 @@ fun RewriteDetailsSecondaryOverlay(
                 OutlinedButton(
                     onClick = onDismiss,
                     modifier = Modifier.focusRequester(closeFocusRequester),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                 ) {
                     Text("Close")
                 }
@@ -206,6 +207,7 @@ fun RewriteDetailsSecondaryOverlay(
                             OutlinedButton(
                                 onClick = { onMarkSeasonWatched(selectedSeason.number) },
                                 enabled = !selectedSeason.fullyWatched,
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                             ) {
                                 Text(if (selectedSeason.fullyWatched) "Watched" else "Mark season watched")
                             }

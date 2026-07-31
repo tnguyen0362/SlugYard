@@ -20,6 +20,11 @@ internal fun PlayerRuntimeController.attachMpvView(view: MpvPlayerSurfaceView?) 
     if (view == null) return
     if (!isUsingMpvEngine()) return
     if (currentStreamUrl.isBlank()) return
+    // The first view attachment happens before startInitialPlaybackIfNeeded(). That startup path
+    // owns the initial setMedia call, including the resume position. Queuing a zero-position
+    // playFile here leaves BaseMPVView with a second pending load, so Continue Watching can issue
+    // an unseeked load and a resumed load during the same surfaceCreated callback.
+    if (!initialPlaybackStarted) return
     if (mpvInitializationInProgress) return
 
     runCatching {
@@ -29,6 +34,11 @@ internal fun PlayerRuntimeController.attachMpvView(view: MpvPlayerSurfaceView?) 
         view.setPlaybackSpeed(_uiState.value.playbackSpeed)
         view.applyAudioAmplificationDb(_uiState.value.audioAmplificationDb)
         view.applyAudioLanguagePreferences(mpvPreferredAudioLanguages)
+        view.applyAudioOutputSettings(
+            downmixEnabled = currentPlayerSettingsForReport.downmixEnabled,
+            outputChannels = currentPlayerSettingsForReport.audioOutputChannels,
+            maintainOriginalMix = currentPlayerSettingsForReport.maintainOriginalAudioOnDownmix,
+        )
         view.applySubtitleLanguagePreferences(
             preferred = _uiState.value.subtitleStyle.preferredLanguage,
             secondary = _uiState.value.subtitleStyle.secondaryPreferredLanguage,
@@ -124,6 +134,11 @@ internal fun PlayerRuntimeController.initializeMpvPlayer(
         view.setPlaybackSpeed(_uiState.value.playbackSpeed)
         view.applyAudioAmplificationDb(_uiState.value.audioAmplificationDb)
         view.applyAudioLanguagePreferences(mpvPreferredAudioLanguages)
+        view.applyAudioOutputSettings(
+            downmixEnabled = currentPlayerSettingsForReport.downmixEnabled,
+            outputChannels = currentPlayerSettingsForReport.audioOutputChannels,
+            maintainOriginalMix = currentPlayerSettingsForReport.maintainOriginalAudioOnDownmix,
+        )
         view.applySubtitleLanguagePreferences(
             preferred = _uiState.value.subtitleStyle.preferredLanguage,
             secondary = _uiState.value.subtitleStyle.secondaryPreferredLanguage,

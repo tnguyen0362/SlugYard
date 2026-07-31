@@ -1,5 +1,6 @@
 package com.sluggyard.tv.ui.rewrite.debrid
 
+import android.util.Log
 import com.sluggyard.tv.core.debrid.PremiumizeDirectDownloadFileSelector
 import com.sluggyard.tv.core.debrid.RealDebridFileSelector
 import com.sluggyard.tv.core.debrid.TorboxFileSelector
@@ -19,6 +20,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withTimeoutOrNull
+
+private const val TORBOX_DIAGNOSTIC_TAG = "RewriteTorboxFiles"
 
 /** Connection state deliberately exposes no API keys to Compose or navigation. */
 data class RewriteDebridConnection(
@@ -104,8 +107,13 @@ private class TorboxManualResolver(
         val selected = fileSelector.selectFile(
             transport.torrentFiles(key, torrentId).orUnavailable("Torbox could not prepare this stream")
                 .map { TorboxTorrentFileDto(it.id, it.name, null, null, it.mimeType, it.sizeBytes) },
-                resolveFor(infoHash, fileIndex), season, episode,
+            resolveFor(infoHash, fileIndex), season, episode,
         ) ?: throw RewriteDebridUnavailableException("Torbox did not return a playable file")
+        Log.d(
+            TORBOX_DIAGNOSTIC_TAG,
+            "download-link requested season=$season episode=$episode fileId=${selected.id} " +
+                "size=${selected.size ?: -1} name='${selected.displayName().take(180)}'",
+        )
         val url = transport.downloadUrl(key, torrentId, selected.id ?: throw RewriteDebridUnavailableException("Torbox did not return a playable file"))
         .orUnavailable("TorBox did not return a download URL for this file. Try another Instant/Cached source.")
         return ResolvedPlaybackSource(url, infoHash)

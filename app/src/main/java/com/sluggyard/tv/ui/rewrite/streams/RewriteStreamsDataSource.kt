@@ -1,5 +1,7 @@
 package com.sluggyard.tv.ui.rewrite.streams
 
+import android.util.Log
+import com.sluggyard.tv.BuildConfig
 import com.sluggyard.tv.core.addonprotocol.AddonRegistryState
 import com.sluggyard.tv.core.addonprotocol.AddonResource
 import com.sluggyard.tv.core.addonprotocol.AddonTransportResult
@@ -27,6 +29,9 @@ import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
+import java.net.URI
+
+private const val REWRITE_STREAM_SOURCE_TAG = "RewriteStreamSources"
 
 /** A progressive, per-addon stream result list for the rewritten Streams surface. */
 class RewriteStreamsDataSource(
@@ -45,6 +50,14 @@ class RewriteStreamsDataSource(
                 // WatchHub is availability metadata for Details, not a playable torrent source.
                 !addon.isWatchHubSource()
         }
+        if (BuildConfig.DEBUG) {
+            Log.i(
+                REWRITE_STREAM_SOURCE_TAG,
+                "fanout addons=${addons.joinToString(" | ") { addon ->
+                    "${addon.manifest.id}:${addon.manifest.name}:host=${addonHost(addon)}"
+                }}",
+            )
+        }
         val groups = addons.map { addon ->
             RewriteStreamGroup(addon.manifest.id, addon.manifest.name, RewriteStreamGroupState.Loading)
         }.toMutableList()
@@ -59,9 +72,36 @@ class RewriteStreamsDataSource(
             val taskKey = addon.manifest.id
             byTask[taskKey] = addon
             AddonFanoutTask(taskKey) {
-                when (val response = gateway.fetchStreams(addon.configuredManifestUrl ?: addon.manifestUrl, type, id)) {
-                    is AddonTransportResult.Success -> StremioResponseDecoder.streamItems(response.value)
-                    else -> throw RewriteStreamLoadException(addon, response)
+                val requestUrl = addon.configuredManifestUrl ?: addon.manifestUrl
+                if (BuildConfig.DEBUG) {
+                    Log.d(
+                        REWRITE_STREAM_SOURCE_TAG,
+                        "request addon=${addon.manifest.id} host=${addonHost(addon)} " +
+                            "mode=${addonUrlMode(requestUrl)} type=$type id=$id",
+                    )
+                }
+                when (val response = gateway.fetchStreams(requestUrl, type, id)) {
+                    is AddonTransportResult.Success -> {
+                        val streams = StremioResponseDecoder.streamItems(response.value)
+                        if (BuildConfig.DEBUG) {
+                            Log.i(
+                                REWRITE_STREAM_SOURCE_TAG,
+                                "response addon=${addon.manifest.id} mode=${addonUrlMode(requestUrl)} " +
+                                    "streams=${streams.size}",
+                            )
+                        }
+                        streams
+                    }
+                    else -> {
+                        if (BuildConfig.DEBUG) {
+                            Log.w(
+                                REWRITE_STREAM_SOURCE_TAG,
+                                "response addon=${addon.manifest.id} mode=${addonUrlMode(requestUrl)} " +
+                                    "error=${response.userMessage()}",
+                            )
+                        }
+                        throw RewriteStreamLoadException(addon, response)
+                    }
                 }
             }
         }
@@ -196,4 +236,18 @@ private fun ManagedAddon.isWatchHubSource(): Boolean {
         .joinToString(" ")
         .lowercase()
     return "watchhub" in haystack
+}
+
+private fun addonHost(addon: ManagedAddon): String = runCatching {
+    URI(addon.configuredManifestUrl ?: addon.manifestUrl).host
+}.getOrNull()?.takeIf(String::isNotBlank) ?: "unknown"
+
+private fun addonUrlMode(url: String): String {
+    val path = runCatching { URI(url).path }.getOrNull().orEmpty()
+    return when {
+        url.contains("%7C", ignoreCase = true) -> "configured-pipe-encoded"
+        url.contains('|') -> "configured-pipe-raw"
+        path.equals("/manifest.json", ignoreCase = true) -> "bootstrap"
+        else -> "configured"
+    }
 }

@@ -3,6 +3,7 @@ package com.sluggyard.tv.core.torrent
 import android.content.Context
 import android.os.Build
 import android.util.Log
+import com.sluggyard.tv.BuildConfig
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -58,7 +59,7 @@ class TorrServerBinary @Inject constructor(
 
     suspend fun start() = withContext(Dispatchers.IO) {
         if (isRunning()) {
-            Log.d(TAG, "TorrServer already running")
+            if (BuildConfig.DEBUG) Log.d(TAG, "TorrServer already running")
             return@withContext
         }
 
@@ -82,7 +83,7 @@ class TorrServerBinary @Inject constructor(
         pb.directory(configDir)
         pb.redirectErrorStream(true)
 
-        Log.d(TAG, "Starting TorrServer on port $PORT from ${binaryFile.absolutePath}")
+        if (BuildConfig.DEBUG) Log.d(TAG, "Starting TorrServer on port $PORT from ${binaryFile.absolutePath}")
         process = pb.start()
 
         // Read stdout in daemon thread for debugging
@@ -90,7 +91,7 @@ class TorrServerBinary @Inject constructor(
         Thread {
             try {
                 proc.inputStream.bufferedReader().forEachLine { line ->
-                    Log.d(TAG, "[server] $line")
+                    if (BuildConfig.DEBUG) Log.d(TAG, "[server] $line")
                 }
             } catch (_: Exception) {}
         }.apply {
@@ -103,7 +104,7 @@ class TorrServerBinary @Inject constructor(
         val deadline = System.currentTimeMillis() + STARTUP_TIMEOUT_MS
         while (System.currentTimeMillis() < deadline) {
             if (isRunning()) {
-                Log.d(TAG, "TorrServer started successfully")
+                if (BuildConfig.DEBUG) Log.d(TAG, "TorrServer started successfully")
                 return@withContext
             }
             if (!isProcessAlive(process)) {
@@ -124,7 +125,7 @@ class TorrServerBinary @Inject constructor(
             val request = Request.Builder().url("$baseUrl/shutdown").build()
             healthClient.newCall(request).execute().close()
             Thread.sleep(1000)
-            Log.d(TAG, "Shut down orphaned TorrServer instance")
+            if (BuildConfig.DEBUG) Log.d(TAG, "Shut down orphaned TorrServer instance")
         } catch (_: Exception) {
             // No orphan responding — nothing to do
         }
@@ -149,7 +150,7 @@ class TorrServerBinary @Inject constructor(
             }
         }
         process = null
-        Log.d(TAG, "TorrServer stopped")
+        if (BuildConfig.DEBUG) Log.d(TAG, "TorrServer stopped")
     }
 
     private fun isProcessAlive(proc: Process?): Boolean {

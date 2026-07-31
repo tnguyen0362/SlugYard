@@ -227,6 +227,7 @@ data class PlaybackIssuePlaybackSettingsDto(
     @Json(name = "parallelConnectionCount") val parallelConnectionCount: Int,
     @Json(name = "parallelChunkSizeKb") val parallelChunkSizeKb: Int,
     @Json(name = "enableHttp2") val enableHttp2: Boolean,
+    // Keep the historical wire field for compatibility with the report backend.
     @Json(name = "nuvioPerformanceModeEnabled") val exoPerformanceModeEnabled: Boolean,
     @Json(name = "streamAutoPlayMode") val streamAutoPlayMode: String,
     @Json(name = "streamAutoPlaySource") val streamAutoPlaySource: String,
