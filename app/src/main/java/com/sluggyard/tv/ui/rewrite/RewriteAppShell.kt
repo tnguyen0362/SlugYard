@@ -94,6 +94,7 @@ import com.sluggyard.tv.ui.rewrite.data.RewriteLibraryWatchStore
 import com.sluggyard.tv.ui.rewrite.data.RewriteLibraryWatchRepository
 import com.sluggyard.tv.ui.rewrite.data.RewriteLibraryWatchState
 import com.sluggyard.tv.ui.rewrite.data.RewritePlaybackProgressStore
+import com.sluggyard.tv.ui.rewrite.data.groupRewritePlaybackCheckpoints
 import com.sluggyard.tv.core.sync.RewriteProgressSyncBridge
 import com.sluggyard.tv.ui.rewrite.data.RewriteProfileStore
 import com.sluggyard.tv.ui.rewrite.data.RewriteHomeSettingsStore
@@ -2194,7 +2195,9 @@ private fun resolveMetadataAddonId(registry: AddonRegistryState): String? {
 /** HotD-style episode ids are often `tt1234567:1:1` or `tt1234567:34` — parent is before the first `:`. */
 private fun inferSeriesParentId(contentId: String, season: Int?, episode: Int?): String? {
     if (season == null && episode == null) return null
-    val base = contentId.substringBefore(':').trim()
+    val base = com.sluggyard.tv.data.repository.StreamMergeUtils
+        .deriveInlineMetaId(contentId)
+        .trim()
     return base.takeIf { it.isNotBlank() && it != contentId }
 }
 
@@ -2256,19 +2259,21 @@ private fun RewriteHomeCatalogState.toScreenState(
                 RewriteHomeRow(
                     id = "continue_watching",
                     title = "Continue Watching",
-                    posters = playbackCheckpoints.map { checkpoint ->
-                        val catalogMatch = catalogPostersById[checkpoint.contentId]
-                            ?: checkpoint.parentId?.let(catalogPostersById::get)
+                    posters = groupRewritePlaybackCheckpoints(playbackCheckpoints).map { checkpoint ->
+                        val checkpointParentId = checkpoint.parentId
+                            ?: inferSeriesParentId(checkpoint.contentId, checkpoint.season, checkpoint.episode)
+                        val catalogMatch = checkpointParentId?.let(catalogPostersById::get)
+                            ?: catalogPostersById[checkpoint.contentId]
                         com.sluggyard.tv.ui.rewrite.home.RewriteHomePoster(
                             id = checkpoint.contentId,
-                            title = checkpoint.title,
+                            title = catalogMatch?.title ?: checkpoint.title,
                             imageUrl = checkpoint.posterUrl ?: catalogMatch?.imageUrl,
                             progressFraction = checkpoint.progressFraction?.toFloat(),
                             contentType = checkpoint.contentType,
                             addonId = checkpoint.addonId ?: catalogMatch?.addonId,
                             season = checkpoint.season,
                             episode = checkpoint.episode,
-                            parentId = checkpoint.parentId ?: catalogMatch?.parentId,
+                            parentId = checkpointParentId ?: catalogMatch?.parentId,
                             parentType = checkpoint.parentType ?: catalogMatch?.parentType,
                             resumePositionMs = checkpoint.positionMs,
                             contentGenres = checkpoint.contentGenres,

@@ -4,6 +4,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
+import com.sluggyard.tv.data.repository.StreamMergeUtils
 import com.sluggyard.tv.core.sync.RewriteProgressSyncBridge
 import com.sluggyard.tv.core.sync.model.CloudWatchProgress
 import com.sluggyard.tv.core.watchstate.WatchStatePolicy
@@ -43,6 +44,31 @@ data class RewritePlaybackCheckpoint(
         get() = WatchStatePolicy.isStartedButIncomplete(positionMs, durationMs)
 }
 
+/** Keep one Continue Watching tile per series while retaining the newest episode checkpoint. */
+internal fun groupRewritePlaybackCheckpoints(
+    checkpoints: List<RewritePlaybackCheckpoint>,
+): List<RewritePlaybackCheckpoint> = checkpoints
+    .groupBy { checkpoint ->
+        val isEpisode = checkpoint.season != null ||
+            checkpoint.episode != null ||
+            checkpoint.parentType.equals("series", ignoreCase = true)
+        if (!isEpisode) {
+            checkpoint.contentId
+        } else {
+            checkpoint.parentId?.takeIf { it.isNotBlank() }
+                ?: StreamMergeUtils.deriveInlineMetaId(checkpoint.contentId)
+        }
+    }
+    .values
+    .mapNotNull { group ->
+        group.maxWithOrNull(
+            compareBy<RewritePlaybackCheckpoint> { it.updatedAtEpochMs }
+                .thenBy { it.season ?: -1 }
+                .thenBy { it.episode ?: -1 }
+                .thenBy { it.contentId },
+        )
+    }
+    .sortedByDescending(RewritePlaybackCheckpoint::updatedAtEpochMs)
 interface RewritePlaybackProgressRepository {
     val checkpoints: Flow<List<RewritePlaybackCheckpoint>>
     suspend fun save(checkpoint: RewritePlaybackCheckpoint)
