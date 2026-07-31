@@ -596,10 +596,25 @@ private fun PlayerIconButton(
 ) {
     val interactions = remember { MutableInteractionSource() }
     val focused by interactions.collectIsFocusedAsState()
-    val scale by animateFloatAsState(if (focused) 1.04f else 1f, animationSpec = tween(180), label = "$contentDescription focus scale")
-    val diameter = 32.dp
-    val background = if (focused) SlugYardPalette.SurfaceElevated else SlugYardPalette.Surface.copy(alpha = .55f)
-    val tint = SlugYardPalette.OnCanvas
+    val scale by animateFloatAsState(if (focused) 1.06f else 1f, animationSpec = tween(160), label = "$contentDescription focus scale")
+    val diameter = when (emphasis) {
+        ButtonEmphasis.PRIMARY -> 44.dp
+        ButtonEmphasis.SECONDARY -> 36.dp
+        ButtonEmphasis.SUBORDINATE -> 32.dp
+    }
+    val shape = RoundedCornerShape(SlugYardTvMetrics.ButtonCornerRadius)
+    val background = when {
+        focused && emphasis == ButtonEmphasis.PRIMARY -> Color.White
+        focused -> SlugYardPalette.Accent
+        emphasis == ButtonEmphasis.PRIMARY -> Color.White.copy(alpha = 0.92f)
+        else -> SlugYardPalette.SurfaceElevated.copy(alpha = 0.85f)
+    }
+    val tint = when {
+        focused && emphasis == ButtonEmphasis.PRIMARY -> Color(0xFF141414)
+        focused -> Color(0xFF141414)
+        emphasis == ButtonEmphasis.PRIMARY -> Color(0xFF141414)
+        else -> SlugYardPalette.OnCanvas
+    }
 
     Box(
         modifier = Modifier
@@ -616,9 +631,13 @@ private fun PlayerIconButton(
                 } else Modifier
             )
             .graphicsLayer { scaleX = scale; scaleY = scale }
-            .clip(CircleShape)
-            .background(background, CircleShape)
-            .border(2.dp, if (focused) SlugYardPalette.Accent else Color.Transparent, CircleShape)
+            .clip(shape)
+            .background(background, shape)
+            .border(
+                SlugYardTvMetrics.FocusRingWidth,
+                if (focused) SlugYardPalette.FocusRing else Color.Transparent,
+                shape,
+            )
             .clickable(
                 interactionSource = interactions,
                 indication = null,
@@ -631,7 +650,7 @@ private fun PlayerIconButton(
             imageVector = icon,
             contentDescription = null,
             tint = tint,
-            modifier = Modifier.size(16.dp),
+            modifier = Modifier.size(if (emphasis == ButtonEmphasis.PRIMARY) 22.dp else 18.dp),
         )
     }
 }
@@ -649,8 +668,9 @@ private fun PlayerLabeledIconButton(
 ) {
     val interactions = remember { MutableInteractionSource() }
     val focused by interactions.collectIsFocusedAsState()
-    val scale by animateFloatAsState(if (focused) 1.04f else 1f, animationSpec = tween(160), label = "$label focus scale")
+    val scale by animateFloatAsState(if (focused) 1.05f else 1f, animationSpec = tween(160), label = "$label focus scale")
     val shortLabel = label.take(18)
+    val shape = RoundedCornerShape(SlugYardTvMetrics.ButtonCornerRadius)
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -678,22 +698,27 @@ private fun PlayerLabeledIconButton(
     ) {
         Box(
             modifier = Modifier
-                .size(40.dp)
-                .clip(CircleShape)
-                .background(if (focused) Color.White else SlugYardPalette.Surface.copy(alpha = .55f), CircleShape)
-                .border(2.dp, if (focused) Color.White else Color.Transparent, CircleShape),
+                .size(42.dp)
+                .clip(shape)
+                .background(if (focused) Color.White else SlugYardPalette.SurfaceElevated.copy(alpha = 0.9f), shape)
+                .border(
+                    SlugYardTvMetrics.FocusRingWidth,
+                    if (focused) SlugYardPalette.FocusRing else Color.Transparent,
+                    shape,
+                ),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                tint = if (focused) Color(0xFF181818) else SlugYardPalette.OnCanvas,
-                modifier = Modifier.size(18.dp),
+                tint = if (focused) Color(0xFF141414) else SlugYardPalette.OnCanvas,
+                modifier = Modifier.size(20.dp),
             )
         }
         Text(
             shortLabel,
             style = MaterialTheme.typography.labelMedium,
+            fontWeight = if (focused) FontWeight.SemiBold else FontWeight.Medium,
             color = if (focused) Color.White else SlugYardPalette.OnCanvasMuted,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,

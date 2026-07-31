@@ -8,9 +8,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -21,12 +19,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.sluggyard.tv.ui.design.SlugYardPalette
 import com.sluggyard.tv.ui.design.SlugYardTvMetrics
+import com.sluggyard.tv.ui.rewrite.RewriteButtonStyle
+import com.sluggyard.tv.ui.rewrite.RewriteTvButton
 import com.sluggyard.tv.ui.rewrite.requestFocusReliably
 import kotlinx.coroutines.delay
 
@@ -54,13 +54,15 @@ fun RewriteContinueWatchingOptionsDialog(
         Column(
             modifier = Modifier
                 .fillMaxWidth(0.42f)
-                .background(SlugYardPalette.SurfaceElevated, RoundedCornerShape(8.dp))
+                .background(SlugYardPalette.Surface, RoundedCornerShape(SlugYardTvMetrics.SheetCornerRadius))
+                .border(1.dp, SlugYardPalette.Divider, RoundedCornerShape(SlugYardTvMetrics.SheetCornerRadius))
                 .padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
                 text = title,
-                style = MaterialTheme.typography.titleLarge,
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.SemiBold,
                 color = SlugYardPalette.OnCanvas,
             )
             Text(
@@ -68,67 +70,28 @@ fun RewriteContinueWatchingOptionsDialog(
                 style = MaterialTheme.typography.bodyMedium,
                 color = SlugYardPalette.OnCanvasMuted,
             )
-            FocusRingDialogButton(
+            RewriteTvButton(
                 label = "Cancel",
                 onClick = onDismiss,
-                primary = false,
+                style = RewriteButtonStyle.Secondary,
                 enabled = true,
-                modifier = Modifier.focusRequester(cancelFocusRequester),
+                fillMaxWidth = true,
+                focusRequester = cancelFocusRequester,
             )
-            FocusRingDialogButton(
+            RewriteTvButton(
                 label = "View details",
                 onClick = { if (actionsArmed) onViewDetails() },
-                primary = true,
+                style = RewriteButtonStyle.Primary,
                 enabled = actionsArmed,
+                fillMaxWidth = true,
             )
-            FocusRingDialogButton(
+            RewriteTvButton(
                 label = "Remove from Continue Watching",
                 onClick = { if (actionsArmed) onRemove() },
-                primary = false,
+                style = RewriteButtonStyle.Ghost,
                 enabled = actionsArmed,
+                fillMaxWidth = true,
             )
-        }
-    }
-}
-
-@Composable
-private fun FocusRingDialogButton(
-    label: String,
-    onClick: () -> Unit,
-    primary: Boolean,
-    enabled: Boolean = true,
-    modifier: Modifier = Modifier,
-) {
-    var focused by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(SlugYardTvMetrics.PillCornerRadius)
-    val focusBorder = if (focused) {
-        Modifier.border(SlugYardTvMetrics.FocusRingWidth, SlugYardPalette.FocusRing, shape)
-    } else {
-        Modifier
-    }
-    if (primary) {
-        Button(
-            onClick = onClick,
-            enabled = enabled,
-            shape = shape,
-            modifier = modifier
-                .fillMaxWidth()
-                .then(focusBorder)
-                .onFocusChanged { focused = it.isFocused },
-        ) {
-            Text(label)
-        }
-    } else {
-        OutlinedButton(
-            onClick = onClick,
-            enabled = enabled,
-            shape = shape,
-            modifier = modifier
-                .fillMaxWidth()
-                .then(focusBorder)
-                .onFocusChanged { focused = it.isFocused },
-        ) {
-            Text(label)
         }
     }
 }

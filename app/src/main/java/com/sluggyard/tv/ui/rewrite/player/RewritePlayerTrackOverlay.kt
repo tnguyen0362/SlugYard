@@ -25,10 +25,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -48,6 +45,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.sluggyard.tv.ui.design.SlugYardPalette
 import com.sluggyard.tv.ui.design.SlugYardTvMetrics
+import com.sluggyard.tv.ui.rewrite.RewriteButtonStyle
+import com.sluggyard.tv.ui.rewrite.RewriteTvButton
 import com.sluggyard.tv.ui.screens.player.PlayerUiState
 import com.sluggyard.tv.ui.screens.player.PlayerSubtitleUtils
 import com.sluggyard.tv.ui.screens.player.RewritePlayerTrackActions
@@ -129,7 +128,11 @@ fun RewritePlayerTrackOverlay(
             modifier = modifier,
             closeFocusRequester = closeFocusRequester,
             headerTrailing = {
-                OutlinedButton(onClick = actions.onOpenSubtitleStyle) { Text("Style") }
+                RewriteTvButton(
+                    label = "Style",
+                    onClick = actions.onOpenSubtitleStyle,
+                    style = RewriteButtonStyle.Secondary,
+                )
             },
         ) {
             // Build unique keys from list ordinals. Media3 format.id is often null/blank/duplicated
@@ -203,12 +206,11 @@ fun RewritePlayerTrackOverlay(
                 )
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("Bold", modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, color = SlugYardPalette.OnCanvas)
-                    Button(
+                    RewriteTvButton(
+                        label = if (state.subtitleStyle.bold) "On" else "Off",
                         onClick = { actions.onSetSubtitleBold(!state.subtitleStyle.bold) },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (state.subtitleStyle.bold) SlugYardPalette.Accent else SlugYardPalette.SurfaceElevated,
-                        ),
-                    ) { Text(if (state.subtitleStyle.bold) "On" else "Off") }
+                        style = if (state.subtitleStyle.bold) RewriteButtonStyle.Primary else RewriteButtonStyle.Secondary,
+                    )
                 }
                 Text("Text color", style = MaterialTheme.typography.titleSmall, color = SlugYardPalette.OnCanvas)
                 ColorSwatchRow(
@@ -218,12 +220,11 @@ fun RewritePlayerTrackOverlay(
                 )
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("Outline", modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, color = SlugYardPalette.OnCanvas)
-                    Button(
+                    RewriteTvButton(
+                        label = if (state.subtitleStyle.outlineEnabled) "On" else "Off",
                         onClick = { actions.onSetSubtitleOutlineEnabled(!state.subtitleStyle.outlineEnabled) },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (state.subtitleStyle.outlineEnabled) SlugYardPalette.Accent else SlugYardPalette.SurfaceElevated,
-                        ),
-                    ) { Text(if (state.subtitleStyle.outlineEnabled) "On" else "Off") }
+                        style = if (state.subtitleStyle.outlineEnabled) RewriteButtonStyle.Primary else RewriteButtonStyle.Secondary,
+                    )
                 }
                 if (state.subtitleStyle.outlineEnabled) {
                     ColorSwatchRow(
@@ -232,7 +233,11 @@ fun RewritePlayerTrackOverlay(
                         onSelect = actions.onSetSubtitleOutlineColor,
                     )
                 }
-                OutlinedButton(onClick = actions.onResetSubtitleStyle) { Text("Reset style") }
+                RewriteTvButton(
+                    label = "Reset style",
+                    onClick = actions.onResetSubtitleStyle,
+                    style = RewriteButtonStyle.Secondary,
+                )
             }
         }
         state.showSpeedDialog -> RewriteTrackSheet("Playback speed", actions.onDismiss, modifier, closeFocusRequester) {
@@ -246,14 +251,12 @@ fun RewritePlayerTrackOverlay(
             ) {
                 items(speeds, key = { it }) { speed ->
                     val selected = speed == state.playbackSpeed
-                    Button(
+                    RewriteTvButton(
+                        label = "${speed}×",
                         onClick = { actions.onSetPlaybackSpeed(speed) },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (selected) SlugYardPalette.Accent else SlugYardPalette.Surface,
-                            contentColor = SlugYardPalette.OnCanvas,
-                        ),
-                    ) { Text("${speed}×") }
+                        style = if (selected) RewriteButtonStyle.Primary else RewriteButtonStyle.Secondary,
+                        fillMaxWidth = true,
+                    )
                 }
             }
         }
@@ -269,17 +272,19 @@ private fun RewriteTrackSheet(
     headerTrailing: (@Composable RowScope.() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    Box(modifier = modifier.fillMaxSize().background(Color.Black.copy(alpha = .58f)), contentAlignment = Alignment.CenterStart) {
+    Box(modifier = modifier.fillMaxSize().background(Color.Black.copy(alpha = .62f)), contentAlignment = Alignment.CenterStart) {
         // Fixed fraction height so weighted LazyColumns always get a real viewport. Shrink-wrapped
         // sheets made short lists unnavigable on TV (focus could not move/scroll inside the list).
+        val sheetShape = RoundedCornerShape(SlugYardTvMetrics.SheetCornerRadius)
         Column(
             modifier = Modifier
                 .padding(start = 48.dp)
                 .width(740.dp)
                 .fillMaxHeight(0.9f)
                 .heightIn(max = 820.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(SlugYardPalette.Canvas)
+                .clip(sheetShape)
+                .background(SlugYardPalette.Surface)
+                .border(1.dp, SlugYardPalette.Divider, sheetShape)
                 .padding(28.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
@@ -297,7 +302,12 @@ private fun RewriteTrackSheet(
                 if (headerTrailing != null) {
                     headerTrailing()
                 }
-                OutlinedButton(onClick = onClose, modifier = Modifier.focusRequester(closeFocusRequester)) { Text("Close") }
+                RewriteTvButton(
+                    label = "Close",
+                    onClick = onClose,
+                    style = RewriteButtonStyle.Secondary,
+                    focusRequester = closeFocusRequester,
+                )
             }
             content()
         }
@@ -407,12 +417,12 @@ private fun ColumnScope.SubtitleChoiceList(
                     TrackStatus("Searching for more subtitles...")
                 } else {
                     if (choices.isEmpty()) TrackStatus("No subtitles found automatically")
-                    OutlinedButton(
+                    RewriteTvButton(
+                        label = if (choices.isEmpty()) "Search OpenSubtitles" else "Search again",
                         onClick = onRetrySubtitleSearch,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(if (choices.isEmpty()) "Search OpenSubtitles" else "Search again")
-                    }
+                        style = RewriteButtonStyle.Secondary,
+                        fillMaxWidth = true,
+                    )
                 }
             }
         }
@@ -428,7 +438,7 @@ private fun SubtitlePillRow(
     focusRequester: FocusRequester? = null,
 ) {
     var focused by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(50)
+    val shape = RoundedCornerShape(SlugYardTvMetrics.ButtonCornerRadius)
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -438,6 +448,13 @@ private fun SubtitlePillRow(
                     focused -> Color.White
                     selected -> SlugYardPalette.SurfaceElevated
                     else -> Color.Transparent
+                },
+            )
+            .then(
+                if (focused) {
+                    Modifier.border(SlugYardTvMetrics.FocusRingWidth, SlugYardPalette.FocusRing, shape)
+                } else {
+                    Modifier
                 },
             )
             .then(focusRequester?.let { Modifier.focusRequester(it) } ?: Modifier)
@@ -454,7 +471,7 @@ private fun SubtitlePillRow(
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = if (focused || selected) FontWeight.SemiBold else FontWeight.Medium,
                 color = when {
-                    focused -> Color(0xFF181818)
+                    focused -> Color(0xFF141414)
                     selected -> SlugYardPalette.OnCanvas
                     else -> SlugYardPalette.OnCanvasMuted
                 },
@@ -470,7 +487,7 @@ private fun SubtitlePillRow(
         if (selected || focused) {
             Text(
                 "✓",
-                color = if (focused) Color(0xFF181818) else SlugYardPalette.Accent,
+                color = if (focused) Color(0xFF141414) else SlugYardPalette.Accent,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
             )
@@ -509,16 +526,16 @@ private fun TrackRow(
     focusRequester: FocusRequester? = null,
 ) {
     var focused by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(8.dp)
+    val shape = RoundedCornerShape(SlugYardTvMetrics.ButtonCornerRadius)
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
             .background(
                 when {
-                    focused -> SlugYardPalette.SurfaceElevated
+                    focused -> Color.White
                     selected -> SlugYardPalette.SurfaceElevated
-                    else -> SlugYardPalette.Surface
+                    else -> SlugYardPalette.Canvas
                 },
             )
             .then(focusRequester?.let { Modifier.focusRequester(it) } ?: Modifier)
@@ -537,10 +554,19 @@ private fun TrackRow(
         Text(
             title,
             style = MaterialTheme.typography.titleMedium,
-            color = if (focused || selected) SlugYardPalette.OnCanvas else SlugYardPalette.OnCanvasMuted,
+            fontWeight = if (focused || selected) FontWeight.SemiBold else FontWeight.Medium,
+            color = when {
+                focused -> Color(0xFF141414)
+                selected -> SlugYardPalette.OnCanvas
+                else -> SlugYardPalette.OnCanvasMuted
+            },
         )
         detail?.takeIf(String::isNotBlank)?.let {
-            Text(it, style = MaterialTheme.typography.labelMedium, color = SlugYardPalette.OnCanvasMuted)
+            Text(
+                it,
+                style = MaterialTheme.typography.labelMedium,
+                color = if (focused) Color(0xFF444444) else SlugYardPalette.OnCanvasMuted,
+            )
         }
     }
 }
@@ -587,9 +613,9 @@ private fun ColorSwatchRow(colors: List<Color>, selectedArgb: Int, onSelect: (In
 @Composable
 private fun StepperRow(value: String, onDecrease: () -> Unit, onIncrease: () -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        OutlinedButton(onClick = onDecrease) { Text("−") }
+        RewriteTvButton(label = "−", onClick = onDecrease, style = RewriteButtonStyle.Secondary)
         Text(value, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge, color = SlugYardPalette.OnCanvas)
-        OutlinedButton(onClick = onIncrease) { Text("+") }
+        RewriteTvButton(label = "+", onClick = onIncrease, style = RewriteButtonStyle.Secondary)
     }
 }
 
@@ -597,7 +623,11 @@ private fun StepperRow(value: String, onDecrease: () -> Unit, onIncrease: () -> 
 private fun TrackStatus(message: String) {
     Text(
         message,
-        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(SlugYardPalette.Surface).padding(18.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(SlugYardTvMetrics.ButtonCornerRadius))
+            .background(SlugYardPalette.Canvas)
+            .padding(18.dp),
         style = MaterialTheme.typography.bodyLarge,
         color = SlugYardPalette.OnCanvasMuted,
     )

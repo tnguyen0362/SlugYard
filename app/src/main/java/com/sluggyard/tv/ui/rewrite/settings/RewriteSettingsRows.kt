@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -34,21 +35,28 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.sluggyard.tv.core.streamresolution.DebridService
 import com.sluggyard.tv.ui.design.SlugYardPalette
+import com.sluggyard.tv.ui.design.SlugYardTvMetrics
 import com.sluggyard.tv.core.logging.ExperimentalDiagnostics
 
 @Composable
 internal fun RewriteSettingsGroup(title: String, content: @Composable () -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text(title, style = MaterialTheme.typography.titleLarge)
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            title,
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = SlugYardPalette.OnCanvas,
+        )
         Column { content() }
     }
 }
 
-/** Flat row shell shared by settings controls. Focus uses surface contrast, not a decorative bar. */
+/** Flat row shell shared by settings controls. Soft-rect focus ring + elevated surface. */
 @Composable
 private fun RewriteSettingsRowShell(
     onClick: (() -> Unit)?,
@@ -58,6 +66,7 @@ private fun RewriteSettingsRowShell(
     modifier: Modifier = Modifier,
     content: @Composable RowScope.() -> Unit,
 ) {
+    val shape = RoundedCornerShape(SlugYardTvMetrics.SettingsRowRadius)
     LaunchedEffect(focused, contentDescription) {
         ExperimentalDiagnostics.event(
             "settings",
@@ -70,11 +79,10 @@ private fun RewriteSettingsRowShell(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .fillMaxWidth()
-                .background(if (focused) SlugYardPalette.SurfaceElevated else Color.Transparent)
+                .background(if (focused) Color.White.copy(alpha = 0.08f) else Color.Transparent, shape)
                 .then(
                     if (focused) {
-                        // Rect focus — never a stadium/pill outline inside settings rows.
-                        Modifier.border(2.dp, SlugYardPalette.FocusRing, RoundedCornerShape(6.dp))
+                        Modifier.border(SlugYardTvMetrics.FocusRingWidth, SlugYardPalette.FocusRing, shape)
                     } else {
                         Modifier
                     },
@@ -94,7 +102,6 @@ private fun RewriteSettingsRowShell(
                             },
                         )
                     } else {
-                        // Read-only rows still need to receive D-pad focus so users can navigate to them.
                         Modifier.focusable(interactionSource = interaction)
                     }
                 )
@@ -106,7 +113,7 @@ private fun RewriteSettingsRowShell(
                         }
                     } ?: Modifier,
                 )
-                .padding(horizontal = 4.dp, vertical = 18.dp),
+                .padding(horizontal = 14.dp, vertical = 16.dp),
         ) {
             content()
         }
@@ -114,7 +121,7 @@ private fun RewriteSettingsRowShell(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(1.dp)
-                .background(SlugYardPalette.OnCanvasMuted.copy(alpha = 0.16f)),
+                .background(SlugYardPalette.Divider.copy(alpha = 0.85f)),
         )
     }
 }
@@ -139,7 +146,13 @@ internal fun RewriteToggleRow(
         contentDescription = "$title. $description. ${if (checked) "On" else "Off"}.",
     ) {
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
             Text(
                 description,
                 style = MaterialTheme.typography.bodyMedium,
@@ -153,6 +166,13 @@ internal fun RewriteToggleRow(
             checked = checked,
             onCheckedChange = ::applyToggle,
             modifier = Modifier.focusProperties { canFocus = false },
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = SlugYardPalette.Canvas,
+                checkedTrackColor = SlugYardPalette.Accent,
+                uncheckedThumbColor = SlugYardPalette.OnCanvasMuted,
+                uncheckedTrackColor = SlugYardPalette.SurfaceElevated,
+                uncheckedBorderColor = SlugYardPalette.Divider,
+            ),
         )
     }
 }
@@ -170,6 +190,7 @@ internal fun RewriteValueRow(title: String, value: String) {
         Text(
             title,
             style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Medium,
             modifier = Modifier.weight(1f),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -204,7 +225,13 @@ internal fun RewriteActionRow(
         modifier = modifier,
     ) {
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
             Text(
                 description,
                 style = MaterialTheme.typography.bodyMedium,
@@ -214,7 +241,12 @@ internal fun RewriteActionRow(
             )
         }
         Spacer(Modifier.width(16.dp))
-        Text(actionLabel, style = MaterialTheme.typography.labelLarge, color = SlugYardPalette.OnCanvasMuted)
+        Text(
+            actionLabel,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = if (focused) SlugYardPalette.Accent else SlugYardPalette.OnCanvasMuted,
+        )
     }
 }
 

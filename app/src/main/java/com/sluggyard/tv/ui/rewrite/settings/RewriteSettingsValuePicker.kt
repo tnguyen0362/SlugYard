@@ -2,6 +2,7 @@ package com.sluggyard.tv.ui.rewrite.settings
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,7 +20,6 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -36,6 +36,9 @@ import com.sluggyard.tv.core.logging.ExperimentalDiagnostics
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.sluggyard.tv.ui.design.SlugYardPalette
+import com.sluggyard.tv.ui.design.SlugYardTvMetrics
+import com.sluggyard.tv.ui.rewrite.RewriteButtonStyle
+import com.sluggyard.tv.ui.rewrite.RewriteTvButton
 
 /**
  * Full-screen scrollable picker used in place of the old click-to-cycle interaction. Modeled on
@@ -75,19 +78,34 @@ fun RewriteSettingsValuePicker(
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         BackHandler(onBack = onDismiss)
 
-        Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = .58f)), contentAlignment = Alignment.Center) {
+        Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = .62f)), contentAlignment = Alignment.Center) {
             Column(
-                modifier = Modifier.width(560.dp).heightIn(max = 720.dp).clip(RoundedCornerShape(12.dp))
-                    .background(SlugYardPalette.Canvas).padding(28.dp),
+                modifier = Modifier
+                    .width(560.dp)
+                    .heightIn(max = 720.dp)
+                    .clip(RoundedCornerShape(SlugYardTvMetrics.SheetCornerRadius))
+                    .background(SlugYardPalette.Surface)
+                    .border(1.dp, SlugYardPalette.Divider, RoundedCornerShape(SlugYardTvMetrics.SheetCornerRadius))
+                    .padding(28.dp),
                 verticalArrangement = Arrangement.spacedBy(18.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-                    OutlinedButton(onClick = onDismiss) { Text("Close") }
+                    Text(
+                        title,
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = SlugYardPalette.OnCanvas,
+                    )
+                    RewriteTvButton(
+                        label = "Close",
+                        onClick = onDismiss,
+                        style = RewriteButtonStyle.Secondary,
+                    )
                 }
                 LazyColumn(
                     state = listState,
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
                     modifier = Modifier.heightIn(max = 560.dp),
                 ) {
                     itemsIndexed(values) { index, value ->
@@ -108,16 +126,43 @@ fun RewriteSettingsValuePicker(
 private fun ValuePickerRow(value: String, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val interaction = remember { MutableInteractionSource() }
     val focused = interaction.collectIsFocusedAsState().value
+    val shape = RoundedCornerShape(SlugYardTvMetrics.ButtonCornerRadius)
     Row(
-        modifier = modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
-            .background(if (focused || selected) SlugYardPalette.SurfaceElevated else SlugYardPalette.Surface)
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(
+                when {
+                    focused -> Color.White
+                    selected -> SlugYardPalette.SurfaceElevated
+                    else -> SlugYardPalette.Canvas
+                },
+            )
+            .then(
+                if (focused) {
+                    Modifier.border(SlugYardTvMetrics.FocusRingWidth, SlugYardPalette.FocusRing, shape)
+                } else {
+                    Modifier
+                },
+            )
             .clickable(interactionSource = interaction, indication = null, onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(value, modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+        Text(
+            value,
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = if (focused || selected) FontWeight.SemiBold else FontWeight.Medium,
+            color = if (focused) Color(0xFF141414) else SlugYardPalette.OnCanvas,
+        )
         if (selected) {
-            Text("Selected", style = MaterialTheme.typography.labelMedium, color = SlugYardPalette.Accent)
+            Text(
+                "Selected",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = if (focused) Color(0xFF141414) else SlugYardPalette.Accent,
+            )
         }
     }
 }

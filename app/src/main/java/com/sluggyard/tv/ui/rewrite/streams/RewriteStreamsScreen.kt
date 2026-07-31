@@ -36,6 +36,8 @@ import androidx.compose.ui.unit.dp
 import com.sluggyard.tv.core.streamresolution.StreamCacheState
 import com.sluggyard.tv.ui.design.SlugYardPalette
 import com.sluggyard.tv.ui.design.SlugYardTvMetrics
+import com.sluggyard.tv.ui.rewrite.RewriteButtonStyle
+import com.sluggyard.tv.ui.rewrite.RewriteTvButton
 import com.sluggyard.tv.ui.rewrite.requestFocusReliably
 
 data class RewriteStreamCandidate(
@@ -154,12 +156,12 @@ fun RewriteStreamsScreen(
                             modifier = Modifier.weight(1f).padding(top = if (item.key == "header:$title") 8.dp else 22.dp),
                         )
                         if (item.key == "header:$title") {
-                            androidx.compose.material3.OutlinedButton(
+                            RewriteTvButton(
+                                label = "Back",
                                 onClick = onBack,
-                                modifier = Modifier.focusRequester(backFocusRequester),
-                            ) {
-                                Text("Back")
-                            }
+                                style = RewriteButtonStyle.Secondary,
+                                focusRequester = backFocusRequester,
+                            )
                         }
                     }
                     if (item.key == "header:$title") {
@@ -193,7 +195,7 @@ private fun StreamStatusCard(message: String, color: Color) {
         message,
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(SlugYardTvMetrics.ButtonCornerRadius))
             .background(SlugYardPalette.Surface)
             .padding(16.dp),
         style = MaterialTheme.typography.bodyMedium,
@@ -210,10 +212,11 @@ private fun StreamCandidateRow(
     downFocusRequester: FocusRequester? = null,
 ) {
     val focusState = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    val shape = RoundedCornerShape(SlugYardTvMetrics.ButtonCornerRadius)
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
+            .clip(shape)
             .then(focusRequester?.let { Modifier.focusRequester(it) } ?: Modifier)
             .focusProperties {
                 upFocusRequester?.let { up = it }
@@ -221,15 +224,25 @@ private fun StreamCandidateRow(
             }
             .onFocusChanged { focusState.value = it.isFocused }
             .scale(if (focusState.value) SlugYardTvMetrics.FocusScale else 1f)
-            .background(if (focusState.value) SlugYardPalette.SurfaceElevated else SlugYardPalette.Surface)
-            .then(if (focusState.value) Modifier.border(2.dp, SlugYardPalette.FocusRing, RoundedCornerShape(8.dp)) else Modifier)
+            .background(if (focusState.value) Color.White.copy(alpha = 0.10f) else SlugYardPalette.Surface)
+            .then(
+                if (focusState.value) {
+                    Modifier.border(SlugYardTvMetrics.FocusRingWidth, SlugYardPalette.FocusRing, shape)
+                } else {
+                    Modifier
+                },
+            )
             .clickable(onClick = onClick)
             .focusable()
             .padding(horizontal = 18.dp, vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(stream.title, style = MaterialTheme.typography.titleMedium)
+            Text(
+                stream.title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Medium,
+            )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(stream.sourceLabel, style = MaterialTheme.typography.labelMedium, color = SlugYardPalette.OnCanvasMuted)
                 stream.detailLabel?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = SlugYardPalette.OnCanvasMuted) }

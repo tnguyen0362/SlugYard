@@ -187,10 +187,14 @@ private fun rememberRewriteHomeBringIntoViewSpec(): BringIntoViewSpec {
 }
 
 /**
- * Header clearance for a focused shelf title — also the trailing gap after every catalog row.
- * Matching those two values is what keeps the previous rail fully off-screen when you go Down.
+ * BringIntoView pins a focused shelf **title** below the floating root nav so labels never
+ * sit under the header. Separated from [RewriteHomeShelfTrailingGap] so catalogs can stack
+ * densely (Figma home) without requiring a full nav-height void after every rail.
  */
-private val RewriteHomeCatalogFocusTopInset = (SlugYardTvMetrics.RootNavBarHeight + 20.dp)
+private val RewriteHomeCatalogFocusTopInset = (SlugYardTvMetrics.RootNavBarHeight + 4.dp)
+
+/** Figma MoviePreview / HomePage shelf stack — tight trailing void after each rail. */
+private val RewriteHomeShelfTrailingGap = SlugYardTvMetrics.ShelfTrailingGap
 
 /** Focused Home tiles expand to a real ~16:9 layout width (pushes neighbors — no overlap). */
 private const val HomePosterLandscapeAspect = 16f / 9f
@@ -425,8 +429,10 @@ fun RewriteHomeScreen(
                         },
                     )
                 }
+                // Tight hero → first shelf band (Figma home density). Focused-shelf nav clearance
+                // still comes from BringIntoView + per-shelf trailing spacer, not this gap.
                 item(key = "hero_exit_gap") {
-                    Spacer(modifier = Modifier.height(RewriteHomeCatalogFocusTopInset))
+                    Spacer(modifier = Modifier.height(SlugYardTvMetrics.ShelfStackGap))
                 }
             }
             itemsIndexed(
@@ -601,9 +607,9 @@ private fun RewriteHeroPanel(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            // Full-bleed under the floating nav; keep height modest so title + actions stay
-            // fully on-screen after scrollToItem(0) (taller heroes got their top chopped).
-            .height(440.dp)
+            // Figma HomePage hero (~810px @ 1440) scaled for 1080p TV; title sits upper-left
+            // under the floating nav so the first shelf can stack tightly into the fade.
+            .height(SlugYardTvMetrics.HomeHeroHeight)
             .background(SlugYardPalette.Surface),
     ) {
         val heroContext = LocalContext.current
@@ -618,7 +624,7 @@ private fun RewriteHeroPanel(
                 contentDescription = null,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
-                alpha = 0.54f,
+                alpha = 0.88f,
             )
         } ?: hero.posterUrl?.let { posterUrl ->
             val posterModel = remember(posterUrl) {
@@ -645,27 +651,47 @@ private fun RewriteHeroPanel(
                 alpha = 0.30f,
             )
         }
+        // Top nav scrim — Figma HeaderLinearGradient (70% black → transparent over ~68dp).
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(SlugYardTvMetrics.RootNavBarHeight + 24.dp)
+                .align(Alignment.TopCenter)
+                .background(
+                    androidx.compose.ui.graphics.Brush.verticalGradient(
+                        listOf(
+                            Color.Black.copy(alpha = 0.70f),
+                            Color.Transparent,
+                        ),
+                    ),
+                ),
+        )
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(
                     androidx.compose.ui.graphics.Brush.horizontalGradient(
-                        listOf(SlugYardPalette.Canvas, Color.Transparent, Color.Transparent),
+                        listOf(
+                            SlugYardPalette.Canvas.copy(alpha = 0.92f),
+                            SlugYardPalette.Canvas.copy(alpha = 0.35f),
+                            Color.Transparent,
+                            Color.Transparent,
+                        ),
                     ),
                 ),
         )
-        // A separate bottom scrim keeps the title and actions readable across bright artwork.
-        // This borrows the legibility principle from the old hero without copying its layout or
-        // gradient stops into the rewrite.
+        // Bottom fade into canvas — Figma MovieBlock gradient stops (~0 → solid #141414).
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(
                     androidx.compose.ui.graphics.Brush.verticalGradient(
                         colorStops = arrayOf(
-                            0.40f to Color.Transparent,
-                            0.62f to SlugYardPalette.Canvas.copy(alpha = 0.18f),
-                            0.84f to SlugYardPalette.Canvas.copy(alpha = 0.72f),
+                            0.0f to Color.Transparent,
+                            0.45f to Color.Transparent,
+                            0.58f to SlugYardPalette.Canvas.copy(alpha = 0.15f),
+                            0.72f to SlugYardPalette.Canvas.copy(alpha = 0.35f),
+                            0.86f to SlugYardPalette.Canvas.copy(alpha = 0.58f),
                             1.0f to SlugYardPalette.Canvas,
                         ),
                     ),
@@ -673,18 +699,21 @@ private fun RewriteHeroPanel(
         )
         Column(
             modifier = Modifier
-                .align(Alignment.BottomStart)
+                .align(Alignment.TopStart)
                 .padding(
                     start = SlugYardTvMetrics.ScreenHorizontalInset,
                     end = SlugYardTvMetrics.ScreenHorizontalInset,
-                    bottom = 44.dp,
+                    // Clear floating nav (Figma TitlePreview top ~154 with 68 header).
+                    top = SlugYardTvMetrics.RootNavBarHeight + 48.dp,
+                    bottom = 28.dp,
                 )
                 .fillMaxWidth(0.52f),
         ) {
             Text(
                 hero.title,
                 style = MaterialTheme.typography.displayMedium,
-                maxLines = 1,
+                fontWeight = FontWeight.Normal,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
             Spacer(Modifier.height(10.dp))
@@ -706,7 +735,7 @@ private fun RewriteHeroPanel(
             Spacer(Modifier.height(22.dp))
             // Keep button focus from scrolling/chopping the hero via bring-into-view.
             CompositionLocalProvider(LocalBringIntoViewSpec provides RewriteHomeHeroNoBringIntoViewSpec) {
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(11.dp)) {
                     HeroActionButton(
                         "Play",
                         Icons.Default.PlayArrow,
@@ -762,46 +791,48 @@ private fun HeroActionButton(
 ) {
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
-    val shape = RoundedCornerShape(SlugYardTvMetrics.PillCornerRadius)
+    // Figma Play = white/black; More Info = rgba(109,109,110,0.7)/white; TV focus → gold accent.
+    val shape = RoundedCornerShape(SlugYardTvMetrics.ButtonCornerRadius)
+    val moreInfoFill = Color(0xB26D6D6E)
     val container = when {
         focused -> SlugYardPalette.Accent
-        primary -> SlugYardPalette.OnCanvas
-        else -> SlugYardPalette.SurfaceElevated.copy(alpha = 0.72f)
+        primary -> Color.White
+        else -> moreInfoFill
     }
     val content = when {
-        focused -> Color(0xFF181818)
-        primary -> SlugYardPalette.Canvas
-        else -> SlugYardPalette.OnCanvas
+        focused -> Color(0xFF141414)
+        primary -> Color.Black
+        else -> Color.White
     }
     Row(
         modifier = modifier
             .graphicsLayer {
-                scaleX = if (focused) 1.08f else 1f
-                scaleY = if (focused) 1.08f else 1f
+                scaleX = if (focused) 1.06f else 1f
+                scaleY = if (focused) 1.06f else 1f
             }
+            .height(42.dp)
             .clip(shape)
             .background(container, shape)
             .then(
                 if (focused) {
                     Modifier.border(SlugYardTvMetrics.FocusRingWidth, SlugYardPalette.FocusRing, shape)
-                } else if (!primary) {
-                    Modifier.border(1.5.dp, SlugYardPalette.OnCanvas.copy(alpha = 0.45f), shape)
                 } else {
                     Modifier
                 },
             )
             .clickable(interactionSource = interaction, indication = null, onClick = onClick)
-            .padding(horizontal = 22.dp, vertical = 14.dp)
+            .padding(horizontal = 26.dp, vertical = 8.dp)
             .semantics { role = Role.Button },
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Icon(icon, contentDescription = null, tint = content)
+        Icon(icon, contentDescription = null, tint = content, modifier = Modifier.size(22.dp))
         Text(
             label,
             style = MaterialTheme.typography.titleMedium,
             color = content,
-            fontWeight = if (focused) FontWeight.Bold else FontWeight.SemiBold,
+            fontWeight = FontWeight.Medium,
+            letterSpacing = 0.5.sp,
         )
     }
 }
@@ -834,19 +865,22 @@ private fun RewritePosterRow(
     Column {
         Column(
             modifier = Modifier.bringIntoViewRequester(rowBringIntoViewRequester),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(SlugYardTvMetrics.ShelfTitleGap),
         ) {
             Text(
                 text = row.title,
                 modifier = Modifier.padding(horizontal = SlugYardTvMetrics.ScreenHorizontalInset),
+                // Figma MovieBlock / Name — Medium ~20px, #E5E5E5
                 style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Medium,
+                color = Color(0xFFE5E5E5),
             )
             LazyRow(
                 state = listState,
                 modifier = Modifier.fillMaxWidth(),
                 contentPadding = PaddingValues(
                     horizontal = SlugYardTvMetrics.ScreenHorizontalInset,
-                    vertical = 18.dp,
+                    vertical = SlugYardTvMetrics.ShelfRowVerticalPad,
                 ),
                 horizontalArrangement = Arrangement.spacedBy(SlugYardTvMetrics.RowGap),
             ) {
@@ -892,9 +926,7 @@ private fun RewritePosterRow(
                 }
             }
         }
-        // Trailing empty band matches BringIntoView top inset: when the next shelf is pinned
-        // under the header, this spacer (not the previous posters) fills the nav breathing room.
-        Spacer(modifier = Modifier.height(RewriteHomeCatalogFocusTopInset))
+        Spacer(modifier = Modifier.height(RewriteHomeShelfTrailingGap))
     }
 }
 

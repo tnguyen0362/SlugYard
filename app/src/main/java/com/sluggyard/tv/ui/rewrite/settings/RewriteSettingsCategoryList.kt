@@ -1,7 +1,6 @@
 package com.sluggyard.tv.ui.rewrite.settings
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
@@ -9,7 +8,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -39,6 +37,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.sluggyard.tv.ui.design.SlugYardPalette
 import com.sluggyard.tv.ui.design.SlugYardTvMetrics
@@ -62,11 +61,16 @@ fun RewriteSettingsCategoryList(
             horizontal = SlugYardTvMetrics.ScreenHorizontalInset,
             vertical = 34.dp,
         ),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         item {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Settings", style = MaterialTheme.typography.displayLarge)
+                Text(
+                    "Settings",
+                    style = MaterialTheme.typography.displayMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = SlugYardPalette.OnCanvas,
+                )
                 Text(
                     "Tune the TV experience without changing automatic playback policy.",
                     style = MaterialTheme.typography.bodyLarge,
@@ -136,8 +140,9 @@ fun RewriteSettingsSplitPane(
             modifier = Modifier
                 .fillMaxHeight()
                 .weight(0.42f)
-                .padding(horizontal = 48.dp, vertical = 40.dp),
-            verticalArrangement = Arrangement.spacedBy(28.dp),
+                .background(SlugYardPalette.Surface)
+                .padding(horizontal = 40.dp, vertical = 36.dp),
+            verticalArrangement = Arrangement.spacedBy(24.dp),
         ) {
             Box(
                 modifier = Modifier
@@ -148,11 +153,16 @@ fun RewriteSettingsSplitPane(
                     }
                     .focusable(),
             )
-            Text("Settings", style = MaterialTheme.typography.displayLarge)
+            Text(
+                "Settings",
+                style = MaterialTheme.typography.displayMedium,
+                fontWeight = FontWeight.Bold,
+                color = SlugYardPalette.OnCanvas,
+            )
             LazyColumn(
                 state = categoryListState,
                 modifier = Modifier.weight(1f).fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 items(categories, key = RewriteSettingsCategory::name) { category ->
                     RewriteSettingsCategoryRow(
@@ -167,6 +177,12 @@ fun RewriteSettingsSplitPane(
                 }
             }
         }
+        Box(
+            modifier = Modifier
+                .fillMaxHeight()
+                .width(1.dp)
+                .background(SlugYardPalette.Divider),
+        )
         Box(
             modifier = Modifier
                 .fillMaxHeight()
@@ -189,6 +205,7 @@ private fun RewriteSettingsCategoryRow(
 ) {
     val interaction = remember { MutableInteractionSource() }
     val focused = interaction.collectIsFocusedAsState().value
+    val shape = RoundedCornerShape(SlugYardTvMetrics.SettingsRowRadius)
     Column(modifier = modifier.fillMaxWidth()) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -198,20 +215,21 @@ private fun RewriteSettingsCategoryRow(
                 .fillMaxWidth()
                 .background(
                     when {
-                        focused -> SlugYardPalette.SurfaceElevated
-                        selected -> SlugYardPalette.Surface
+                        focused -> Color.White.copy(alpha = 0.12f)
+                        selected -> SlugYardPalette.SurfaceElevated
                         else -> Color.Transparent
                     },
+                    shape,
                 )
                 .clickable(interactionSource = interaction, indication = null, onClick = onClick)
-                .padding(horizontal = 12.dp, vertical = 16.dp),
+                .padding(horizontal = 12.dp, vertical = 14.dp),
         ) {
             // Single focus cue: left accent bar — no competing pill/outline on top of the fill.
             Box(
                 modifier = Modifier
                     .padding(end = 12.dp)
-                    .width(4.dp)
-                    .height(36.dp)
+                    .width(3.dp)
+                    .height(34.dp)
                     .background(
                         when {
                             focused -> SlugYardPalette.Accent
@@ -221,20 +239,25 @@ private fun RewriteSettingsCategoryRow(
                         RoundedCornerShape(2.dp),
                     ),
             )
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(
                     category.title,
                     style = MaterialTheme.typography.titleLarge,
+                    fontWeight = if (focused || selected) FontWeight.SemiBold else FontWeight.Medium,
                     color = SlugYardPalette.OnCanvas,
                 )
-                Text(category.description, style = MaterialTheme.typography.bodyMedium, color = SlugYardPalette.OnCanvasMuted)
+                Text(
+                    category.description,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = SlugYardPalette.OnCanvasMuted,
+                )
             }
         }
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(1.dp)
-                .background(SlugYardPalette.OnCanvasMuted.copy(alpha = 0.16f)),
+                .background(SlugYardPalette.Divider.copy(alpha = 0.65f)),
         )
     }
 }

@@ -17,7 +17,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.Button
+import androidx.compose.foundation.border
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -36,6 +36,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -47,6 +48,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.sluggyard.tv.ui.design.SlugYardPalette
 import com.sluggyard.tv.ui.design.SlugYardTvMetrics
+import com.sluggyard.tv.ui.rewrite.RewriteButtonStyle
+import com.sluggyard.tv.ui.rewrite.RewriteTvButton
 import com.sluggyard.tv.ui.rewrite.home.RewriteHomePoster
 import com.sluggyard.tv.ui.rewrite.home.RewritePosterCard
 import com.sluggyard.tv.ui.rewrite.requestFocusReliably
@@ -141,13 +144,22 @@ fun RewriteSearchScreen(
         }
     }
 
+    var fieldFocused by remember { mutableStateOf(false) }
+    val fieldShape = RoundedCornerShape(SlugYardTvMetrics.ButtonCornerRadius)
     Column(
         modifier = modifier
             .fillMaxSize()
             .background(SlugYardPalette.Canvas)
             .padding(top = 8.dp, bottom = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
+        Text(
+            "Search",
+            modifier = Modifier.padding(horizontal = SlugYardTvMetrics.ScreenHorizontalInset),
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Bold,
+            color = SlugYardPalette.OnCanvas,
+        )
         OutlinedTextField(
             value = query,
             onValueChange = {
@@ -157,9 +169,15 @@ fun RewriteSearchScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = SlugYardTvMetrics.ScreenHorizontalInset)
-                .height(52.dp)
+                .height(56.dp)
+                .border(
+                    width = if (fieldFocused) SlugYardTvMetrics.FocusRingWidth else 1.dp,
+                    color = if (fieldFocused) SlugYardPalette.FocusRing else SlugYardPalette.Divider,
+                    shape = fieldShape,
+                )
                 .focusRequester(initialFocusRequester)
                 .onFocusChanged { state ->
+                    fieldFocused = state.isFocused
                     // Android TV should not keep a soft keyboard owning DPAD; hide as soon as
                     // the field focuses so Down can reach Movies/TV results.
                     if (state.isFocused) keyboardController?.hide()
@@ -202,15 +220,31 @@ fun RewriteSearchScreen(
                     }
                 },
             singleLine = true,
-            textStyle = MaterialTheme.typography.titleMedium,
-            placeholder = { Text("Search movies & TV") },
-            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-            shape = RoundedCornerShape(5.dp),
+            textStyle = MaterialTheme.typography.titleMedium.copy(
+                fontWeight = FontWeight.Medium,
+                color = SlugYardPalette.OnCanvas,
+            ),
+            placeholder = {
+                Text(
+                    "Search movies & TV",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = SlugYardPalette.OnCanvasMuted,
+                )
+            },
+            leadingIcon = {
+                Icon(Icons.Filled.Search, contentDescription = null, tint = SlugYardPalette.OnCanvasMuted)
+            },
+            shape = fieldShape,
             colors = androidx.compose.material3.TextFieldDefaults.colors(
                 focusedContainerColor = SlugYardPalette.SurfaceElevated,
                 unfocusedContainerColor = SlugYardPalette.Surface,
-                focusedIndicatorColor = SlugYardPalette.OnCanvas,
-                unfocusedIndicatorColor = SlugYardPalette.OnCanvasMuted,
+                focusedIndicatorColor = Color.Transparent,
+                unfocusedIndicatorColor = Color.Transparent,
+                cursorColor = SlugYardPalette.Accent,
+                focusedTextColor = SlugYardPalette.OnCanvas,
+                unfocusedTextColor = SlugYardPalette.OnCanvas,
+                focusedLeadingIconColor = SlugYardPalette.OnCanvas,
+                unfocusedLeadingIconColor = SlugYardPalette.OnCanvasMuted,
             ),
         )
 
@@ -284,7 +318,7 @@ private fun SearchResultsSections(
                 Text(
                     "Movies",
                     modifier = Modifier.padding(horizontal = SlugYardTvMetrics.ScreenHorizontalInset),
-                    style = MaterialTheme.typography.titleLarge,
+                    style = MaterialTheme.typography.headlineSmall,
                     color = SlugYardPalette.OnCanvas,
                     fontWeight = FontWeight.SemiBold,
                 )
@@ -316,7 +350,7 @@ private fun SearchResultsSections(
                 Text(
                     "TV Shows",
                     modifier = Modifier.padding(horizontal = SlugYardTvMetrics.ScreenHorizontalInset),
-                    style = MaterialTheme.typography.titleLarge,
+                    style = MaterialTheme.typography.headlineSmall,
                     color = SlugYardPalette.OnCanvas,
                     fontWeight = FontWeight.SemiBold,
                 )
@@ -385,7 +419,7 @@ private fun SearchPosterRow(
 
 @Composable
 private fun SearchHint() {
-    Box(modifier = Modifier.fillMaxSize().padding(horizontal = SlugYardTvMetrics.ScreenHorizontalInset)) {
+    Box(modifier = Modifier.fillMaxSize().padding(horizontal = SlugYardTvMetrics.ScreenHorizontalInset, vertical = 8.dp)) {
         Text(
             "Start typing to search across your installed addons.",
             style = MaterialTheme.typography.bodyLarge,
@@ -403,10 +437,10 @@ private fun SearchLoading() {
 
 @Composable
 private fun SearchEmpty(query: String) {
-    Box(modifier = Modifier.fillMaxSize().padding(horizontal = SlugYardTvMetrics.ScreenHorizontalInset)) {
+    Box(modifier = Modifier.fillMaxSize().padding(horizontal = SlugYardTvMetrics.ScreenHorizontalInset, vertical = 8.dp)) {
         Text(
             "No results for \"${query.trim()}\".",
-            style = MaterialTheme.typography.bodyLarge,
+            style = MaterialTheme.typography.titleMedium,
             color = SlugYardPalette.OnCanvasMuted,
         )
     }
@@ -415,10 +449,14 @@ private fun SearchEmpty(query: String) {
 @Composable
 private fun SearchError(message: String, onRetry: () -> Unit) {
     Column(
-        modifier = Modifier.fillMaxSize().padding(horizontal = SlugYardTvMetrics.ScreenHorizontalInset),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+        modifier = Modifier.fillMaxSize().padding(horizontal = SlugYardTvMetrics.ScreenHorizontalInset, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text(message, style = MaterialTheme.typography.bodyLarge, color = SlugYardPalette.OnCanvasMuted)
-        Button(onClick = onRetry) { Text("Retry") }
+        RewriteTvButton(
+            label = "Retry",
+            onClick = onRetry,
+            style = RewriteButtonStyle.Primary,
+        )
     }
 }

@@ -5,22 +5,18 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -31,6 +27,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.sluggyard.tv.ui.design.SlugYardPalette
 import com.sluggyard.tv.ui.design.SlugYardTvMetrics
+import com.sluggyard.tv.ui.rewrite.RewriteButtonStyle
+import com.sluggyard.tv.ui.rewrite.RewriteTvButton
 import com.sluggyard.tv.ui.screens.player.PlayerUiState
 import com.sluggyard.tv.ui.screens.player.RewritePlayerSubtitleTimingActions
 import com.sluggyard.tv.ui.screens.player.SUBTITLE_DELAY_MAX_MS
@@ -79,35 +77,54 @@ private fun DelayCard(
     onDismiss: () -> Unit,
     modifier: Modifier,
 ) {
+    val cardShape = RoundedCornerShape(SlugYardTvMetrics.SheetCornerRadius)
     Box(modifier = modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .padding(top = 44.dp)
                 .fillMaxWidth(0.66f)
-                .background(SlugYardPalette.SurfaceElevated, RoundedCornerShape(8.dp))
+                .background(SlugYardPalette.Surface, cardShape)
+                .border(1.dp, SlugYardPalette.Divider, cardShape)
                 .padding(28.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
-            Text("Subtitle timing", fontWeight = FontWeight.SemiBold, color = SlugYardPalette.OnCanvas)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                OutlinedButton(onClick = { onAdjust(-SUBTITLE_DELAY_STEP_MS) }) { Text("−0.1 s") }
+            Text(
+                "Subtitle timing",
+                fontWeight = FontWeight.SemiBold,
+                color = SlugYardPalette.OnCanvas,
+            )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                RewriteTvButton(
+                    label = "−0.1 s",
+                    onClick = { onAdjust(-SUBTITLE_DELAY_STEP_MS) },
+                    style = RewriteButtonStyle.Secondary,
+                )
                 Text(
                     formatDelay(delayMs),
                     modifier = Modifier.weight(1f),
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                     color = SlugYardPalette.OnCanvas,
+                    fontWeight = FontWeight.Medium,
                 )
-                OutlinedButton(onClick = { onAdjust(SUBTITLE_DELAY_STEP_MS) }) { Text("+0.1 s") }
+                RewriteTvButton(
+                    label = "+0.1 s",
+                    onClick = { onAdjust(SUBTITLE_DELAY_STEP_MS) },
+                    style = RewriteButtonStyle.Secondary,
+                )
             }
             TimingMeter(delayMs)
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Button(
+                RewriteTvButton(
+                    label = "Sync by line",
                     onClick = onSyncByLine,
-                    shape = RoundedCornerShape(4.dp),
-                    colors = rewritePrimaryButtonColors(),
-                ) { Text("Sync by line") }
-                OutlinedButton(onClick = onDismiss, shape = RoundedCornerShape(4.dp)) { Text("Done") }
+                    style = RewriteButtonStyle.Primary,
+                )
+                RewriteTvButton(
+                    label = "Done",
+                    onClick = onDismiss,
+                    style = RewriteButtonStyle.Secondary,
+                )
             }
         }
     }
@@ -123,7 +140,7 @@ private fun TimingMeter(delayMs: Int) {
                 modifier = Modifier
                     .fillMaxWidth(fraction)
                     .height(4.dp)
-                    .background(SlugYardPalette.OnCanvas),
+                    .background(SlugYardPalette.Accent),
             )
         }
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -144,6 +161,7 @@ private fun SyncCard(
     val capturedAt = state.subtitleAutoSyncCapturedVideoMs
     val anchor = capturedAt ?: currentPositionMs
     val cues = state.subtitleAutoSyncCues.sortedBy { abs(it.startTimeMs - anchor) }.take(12)
+    val cardShape = RoundedCornerShape(SlugYardTvMetrics.SheetCornerRadius)
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -153,23 +171,30 @@ private fun SyncCard(
             modifier = Modifier
                 .align(Alignment.Center)
                 .fillMaxWidth(.82f)
-                .background(SlugYardPalette.SurfaceElevated, RoundedCornerShape(8.dp))
+                .background(SlugYardPalette.Surface, cardShape)
+                .border(1.dp, SlugYardPalette.Divider, cardShape)
                 .padding(SlugYardTvMetrics.ScreenHorizontalInset),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            Text("Sync subtitle timing", fontWeight = FontWeight.SemiBold, color = SlugYardPalette.OnCanvas)
+            Text(
+                "Sync subtitle timing",
+                fontWeight = FontWeight.SemiBold,
+                color = SlugYardPalette.OnCanvas,
+            )
             Text(
                 if (capturedAt == null) "Pause at the spoken line, then capture the video time."
                 else "Choose the subtitle line that is being spoken.",
                 color = SlugYardPalette.OnCanvasMuted,
             )
             if (capturedAt == null) {
-                Button(onClick = actions.onCaptureNow, shape = RoundedCornerShape(4.dp), colors = rewritePrimaryButtonColors()) {
-                    Text("Capture video time")
-                }
+                RewriteTvButton(
+                    label = "Capture video time",
+                    onClick = actions.onCaptureNow,
+                    style = RewriteButtonStyle.Primary,
+                )
             } else {
                 state.subtitleAutoSyncStatus?.let { Text(it, color = SlugYardPalette.OnCanvasMuted) }
-                state.subtitleAutoSyncError?.let { Text(it, color = Color(0xFFFFB4AB)) }
+                state.subtitleAutoSyncError?.let { Text(it, color = SlugYardPalette.Danger) }
                 if (state.subtitleAutoSyncLoading) {
                     Text("Loading subtitle lines…", color = SlugYardPalette.OnCanvasMuted)
                 } else if (cues.isEmpty()) {
@@ -177,14 +202,21 @@ private fun SyncCard(
                 } else {
                     LazyColumn(modifier = Modifier.height(300.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         items(cues, key = SubtitleSyncCue::startTimeMs) { cue ->
-                            OutlinedButton(onClick = { actions.onCueSelected(cue) }, modifier = Modifier.fillMaxWidth()) {
-                                Text("${formatClock(cue.startTimeMs)}  ${cue.text}", maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            }
+                            RewriteTvButton(
+                                label = "${formatClock(cue.startTimeMs)}  ${cue.text}",
+                                onClick = { actions.onCueSelected(cue) },
+                                style = RewriteButtonStyle.Secondary,
+                                fillMaxWidth = true,
+                            )
                         }
                     }
                 }
             }
-            OutlinedButton(onClick = actions.onDismissSync, shape = RoundedCornerShape(4.dp)) { Text("Back") }
+            RewriteTvButton(
+                label = "Back",
+                onClick = actions.onDismissSync,
+                style = RewriteButtonStyle.Secondary,
+            )
         }
     }
 }
@@ -199,9 +231,3 @@ private fun formatClock(valueMs: Long): String {
     val totalSeconds = valueMs / 1000
     return "%d:%02d".format(totalSeconds / 60, totalSeconds % 60)
 }
-
-@Composable
-private fun rewritePrimaryButtonColors() = ButtonDefaults.buttonColors(
-    containerColor = SlugYardPalette.OnCanvas,
-    contentColor = SlugYardPalette.Canvas,
-)
