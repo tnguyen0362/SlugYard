@@ -188,6 +188,7 @@ class AppGraph(
     progressSyncBridge: ProgressSyncBridge,
     val providerCredentialSyncBridge: ProviderCredentialSyncBridge,
     libraryWatchRepository: LibraryWatchRepository,
+    private val watchProgressRepository: WatchProgressRepository? = null,
     relatedDataSource: RelatedDataSource? = null,
     tmdbHomeDataSource: TmdbHomeDataSource? = null,
     val resolveMetaContentId: suspend (type: String, id: String) -> String = { _, id -> id },
@@ -265,6 +266,11 @@ class AppGraph(
         gateway = gateway,
         watchStateSnapshot = { libraryWatch.state.firstValue() },
         resolveMetaContentId = resolveMetaContentId,
+        isEpisodeCompleted = { showId, episodeId, season, episode ->
+            val repo = watchProgressRepository ?: return@DetailsDataSource false
+            repo.isWatched(showId, episodeId, season, episode).first() ||
+                repo.isWatched(episodeId, episodeId, season, episode).first()
+        },
     )
     val streamsDataSource = StreamsDataSource(
         registrySnapshot = { registry.state.firstValue() },
@@ -482,6 +488,14 @@ fun AppShell(
     var routeStack by remember {
         mutableStateOf(listOf<RootDestination>(RootDestination.Profiles))
     }
+    // Survives app_root dispose/recreate when opening the retained player — otherwise
+    // needsStartupProfilePick resets to true and Back/Play dumps you on Who's watching.
+    var needsStartupProfilePick by remember { mutableStateOf(true) }
+    var homeSplashVisible by remember { mutableStateOf(false) }
+    LaunchedEffect(sessionBootKey) {
+        needsStartupProfilePick = true
+        homeSplashVisible = false
+    }
     val streamBadgeSettings by settingsFacade.streamBadgeSettings.collectAsState(
         initial = com.sluggyard.tv.core.streams.StreamBadgeSettings(),
     )
@@ -501,6 +515,10 @@ fun AppShell(
                     watchProgressRepository = watchProgressRepository,
                     routeStack = routeStack,
                     onRouteStackChange = { routeStack = it },
+                    needsStartupProfilePick = needsStartupProfilePick,
+                    onNeedsStartupProfilePickChange = { needsStartupProfilePick = it },
+                    homeSplashVisible = homeSplashVisible,
+                    onHomeSplashVisibleChange = { homeSplashVisible = it },
                     onSignedOut = {
                         accessGranted = false
                         forceAuthChoice = false
@@ -641,6 +659,10 @@ private fun AppContent(
     watchProgressRepository: WatchProgressRepository,
     routeStack: List<RootDestination>,
     onRouteStackChange: (List<RootDestination>) -> Unit,
+    needsStartupProfilePick: Boolean,
+    onNeedsStartupProfilePickChange: (Boolean) -> Unit,
+    homeSplashVisible: Boolean,
+    onHomeSplashVisibleChange: (Boolean) -> Unit,
     onSignedOut: () -> Unit,
     onOpenAuth: () -> Unit,
     sessionBootKey: Int,
@@ -713,9 +735,8 @@ private fun AppContent(
     var continueWatchingFocusNonce by remember { mutableStateOf(0) }
     var suppressHomeHeroFocusRestore by remember { mutableStateOf(false) }
     var navigationRoot by remember { mutableStateOf<RootDestination>(RootDestination.Home) }
-    // Who's watching first; logo heartbeat splash only after a profile is chosen.
-    var needsStartupProfilePick by remember(sessionBootKey) { mutableStateOf(true) }
-    var homeSplashVisible by remember(sessionBootKey) { mutableStateOf(false) }
+    // Who's watching / splash flags are owned by AppShell so retained-player navigation
+    // (which disposes app_root) cannot reset them and force Profiles again.
     // Timestamp is owned by the dismiss effect when splash becomes visible — never leave it at
     // 0 while visible (that used to short-circuit the gate and hang forever after profile pick).
     var homeSplashStartedAt by remember(sessionBootKey) { mutableStateOf(0L) }
@@ -1132,7 +1153,7 @@ private fun AppContent(
 
     LaunchedEffect(homeReloadNonce) {
         if (homeReloadNonce > 0) {
-            homeSplashVisible = true
+            onHomeSplashVisibleChange(true)
         }
     }
     // Single dismiss gate: start the clock when splash is shown, then leave on catalog settle,
@@ -1153,11 +1174,11 @@ private fun AppContent(
                 else -> false
             }
             if (elapsed >= HomeSplashMinDurationMs && catalogsReady) {
-                homeSplashVisible = false
+                onHomeSplashVisibleChange(false)
                 break
             }
             if (elapsed >= HomeSplashMaxDurationMs) {
-                homeSplashVisible = false
+                onHomeSplashVisibleChange(false)
                 break
             }
             delay(100)
@@ -1753,9 +1774,9 @@ private fun AppContent(
                         scope.launch {
                             graph.selectProfile(profile.id)
                             if (needsStartupProfilePick) {
-                                needsStartupProfilePick = false
+                                onNeedsStartupProfilePickChange(false)
                                 // Dismiss LaunchedEffect starts the timer when visible flips true.
-                                homeSplashVisible = true
+                                onHomeSplashVisibleChange(true)
                                 // Replace Who's watching entirely — never leave Profiles under Home.
                                 onRouteStackChange(listOf(RootDestination.Home))
                                 navigationRoot = RootDestination.Home

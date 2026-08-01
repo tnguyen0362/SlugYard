@@ -126,6 +126,7 @@ class MainActivity : ComponentActivity() {
                     progressSyncBridge = progressSyncBridge,
                     providerCredentialSyncBridge = providerCredentialSyncBridge,
                     libraryWatchRepository = libraryWatchRepository,
+                    watchProgressRepository = watchProgressRepository,
                     relatedDataSource = relatedDataSource,
                     tmdbHomeDataSource = tmdbHomeDataSource,
                     digitalReleaseLookup = com.sluggyard.tv.ui.app.streams.DigitalReleaseLookup(

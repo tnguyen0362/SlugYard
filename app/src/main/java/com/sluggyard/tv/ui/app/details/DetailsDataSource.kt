@@ -49,6 +49,16 @@ class DetailsDataSource(
     private val gateway: StremioAddonGateway,
     private val watchStateSnapshot: suspend () -> LibraryWatchState = { LibraryWatchState() },
     private val resolveMetaContentId: suspend (type: String, id: String) -> String = { _, id -> id },
+    /**
+     * Player completion writes WatchedItemsPreferences / progress — not LibraryWatchStore.
+     * Details badges + Play targeting must honor that completion state too.
+     */
+    private val isEpisodeCompleted: suspend (
+        showId: String,
+        episodeId: String,
+        season: Int,
+        episode: Int,
+    ) -> Boolean = { _, _, _, _ -> false },
 ) {
     suspend fun load(addonId: String, type: String, id: String): DetailsLoadResult {
         val localState = watchStateSnapshot()
@@ -117,18 +127,27 @@ class DetailsDataSource(
                     DetailsSeason(
                         number = season,
                         episodes = episodes.sortedBy { it.episode }.mapIndexed { index, episode ->
+                            val seasonNumber = season
+                            val episodeNumber = episode.episode!!
+                            val episodeId = episode.id
+                            val watched = episodeId in localState.watchedIds ||
+                                isEpisodeCompleted(metadata.id, episodeId, seasonNumber, episodeNumber)
                             DetailsEpisode(
-                                id = episode.id,
-                                number = episode.episode!!,
+                                id = episodeId,
+                                number = episodeNumber,
                                 displayNumber = index + 1,
                                 title = episode.title.unescapeHtmlEntities(),
                                 releaseLabel = formatEpisodeReleaseLabel(episode.released) ?: episode.released,
                                 thumbnailUrl = episode.thumbnailUrl,
-                                watched = episode.id in localState.watchedIds,
+                                watched = watched,
                                 description = episode.description?.unescapeHtmlEntities()?.takeIf(String::isNotBlank),
                             )
                         },
-                        fullyWatched = episodes.all { it.id in localState.watchedIds },
+                        fullyWatched = episodes.all { ep ->
+                            val episodeNumber = ep.episode!!
+                            ep.id in localState.watchedIds ||
+                                isEpisodeCompleted(metadata.id, ep.id, season, episodeNumber)
+                        },
                     )
                 }
                 .regularSeasonsThenSpecials(DetailsSeason::number)

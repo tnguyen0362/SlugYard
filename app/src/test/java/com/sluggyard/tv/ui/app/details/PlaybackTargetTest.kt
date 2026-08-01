@@ -65,7 +65,23 @@ class PlaybackTargetTest {
     }
 
     @Test
-    fun `series play uses the selected regular season`() {
+    fun `series play skips watched episodes across seasons for next unwatched`() {
+        val seasonOne = DetailsEpisode("show:1:1", 1, "Pilot", null, null, watched = true)
+        val seasonTwo = DetailsEpisode("show:2:1", 1, "Return", null, null, watched = false)
+        val state = seriesState(seasonOne).copy(
+            seasons = listOf(
+                DetailsSeason(1, listOf(seasonOne), fullyWatched = true),
+                DetailsSeason(2, listOf(seasonTwo), fullyWatched = false),
+            ),
+            // Even if UI is parked on a fully-watched season, Play advances to next unwatched.
+            selectedSeason = 1,
+        )
+
+        assertEquals(PlaybackTarget("series", "show:2:1", 2, 1), state.playbackTarget("series", "show"))
+    }
+
+    @Test
+    fun `series play prefers earlier-season unwatched over selected later season`() {
         val seasonOne = DetailsEpisode("show:1:1", 1, "Pilot", null, null, watched = false)
         val seasonTwo = DetailsEpisode("show:2:1", 1, "Return", null, null, watched = false)
         val state = seriesState(seasonOne).copy(
@@ -76,7 +92,7 @@ class PlaybackTargetTest {
             selectedSeason = 2,
         )
 
-        assertEquals(PlaybackTarget("series", "show:2:1", 2, 1), state.playbackTarget("series", "show"))
+        assertEquals(PlaybackTarget("series", "show:1:1", 1, 1), state.playbackTarget("series", "show"))
     }
 
     private fun seriesState(vararg episodes: DetailsEpisode) = DetailsState(
