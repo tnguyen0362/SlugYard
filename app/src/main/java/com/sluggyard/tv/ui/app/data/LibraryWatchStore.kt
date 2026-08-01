@@ -1,11 +1,14 @@
 package com.sluggyard.tv.ui.app.data
 
+import android.content.Context
+import android.util.Log
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.sluggyard.tv.core.sync.LibraryWatchSyncBridge
 import com.sluggyard.tv.core.sync.LibraryWatchSyncSnapshot
+import com.sluggyard.tv.core.sync.SupabaseSyncScheduler
 import com.sluggyard.tv.core.sync.SyncMutationRecorder
 import com.sluggyard.tv.core.sync.model.CloudLibraryItem
 import com.sluggyard.tv.core.sync.model.CloudWatchedItem
@@ -49,12 +52,14 @@ interface LibraryWatchRepository {
 
 private fun libraryWatchKey(profileId: String) = stringPreferencesKey("app_library_watch_v2_$profileId")
 private const val MAX_STORED_LIBRARY_ENTRIES = 500
+private const val TAG = "LibraryWatch"
 
 /** Durable local state for independent library and watched actions. */
 class LibraryWatchStore(
     private val dataStore: DataStore<Preferences>,
     private val profiles: ProfileRepository = DefaultProfileRepository,
     private val mutationRecorder: SyncMutationRecorder? = null,
+    private val appContext: Context? = null,
 ) : LibraryWatchRepository, LibraryWatchSyncBridge {
     override val state: Flow<LibraryWatchState> = combine(dataStore.data, profiles.state) { preferences, profileState ->
         preferences[libraryWatchKey(profileState.activeProfile.id)]?.let(LibraryWatchCodec::decode) ?: LibraryWatchState()
@@ -62,6 +67,7 @@ class LibraryWatchStore(
 
     override suspend fun setInLibrary(id: String, inLibrary: Boolean, entry: LibraryEntry?) {
         val profileId = profiles.state.first().activeProfile.id
+        Log.i(TAG, "setInLibrary profile=$profileId id=$id inLibrary=$inLibrary")
         mutate(profileId) { current ->
             val changedAt = System.currentTimeMillis()
             val entries = current.libraryEntries.filterNot { it.id == id }.toMutableList()
@@ -75,6 +81,7 @@ class LibraryWatchStore(
             )
         }
         recordLibraryMutation(profileId, id, inLibrary)
+        requestWatchlistSync()
     }
 
     override suspend fun setWatched(
@@ -86,10 +93,12 @@ class LibraryWatchStore(
         episode: Int?,
     ) {
         val profileId = profiles.state.first().activeProfile.id
+        Log.i(TAG, "setWatched profile=$profileId id=$id watched=$watched")
         mutate(profileId) { current ->
             current.copy(watchedIds = current.watchedIds.withMembership(id, watched))
         }
         recordWatchedMutation(profileId, id, watched, contentType, title, season, episode)
+        requestWatchlistSync()
     }
 
     private suspend fun mutate(
@@ -140,6 +149,17 @@ class LibraryWatchStore(
                 )
             }
         }
+        Log.i(
+            TAG,
+            "apply sync profiles=${groupedLibrary.keys + groupedWatched.keys} " +
+                "library=${snapshot.library.size} watched=${snapshot.watchedItems.size}",
+        )
+    }
+
+    private fun requestWatchlistSync() {
+        val context = appContext ?: return
+        runCatching { SupabaseSyncScheduler.requestImmediate(context) }
+            .onFailure { Log.w(TAG, "watchlist sync request failed: ${it.message}") }
     }
 
     private suspend fun recordLibraryMutation(profileId: String, id: String, inLibrary: Boolean) {

@@ -27,7 +27,10 @@ class DigitalReleaseLookup(
             if (apiKey.isBlank()) return@withContext DigitalReleasePolicy.Status.UNKNOWN
 
             val cacheKey = cacheKey(contentId) ?: return@withContext DigitalReleasePolicy.Status.UNKNOWN
-            cache[cacheKey]?.let { return@withContext it }
+            cache[cacheKey]?.let {
+                Log.i(TAG, "cache hit key=$cacheKey status=$it type=$type")
+                return@withContext it
+            }
 
             val status = runCatching {
                 val tmdbId = parseTmdbId(contentId)
@@ -41,6 +44,7 @@ class DigitalReleaseLookup(
             }
                 .onFailure { Log.w(TAG, "digital-release lookup failed for $cacheKey: ${it.message}") }
                 .getOrDefault(DigitalReleasePolicy.Status.UNKNOWN)
+            Log.i(TAG, "resolved key=$cacheKey status=$status type=$type id=$contentId")
             cache[cacheKey] = status
             status
         }
@@ -55,7 +59,10 @@ class DigitalReleaseLookup(
 
     private suspend fun lookupByTmdbId(tmdbId: Int): DigitalReleasePolicy.Status {
         val releases = tmdbApi.getMovieReleaseDates(tmdbId, apiKey)
-        if (!releases.isSuccessful) return DigitalReleasePolicy.Status.UNKNOWN
+        if (!releases.isSuccessful) {
+            Log.w(TAG, "release-dates HTTP ${releases.code()} for tmdb:$tmdbId — trying primary release_date")
+            return lookupPrimaryReleaseFallback(tmdbId)
+        }
         val rows = releases.body()?.results.orEmpty()
             .flatMap { country -> country.releaseDates.orEmpty() }
             .mapNotNull { item ->
@@ -63,7 +70,23 @@ class DigitalReleaseLookup(
                 val date = DigitalReleasePolicy.parseReleaseDate(item.releaseDate) ?: return@mapNotNull null
                 DigitalReleasePolicy.ReleaseRow(type = releaseType, date = date)
             }
-        return DigitalReleasePolicy.status(rows)
+        val fromRows = DigitalReleasePolicy.status(rows)
+        if (fromRows != DigitalReleasePolicy.Status.UNKNOWN) {
+            Log.i(TAG, "tmdb:$tmdbId status=$fromRows rows=${rows.size}")
+            return fromRows
+        }
+        // Empty release-dates payload: fall back to movie details primary release_date so
+        // theatrical-only titles (Brand New Day, etc.) are NOT_YET instead of fail-open.
+        val fallback = lookupPrimaryReleaseFallback(tmdbId)
+        Log.i(TAG, "tmdb:$tmdbId release-dates empty → primary fallback status=$fallback")
+        return fallback
+    }
+
+    private suspend fun lookupPrimaryReleaseFallback(tmdbId: Int): DigitalReleasePolicy.Status {
+        val details = tmdbApi.getMovieDetails(tmdbId, apiKey)
+        if (!details.isSuccessful) return DigitalReleasePolicy.Status.UNKNOWN
+        val primary = DigitalReleasePolicy.parseReleaseDate(details.body()?.releaseDate)
+        return DigitalReleasePolicy.statusFromPrimaryReleaseDate(primary)
     }
 
     companion object {

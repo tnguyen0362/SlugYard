@@ -440,6 +440,7 @@ class MpvPlayerSurfaceView @JvmOverloads constructor(
         }
         if (preferredAss != null) {
             mpv.setPropertyInt("sid", preferredAss)
+            Log.d(TAG, "preferAss selected sid=$preferredAss")
         } else {
             mpv.setPropertyString("sid", "auto")
         }
@@ -499,6 +500,14 @@ class MpvPlayerSurfaceView @JvmOverloads constructor(
             .getOrNull()?.asArray()
             ?: return readTrackSnapshotLegacy()
 
+        // Node `selected` flags can lag behind sid/aid after preferAss / slang applies.
+        // Cross-check active ids the same way the legacy path does so the overlay does not
+        // show Off while ASS is already painting.
+        val selectedAudioId = mpv.getPropertyString("aid")?.toIntOrNull()
+            ?: mpv.getPropertyInt("current-tracks/audio/id")
+        val selectedSubtitleId = mpv.getPropertyString("sid")?.toIntOrNull()
+            ?: mpv.getPropertyInt("current-tracks/sub/id")
+
         val audioTracks = mutableListOf<MpvTrack>()
         val subtitleTracks = mutableListOf<MpvTrack>()
 
@@ -510,8 +519,13 @@ class MpvPlayerSurfaceView @JvmOverloads constructor(
             val language = values.stringValue("lang")
             val title = values.stringValue("title")
             val codec = values.stringValue("codec")
-            val selected = values.booleanValue("selected") == true
+            val selectedByFlag = values.booleanValue("selected") == true
             val external = values.booleanValue("external") == true
+            val selected = when (type) {
+                "audio" -> (selectedAudioId != null && selectedAudioId == id) || selectedByFlag
+                "sub" -> (selectedSubtitleId != null && selectedSubtitleId == id) || selectedByFlag
+                else -> selectedByFlag
+            }
 
             when (type) {
                 "audio" -> audioTracks += MpvTrack(

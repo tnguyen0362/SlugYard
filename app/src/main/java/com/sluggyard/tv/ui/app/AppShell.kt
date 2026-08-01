@@ -192,6 +192,7 @@ class AppGraph(
     tmdbHomeDataSource: TmdbHomeDataSource? = null,
     val resolveMetaContentId: suspend (type: String, id: String) -> String = { _, id -> id },
     val digitalReleaseLookup: DigitalReleaseLookup? = null,
+    val profiles: ProfileStore = ProfileStore(dataStore),
 ) {
     private val playbackSources = java.util.concurrent.ConcurrentHashMap<String, ResolvedPlaybackSource>()
 
@@ -209,7 +210,6 @@ class AppGraph(
 
     val related = relatedDataSource
     val registry = AddonRegistryStore(dataStore)
-    val profiles = ProfileStore(dataStore)
     val libraryWatch = libraryWatchRepository
     val playbackProgress = PlaybackProgressStore(dataStore, profiles, progressSyncBridge)
     private val debridCredentials = DebridCredentialStore(dataStore, profiles)
@@ -710,6 +710,8 @@ private fun AppContent(
     var streamResolutionJob by remember { mutableStateOf<Job?>(null) }
     var resolvingCandidateId by remember { mutableStateOf<String?>(null) }
     var continueWatchingMenuPoster by remember { mutableStateOf<HomePoster?>(null) }
+    var continueWatchingFocusNonce by remember { mutableStateOf(0) }
+    var suppressHomeHeroFocusRestore by remember { mutableStateOf(false) }
     var navigationRoot by remember { mutableStateOf<RootDestination>(RootDestination.Home) }
     // Who's watching first; logo heartbeat splash only after a profile is chosen.
     var needsStartupProfilePick by remember(sessionBootKey) { mutableStateOf(true) }
@@ -797,8 +799,17 @@ private fun AppContent(
 
     fun popRoute() {
         ExperimentalDiagnostics.event("navigation", "pop", mapOf("previousDepth" to routeStack.size))
-        if (routeStack.size > 1) onRouteStackChange(routeStack.dropLast(1))
-        else openRoot(RootDestination.Home)
+        if (routeStack.size <= 1) {
+            openRoot(RootDestination.Home)
+            return
+        }
+        // Who's watching must never sit under Details/Home after a content Back.
+        val next = routeStack.dropLast(1).filterNot { it is RootDestination.Profiles }
+        when {
+            next.isEmpty() -> openRoot(RootDestination.Home)
+            next.last() is RootDestination.Profiles -> openRoot(RootDestination.Home)
+            else -> onRouteStackChange(next)
+        }
     }
 
     /** No debrid → WatchHub "where to watch"; otherwise torrent auto-pick Streams. */
@@ -880,7 +891,10 @@ private fun AppContent(
 
     /** After Streams hands off to the player, Back must land on Details whenever possible. */
     fun stackForPlayerExit(streams: RootDestination.Streams): List<RootDestination> {
-        var stack = routeStack.dropLastWhile { it is RootDestination.Streams }
+        // Profiles belongs to Who's watching only — never under the content Back stack.
+        var stack = routeStack
+            .dropLastWhile { it is RootDestination.Streams }
+            .filterNot { it is RootDestination.Profiles }
         val detailsId = streams.parentId
             ?: inferSeriesParentId(streams.id, streams.season, streams.episode)
             ?: streams.id.takeIf { streams.season == null && streams.episode == null }
@@ -901,6 +915,18 @@ private fun AppContent(
                 type = detailsType,
                 id = detailsId,
             )
+        }
+        // Hero Play uses replaceCurrent(Streams) which drops Home — restore it under Details
+        // so Back from Details never falls through to Profiles or an empty stack.
+        val hasContentRoot = stack.any {
+            it is RootDestination.Home ||
+                it is RootDestination.Search ||
+                it is RootDestination.Browse ||
+                it is RootDestination.Settings ||
+                it is RootDestination.CloudManager
+        }
+        if (!hasContentRoot) {
+            stack = listOf(RootDestination.Home) + stack
         }
         return stack.ifEmpty { listOf(RootDestination.Home) }
     }
@@ -1310,9 +1336,10 @@ private fun AppContent(
                     is ManualResolutionResult.Ready -> {
                         if (routeStack.lastOrNull() != streams) return@launch
                         streamMessage = null
-                        // Drop Streams, then ensure Details is on top so Back from the
-                        // retained player returns to View Details (Home/Search/CW flows).
-                        onRouteStackChange(stackForPlayerExit(streams))
+                        // Launch the retained player BEFORE rewriting the route stack. Changing
+                        // stack first briefly reveals Details under Streams and flashes ~0.5s of
+                        // non-preparing chrome between "Finding a stream" and "Building player".
+                        val exitStack = stackForPlayerExit(streams)
                         onLaunchRetainedPlayer(
                             result.source,
                             streams.title,
@@ -1333,6 +1360,7 @@ private fun AppContent(
                                 ?: detailsState?.genres?.takeIf { it.isNotEmpty() }?.joinToString(","),
                             streams.contentLanguage,
                         )
+                        onRouteStackChange(exitStack)
                     }
                     is ManualResolutionResult.Unavailable -> {
                         streamMessage = result.message
@@ -1408,6 +1436,10 @@ private fun AppContent(
             contentId = releaseLookupId,
             contentType = streams.type,
         ) ?: DigitalReleasePolicy.Status.UNKNOWN
+        android.util.Log.i(
+            "DigitalRelease",
+            "auto-pick id=${streams.id} lookupId=$releaseLookupId type=${streams.type} status=$digitalReleaseStatus",
+        )
         val candidate = selectAutoPlayCandidate(
             groups = groupsForPick,
             context = com.sluggyard.tv.ui.app.streams.StreamScoringEngine.Context(
@@ -1587,8 +1619,12 @@ private fun AppContent(
                     rowScrollStates = homeRowScrollStates,
                     heroIndexState = homeHeroIndexState,
                     lastHeroKeyState = homeLastHeroKeyState,
+                    continueWatchingFocusNonce = continueWatchingFocusNonce,
+                    suppressHeroFocusRestore = suppressHomeHeroFocusRestore,
+                    onContinueWatchingFocusRestored = { suppressHomeHeroFocusRestore = false },
                     onPlay = { hero ->
-                        replaceCurrent(if (hero.contentType == "series") {
+                        // Keep Home under Details/Streams so Back never falls through to Profiles.
+                        push(if (hero.contentType == "series") {
                             RootDestination.Details(
                                 addonId = hero.addonId,
                                 type = hero.contentType,
@@ -1720,7 +1756,9 @@ private fun AppContent(
                                 needsStartupProfilePick = false
                                 // Dismiss LaunchedEffect starts the timer when visible flips true.
                                 homeSplashVisible = true
-                                openRoot(RootDestination.Home)
+                                // Replace Who's watching entirely — never leave Profiles under Home.
+                                onRouteStackChange(listOf(RootDestination.Home))
+                                navigationRoot = RootDestination.Home
                             } else {
                                 openRoot(profilesReturnDestination)
                             }
@@ -2100,6 +2138,11 @@ private fun AppContent(
                         continueWatchingMenuPoster = null
                     },
                     onRemove = {
+                        // Keep CW row focus after the dialog dismisses — removing a tile used to
+                        // dispose the focused card, dump focus onto the header bridge, and
+                        // teleport scroll/focus back to the hero.
+                        suppressHomeHeroFocusRestore = true
+                        continueWatchingFocusNonce += 1
                         scope.launch {
                             if (useTraktCw) {
                                 val removeId = poster.parentId?.takeIf {

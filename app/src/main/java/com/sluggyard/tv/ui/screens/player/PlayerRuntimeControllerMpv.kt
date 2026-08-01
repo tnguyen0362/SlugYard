@@ -339,6 +339,24 @@ private fun PlayerRuntimeController.applyMpvTrackSnapshot(snapshot: MpvTrackSnap
         }
     }
 
+    // PreferAss may set sid while track-list selection flags are still empty. Re-read after
+    // apply; if still none selected but an ASS track exists, select it so UI index matches paint.
+    if (effectiveSnapshot.subtitleTracks.none { it.isSelected && !it.isExternal } &&
+        shouldPreferAssSubtitles() &&
+        !subtitleDisabledByPersistedPreference
+    ) {
+        val assId = effectiveSnapshot.subtitleTracks.firstOrNull { track ->
+            if (track.isExternal) return@firstOrNull false
+            val haystack = listOfNotNull(track.codec, track.name).joinToString(" ").lowercase()
+            "ass" in haystack || "ssa" in haystack
+        }?.id
+        if (assId != null) {
+            Log.d(PlayerRuntimeController.TAG, "MPV_TRACKS: forcing preferAss sid=$assId for UI sync")
+            mpvView?.selectSubtitleTrackById(assId)
+            effectiveSnapshot = mpvView?.readTrackSnapshot() ?: effectiveSnapshot
+        }
+    }
+
     val audioTracks = effectiveSnapshot.audioTracks.mapIndexed { index, track ->
         val codecSuffix = buildList {
             track.codec?.takeIf { it.isNotBlank() }?.let { add(it) }

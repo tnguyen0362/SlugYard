@@ -653,6 +653,6 @@ internal object StreamScoringEngine {
     private val RESOLUTION_SD = Regex("\\b(480p|sd)\\b")
     private val MODERN_CODEC = Regex("\\b(av1|hevc|h\\.?265|x265)\\b")
     private val HDR_TAG = Regex("\\b(hdr10\\+?|dolby.?vision|dv)\\b")
-    private val CAM_TAG = Regex("\\b(cam|hdcam|telesync|tscam|telecine|screener)\\b")
+    private val CAM_TAG = Regex("\\b(cam(?:rip)?|hdcam|telesync|tscam|telecine|screener)\\b|\\[\\s*cam(?:rip)?\\s*]")
     private val AI_UPSCALE = Regex("\\b(ai.?upscale|upscaled|ai.?enhance|reupscale|topaz|esrgan)\\b")
 }

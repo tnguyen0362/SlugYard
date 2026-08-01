@@ -7,7 +7,8 @@ import java.time.LocalDate
  * SlugYard-side digital-release gate (AIOStreams-equivalent, using our TMDB key).
  *
  * When a movie is not digitally released yet, auto-play should refuse CAM/TS/SCR/trailer
- * junk so Play does not land on dud early rips. Missing TMDB data fails open.
+ * junk so Play does not land on dud early rips. Fail open only when TMDB truly has no
+ * usable release signal — theatrical-without-past-digital must be [Status.NOT_YET].
  */
 object DigitalReleasePolicy {
     enum class Status {
@@ -15,7 +16,7 @@ object DigitalReleasePolicy {
         AVAILABLE,
         /** Still theatrical-only / future digital — treat early-release junk as unplayable for auto-pick. */
         NOT_YET,
-        /** No key, no rows, or ambiguous — do not block. */
+        /** No key / no TMDB rows at all — do not block. */
         UNKNOWN,
     }
 
@@ -38,7 +39,23 @@ object DigitalReleasePolicy {
         if (theatrical != null && theatrical.isAfter(today)) return Status.NOT_YET
         // Theatrical already happened (or unknown types only) but no past digital row.
         if (theatrical != null && !theatrical.isAfter(today)) return Status.NOT_YET
-        return Status.UNKNOWN
+        // Non-empty TMDB payload without a past digital date — treat as pre-digital, not fail-open.
+        return Status.NOT_YET
+    }
+
+    /**
+     * When release-dates rows are empty but the movie detail primary [releaseDate] exists,
+     * use it as a theatrical stand-in so we do not fail open on theatrical-only titles.
+     */
+    fun statusFromPrimaryReleaseDate(
+        releaseDate: LocalDate?,
+        clock: Clock = Clock.systemUTC(),
+    ): Status {
+        val theatrical = releaseDate ?: return Status.UNKNOWN
+        return status(
+            rows = listOf(ReleaseRow(type = 3, date = theatrical)),
+            clock = clock,
+        )
     }
 
     fun isEarlyReleaseJunk(text: String): Boolean =
@@ -60,8 +77,9 @@ object DigitalReleasePolicy {
 
     private val DIGITAL_TYPES = 4..6
     private val THEATRICAL_TYPES = 1..3
+    // Match CAMRip / HDTS / TS.CAM etc., not only spaced whole-word "CAM".
     private val EARLY_RELEASE_JUNK = Regex(
-        "\\b(cam|hdcam|hqcam|telesync|telecine|tscam|screener|dvdscr|bdscr|r5|pdvd|predvd|" +
-            "workprint|wp|trailer|teaser)\\b|\\b(?:hd)?ts\\b|\\btc\\b",
+        "\\b(cam(?:rip)?|hdcam|hqcam|telesync|telecine|tscam|screener|dvdscr|bdscr|r5|pdvd|predvd|" +
+            "workprint|wp|trailer|teaser)\\b|\\b(?:hd)?ts\\b|\\btc\\b|\\[\\s*cam(?:rip)?\\s*]",
     )
 }

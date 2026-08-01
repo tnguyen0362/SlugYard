@@ -318,6 +318,10 @@ fun HomeScreen(
     rowScrollStates: MutableMap<String, LazyListState> = remember { mutableMapOf() },
     heroIndexState: MutableState<Int> = remember { mutableStateOf(0) },
     lastHeroKeyState: MutableState<String?> = remember { mutableStateOf(null) },
+    /** Bumped after Remove-from-CW so focus stays on the Continue Watching row. */
+    continueWatchingFocusNonce: Int = 0,
+    suppressHeroFocusRestore: Boolean = false,
+    onContinueWatchingFocusRestored: () -> Unit = {},
 ) {
     val context = LocalContext.current
     // OEM "low RAM" TV boxes still choke on simultaneous rail + landscape decode; keep expand
@@ -414,6 +418,18 @@ fun HomeScreen(
         focusPrimaryContent()
         onInitialFocusRequested()
     }
+    LaunchedEffect(continueWatchingFocusNonce) {
+        if (continueWatchingFocusNonce <= 0) return@LaunchedEffect
+        // Let the CW row recompose after the removed tile leaves the list.
+        delay(48)
+        val cwIndex = state.rows.indexOfFirst { it.id == "continue_watching" }
+        if (cwIndex >= 0) {
+            focusCatalogRow(cwIndex)
+        } else {
+            focusFirstCatalogRow()
+        }
+        onContinueWatchingFocusRestored()
+    }
     val catalogBringIntoViewSpec = rememberHomeBringIntoViewSpec()
     val dpadVerticalNeighbors = remember { DpadVerticalNeighbors() }
     // Which shelf owns focus right now. Horizontal moves inside one shelf must not re-run the
@@ -443,7 +459,17 @@ fun HomeScreen(
                         }
                         .onFocusChanged { focusState ->
                             if (focusState.isFocused) {
-                                scrollScope.launch { focusPrimaryContent() }
+                                scrollScope.launch {
+                                    // After CW remove, the disposed tile can dump focus here.
+                                    // Don't teleport to the hero while we restore the CW row.
+                                    if (suppressHeroFocusRestore) {
+                                        val cwIndex = state.rows.indexOfFirst { it.id == "continue_watching" }
+                                        if (cwIndex >= 0) focusCatalogRow(cwIndex)
+                                        else focusFirstCatalogRow()
+                                    } else {
+                                        focusPrimaryContent()
+                                    }
+                                }
                             }
                         }
                         .focusable(),

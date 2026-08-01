@@ -68,6 +68,9 @@ class MainActivity : ComponentActivity() {
     lateinit var libraryWatchRepository: LibraryWatchRepository
 
     @Inject
+    lateinit var profileStore: com.sluggyard.tv.ui.app.data.ProfileStore
+
+    @Inject
     lateinit var tmdbMetadataService: com.sluggyard.tv.core.tmdb.TmdbMetadataService
 
     @Inject
@@ -119,6 +122,7 @@ class MainActivity : ComponentActivity() {
                     context = applicationContext,
                     profileManager = profileManager,
                     dataStore = dataStore,
+                    profiles = profileStore,
                     progressSyncBridge = progressSyncBridge,
                     providerCredentialSyncBridge = providerCredentialSyncBridge,
                     libraryWatchRepository = libraryWatchRepository,

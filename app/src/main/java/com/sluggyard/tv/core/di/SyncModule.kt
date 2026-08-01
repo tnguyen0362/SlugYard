@@ -163,13 +163,22 @@ object SyncModule {
 
     @Provides
     @Singleton
-    fun provideLibraryWatchStore(
+    fun provideProfileStore(
         @Named("app") dataStore: DataStore<Preferences>,
+    ): ProfileStore = ProfileStore(dataStore)
+
+    @Provides
+    @Singleton
+    fun provideLibraryWatchStore(
+        @ApplicationContext context: Context,
+        @Named("app") dataStore: DataStore<Preferences>,
+        profiles: ProfileStore,
         mutationRecorder: SyncMutationRecorder,
     ): LibraryWatchStore = LibraryWatchStore(
         dataStore = dataStore,
-        profiles = ProfileStore(dataStore),
+        profiles = profiles,
         mutationRecorder = mutationRecorder,
+        appContext = context.applicationContext,
     )
 
     @Provides

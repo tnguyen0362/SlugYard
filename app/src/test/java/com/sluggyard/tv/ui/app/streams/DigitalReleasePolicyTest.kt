@@ -48,8 +48,35 @@ class DigitalReleasePolicyTest {
     }
 
     @Test
+    fun nonEmptyWithoutPastDigitalIsNotYet() {
+        // Typed rows that aren't digital and aren't old theatrical still block early junk.
+        val status = DigitalReleasePolicy.status(
+            listOf(DigitalReleasePolicy.ReleaseRow(3, today.minusDays(5))),
+            clock,
+        )
+        assertEquals(DigitalReleasePolicy.Status.NOT_YET, status)
+    }
+
+    @Test
+    fun primaryReleaseDateFallback() {
+        assertEquals(
+            DigitalReleasePolicy.Status.NOT_YET,
+            DigitalReleasePolicy.statusFromPrimaryReleaseDate(today.minusDays(2), clock),
+        )
+        assertEquals(
+            DigitalReleasePolicy.Status.AVAILABLE,
+            DigitalReleasePolicy.statusFromPrimaryReleaseDate(today.minusDays(400), clock),
+        )
+        assertEquals(
+            DigitalReleasePolicy.Status.UNKNOWN,
+            DigitalReleasePolicy.statusFromPrimaryReleaseDate(null, clock),
+        )
+    }
+
+    @Test
     fun earlyJunkBlockedOnlyWhenNotYet() {
         assertFalse(DigitalReleasePolicy.allowsAutoPlay(DigitalReleasePolicy.Status.NOT_YET, "Movie 2026 CAM"))
+        assertFalse(DigitalReleasePolicy.allowsAutoPlay(DigitalReleasePolicy.Status.NOT_YET, "Movie.2026.CAMRip.x264"))
         assertTrue(DigitalReleasePolicy.allowsAutoPlay(DigitalReleasePolicy.Status.NOT_YET, "Movie 2026 1080p WEB-DL"))
         assertTrue(DigitalReleasePolicy.allowsAutoPlay(DigitalReleasePolicy.Status.AVAILABLE, "Movie 2026 CAM"))
         assertTrue(DigitalReleasePolicy.allowsAutoPlay(null, "Movie 2026 CAM"))
@@ -58,6 +85,8 @@ class DigitalReleasePolicyTest {
     @Test
     fun detectsCamTsTrailer() {
         assertTrue(DigitalReleasePolicy.isEarlyReleaseJunk("Foo.2026.HDTS.x264"))
+        assertTrue(DigitalReleasePolicy.isEarlyReleaseJunk("Foo.2026.CAMRip.x264"))
+        assertTrue(DigitalReleasePolicy.isEarlyReleaseJunk("Foo [CAM] 2026"))
         assertTrue(DigitalReleasePolicy.isEarlyReleaseJunk("Foo Official Trailer"))
         assertFalse(DigitalReleasePolicy.isEarlyReleaseJunk("Foo.2026.1080p.WEB-DL.DDP5.1"))
     }
