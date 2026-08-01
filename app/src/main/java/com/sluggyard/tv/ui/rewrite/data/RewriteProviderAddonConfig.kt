@@ -25,6 +25,7 @@ data class RewriteConfiguredAddonUrls(
     val mediaFusionManifestUrl: String?,
     val cometManifestUrl: String? = null,
     val meteorManifestUrl: String? = null,
+    val aioStreamsManifestUrl: String? = null,
 )
 
 internal fun torrentioProviderKey(service: DebridService): String = when (service) {

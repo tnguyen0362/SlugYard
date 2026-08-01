@@ -59,17 +59,28 @@ class RewriteCommunityAddonProvisioner(
         // exists. Content sources are eligible only when their generated URLs are available.
         val hasConfiguredContentSources = debridConfigured && configured != null
         val registryUrls = SlugYardCommunitySourcePolicy.provisionManifestUrls(hasConfiguredContentSources)
-        val requests = registryUrls.map { registryUrl ->
-            val requestUrl = when {
+        val unavailableReasons = mutableListOf<String>()
+        val requests = registryUrls.mapNotNull { registryUrl ->
+            val configuredUrl = when {
                 registryUrl.contains("torrentio", ignoreCase = true) -> configured?.torrentioManifestUrl
                 registryUrl.contains("mediafusion", ignoreCase = true) -> configured?.mediaFusionManifestUrl
                 registryUrl.contains("comet", ignoreCase = true) -> configured?.cometManifestUrl
                 registryUrl.contains("meteor", ignoreCase = true) -> configured?.meteorManifestUrl
+                SlugYardCommunitySourcePolicy.isAioStreamsManifest(registryUrl) ->
+                    configured?.aioStreamsManifestUrl
                 else -> null
-            } ?: registryUrl
-            ManifestRequest(registryUrl, requestUrl)
+            }
+            // AIOStreams public stub has empty resources; only install when a UUID manifest exists.
+            if (SlugYardCommunitySourcePolicy.isAioStreamsManifest(registryUrl) && configuredUrl == null) {
+                unavailableReasons += "$registryUrl: AIOStreams configuration unavailable"
+                Log.w(
+                    COMMUNITY_PROVISION_TAG,
+                    "unavailable registry=$registryUrl reason=AIOStreams configuration unavailable",
+                )
+                return@mapNotNull null
+            }
+            ManifestRequest(registryUrl, configuredUrl ?: registryUrl)
         }
-        val unavailableReasons = mutableListOf<String>()
         val curated = buildList {
             boundedAddonFanout(
                 tasks = requests.mapIndexed { index, request ->
@@ -142,7 +153,7 @@ class RewriteCommunityAddonProvisioner(
         )
         return CommunityProvisioningReport(
             installedCount = curated.size,
-            unavailableCount = requests.size - curated.size,
+            unavailableCount = registryUrls.size - curated.size,
             unavailableReasons = unavailableReasons.toList(),
         )
     }

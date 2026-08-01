@@ -1,5 +1,7 @@
 package com.sluggyard.tv.core.addonprotocol
 
+import com.sluggyard.tv.BuildConfig
+
 /**
  * Fixed backend manifest allowlist for the locked-down SlugYard product.
  *
@@ -9,19 +11,26 @@ package com.sluggyard.tv.core.addonprotocol
  * outage; endpoint availability is handled by the bounded transport, not by removing a source.
  */
 object SlugYardCommunitySourcePolicy {
-    val bootstrapManifestUrls: List<String> = listOf(
-        "https://v3-cinemeta.strem.io/manifest.json",
-        "https://opensubtitles-v3.strem.io/manifest.json",
+    /** Present only when AIOSTREAMS_BASE_URL is set; keyless stub is never used for streams. */
+    val aioStreamsRegistryUrl: String? =
+        BuildConfig.AIOSTREAMS_BASE_URL.trim().trimEnd('/').takeIf { it.isNotBlank() }
+            ?.let { "$it/stremio/manifest.json" }
+
+    val bootstrapManifestUrls: List<String> = buildList {
+        add("https://v3-cinemeta.strem.io/manifest.json")
+        add("https://opensubtitles-v3.strem.io/manifest.json")
         // Vanilla "where to watch" links — not a torrent source; Details/WatchHub surfaces these.
-        "https://watchhub.strem.io/manifest.json",
-        "https://torrentio.strem.fun/manifest.json",
+        add("https://watchhub.strem.io/manifest.json")
+        add("https://torrentio.strem.fun/manifest.json")
         // Keyless catalog only — never a pre-baked encrypted user path with embedded credentials.
-        "https://mediafusionfortheweebs.midnightignite.me/manifest.json",
+        add("https://mediafusionfortheweebs.midnightignite.me/manifest.json")
         // Comet cache-first scraper; debrid key injected into configuredManifestUrl on connect.
-        "https://comet.elfhosted.com/manifest.json",
+        add("https://comet.elfhosted.com/manifest.json")
         // Meteor cache-first scraper (MidnightIgnite); debrid key injected on connect.
-        "https://meteorfortheweebs.midnightignite.me/manifest.json",
-    )
+        add("https://meteorfortheweebs.midnightignite.me/manifest.json")
+        // AIOStreams (AnimeTosho / SeaDex / Torz) — only when an opted-in host is configured.
+        aioStreamsRegistryUrl?.let(::add)
+    }
 
     val watchHubManifestUrl: String =
         bootstrapManifestUrls.first { it.contains("watchhub", ignoreCase = true) }
@@ -46,7 +55,15 @@ object SlugYardCommunitySourcePolicy {
         return "torrentio" in normalized ||
             "mediafusion" in normalized ||
             "comet" in normalized ||
-            "meteor" in normalized
+            "meteor" in normalized ||
+            isAioStreamsManifest(url)
+    }
+
+    fun isAioStreamsManifest(url: String): Boolean {
+        val normalized = url.lowercase()
+        val base = BuildConfig.AIOSTREAMS_BASE_URL.trim().trimEnd('/').lowercase()
+        if (base.isNotBlank() && normalized.startsWith(base)) return true
+        return "aiostreams" in normalized
     }
 
     fun isConfiguredEnabledStreamAddon(addon: ManagedAddon): Boolean =

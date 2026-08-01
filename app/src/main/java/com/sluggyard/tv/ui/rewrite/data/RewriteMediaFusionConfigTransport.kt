@@ -65,6 +65,7 @@ class RewriteMediaFusionConfigTransport(
 
 class RewriteProviderAddonConfigurator(
     private val mediaFusion: RewriteMediaFusionConfigTransport = RewriteMediaFusionConfigTransport(),
+    private val aioStreams: RewriteAioStreamsConfigTransport? = null,
 ) {
     suspend fun configure(service: DebridService, apiKey: String): RewriteConfiguredAddonUrls =
         RewriteConfiguredAddonUrls(
@@ -79,5 +80,13 @@ class RewriteProviderAddonConfigurator(
             },
             cometManifestUrl = buildCometManifestUrl(service, apiKey),
             meteorManifestUrl = buildMeteorManifestUrl(service, apiKey),
+            aioStreamsManifestUrl = try {
+                aioStreams?.createManifestUrl(service, apiKey)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // Optional host; skip when AIOSTREAMS_BASE_URL is empty or create/update fails.
+                null
+            },
         )
 }

@@ -152,7 +152,10 @@ import com.sluggyard.tv.ui.util.LocalFastHorizontalNavigationEnabled
 import com.sluggyard.tv.ui.rewrite.debrid.RewriteDebridRuntime
 import com.sluggyard.tv.ui.rewrite.debrid.RewriteDebridConnection
 import com.sluggyard.tv.ui.rewrite.debrid.RewriteDebridCredentialStore
+import com.sluggyard.tv.ui.rewrite.debrid.RewriteAioStreamsSessionStore
 import com.sluggyard.tv.ui.rewrite.debrid.RewriteCloudManagerScreen
+import com.sluggyard.tv.ui.rewrite.data.RewriteAioStreamsConfigTransport
+import com.sluggyard.tv.ui.rewrite.data.RewriteProviderAddonConfigurator
 import com.sluggyard.tv.core.addonprotocol.SlugYardCommunitySourcePolicy
 import com.sluggyard.tv.core.logging.ExperimentalDiagnostics
 import com.sluggyard.tv.ui.rewrite.watchhub.RewriteWatchHubDataSource
@@ -201,7 +204,23 @@ class RewriteAppGraph(
     val libraryWatch = libraryWatchRepository
     val playbackProgress = RewritePlaybackProgressStore(rewriteDataStore, profiles, progressSyncBridge)
     private val debridCredentials = RewriteDebridCredentialStore(rewriteDataStore, profiles)
-    val debridRuntime = RewriteDebridRuntime(debridCredentials)
+    private val aioStreamsSessions = RewriteAioStreamsSessionStore(rewriteDataStore, profiles)
+    private val aioStreamsTemplateJson = runCatching {
+        context.assets.open("aiostreams/slugyard-template.json").bufferedReader().use { it.readText() }
+    }.getOrDefault("")
+    val debridRuntime = RewriteDebridRuntime(
+        credentials = debridCredentials,
+        addonConfigurator = RewriteProviderAddonConfigurator(
+            aioStreams = if (aioStreamsTemplateJson.isNotBlank()) {
+                RewriteAioStreamsConfigTransport(
+                    templateJson = aioStreamsTemplateJson,
+                    sessions = aioStreamsSessions,
+                )
+            } else {
+                null
+            },
+        ),
+    )
     val homeSettings = RewriteHomeSettingsStore(rewriteDataStore, profiles)
     val dataIntegrity = RewriteDataIntegrityStore(rewriteDataStore)
     val guestSession = RewriteGuestSessionStore(rewriteDataStore)

@@ -27,6 +27,9 @@ class RewriteCommunityAddonProvisionerTest {
                 mediaFusionManifestUrl = "https://mediafusion.example/configured/manifest.json",
                 cometManifestUrl = "https://comet.elfhosted.com/configured/manifest.json",
                 meteorManifestUrl = "https://meteorfortheweebs.midnightignite.me/configured/manifest.json",
+                aioStreamsManifestUrl = SlugYardCommunitySourcePolicy.aioStreamsRegistryUrl?.let {
+                    it.removeSuffix("/manifest.json") + "/uuid/enc/manifest.json"
+                },
             ),
             debridConfigured = true,
         )
@@ -35,6 +38,9 @@ class RewriteCommunityAddonProvisionerTest {
         assertTrue(gateway.requestedUrls.none { it.contains("example.test") })
         assertTrue(gateway.requestedUrls.contains("https://torrentio.strem.fun/debridoptions=nodownloadlinks%7Ctorbox=key/manifest.json"))
         assertTrue(gateway.requestedUrls.contains("https://meteorfortheweebs.midnightignite.me/configured/manifest.json"))
+        if (SlugYardCommunitySourcePolicy.aioStreamsRegistryUrl != null) {
+            assertTrue(gateway.requestedUrls.any { it.contains("/uuid/enc/manifest.json") })
+        }
         assertEquals(SlugYardCommunitySourcePolicy.bootstrapManifestUrls.size, registry.curated.single().size)
         assertEquals(SlugYardCommunitySourcePolicy.bootstrapManifestUrls.size, report.installedCount)
         assertEquals(0, report.unavailableCount)
@@ -86,6 +92,9 @@ class RewriteCommunityAddonProvisionerTest {
                 mediaFusionManifestUrl = "https://mediafusion.example/configured/manifest.json",
                 cometManifestUrl = "https://comet.elfhosted.com/configured/manifest.json",
                 meteorManifestUrl = "https://meteorfortheweebs.midnightignite.me/configured/manifest.json",
+                aioStreamsManifestUrl = SlugYardCommunitySourcePolicy.aioStreamsRegistryUrl?.let {
+                    it.removeSuffix("/manifest.json") + "/uuid/enc/manifest.json"
+                },
             ),
             debridConfigured = true,
         )

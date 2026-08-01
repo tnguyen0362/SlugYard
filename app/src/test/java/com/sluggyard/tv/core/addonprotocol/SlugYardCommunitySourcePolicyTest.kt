@@ -37,6 +37,7 @@ class SlugYardCommunitySourcePolicyTest {
         assertFalse(urls.any { it.contains("mediafusion", ignoreCase = true) })
         assertFalse(urls.any { it.contains("comet", ignoreCase = true) })
         assertFalse(urls.any { it.contains("meteor", ignoreCase = true) })
+        assertFalse(urls.any { SlugYardCommunitySourcePolicy.isAioStreamsManifest(it) })
     }
 
     @Test
