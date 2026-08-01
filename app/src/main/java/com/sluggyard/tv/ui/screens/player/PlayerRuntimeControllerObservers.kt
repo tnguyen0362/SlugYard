@@ -68,7 +68,7 @@ internal suspend fun PlayerRuntimeController.fetchAddonSubtitlesNow(
     onProgress: ((completed: Int, total: Int, addonName: String?) -> Unit)? = null
 ): List<Subtitle> {
     val request = buildSubtitleFetchRequest() ?: return emptyList()
-    if (rewriteSubtitleMode) return rewriteAddonSubtitles
+    if (subtitleMode) return addonSubtitles
 
     // Persist the installed addon order into UI state so subtitle badges can
     // render provider attribution even before results arrive.
@@ -135,12 +135,12 @@ internal suspend fun PlayerRuntimeController.fetchAddonSubtitlesNow(
     return (addonSubs + osSubs).distinctBy { it.id }
 }
 
-internal fun PlayerRuntimeController.enableRewriteSubtitleMode() {
-    rewriteSubtitleMode = true
+internal fun PlayerRuntimeController.enableSubtitleMode() {
+    subtitleMode = true
 }
 
-internal fun PlayerRuntimeController.setRewriteAddonSubtitles(subtitles: List<Subtitle>) {
-    rewriteAddonSubtitles = subtitles
+internal fun PlayerRuntimeController.setAddonSubtitles(subtitles: List<Subtitle>) {
+    addonSubtitles = subtitles
     _uiState.update {
         it.copy(
             addonSubtitles = filterToVisibleAddonSubtitles(subtitles),

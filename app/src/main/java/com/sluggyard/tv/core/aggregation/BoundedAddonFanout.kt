@@ -17,6 +17,7 @@ import kotlinx.coroutines.withTimeout
  */
 data class AddonFanoutTask<T>(
     val key: String,
+    val timeoutMs: Long = DEFAULT_ADDON_TIMEOUT_MS,
     val load: suspend () -> T,
 )
 
@@ -60,8 +61,9 @@ fun <T> boundedAddonFanout(
         tasks.forEach { task ->
             launch {
                 permits.withPermit {
+                    val timeoutMs = task.timeoutMs.takeIf { it > 0L } ?: perTaskTimeoutMs
                     val result = try {
-                        AddonFanoutResult.Success(task.key, withTimeout(perTaskTimeoutMs) { task.load() })
+                        AddonFanoutResult.Success(task.key, withTimeout(timeoutMs) { task.load() })
                     } catch (timedOut: TimeoutCancellationException) {
                         AddonFanoutResult.Failure(task.key, timedOut)
                     } catch (cancelled: CancellationException) {
@@ -81,3 +83,9 @@ const val DEFAULT_ADDON_CONCURRENCY = 6
 /** Generous enough for slow but legitimate addon responses, tight enough that one bad source
  * can't stall the whole fanout past what a user will wait for. */
 const val DEFAULT_ADDON_TIMEOUT_MS = 12_000L
+
+/**
+ * AIOStreams runs Torz + SeaDex + AnimeTosho then TorBox cache filtering in one request —
+ * longer than a single Comet scrape. Keep this under [NetworkClient] callTimeout.
+ */
+const val AIOSTREAMS_STREAM_TIMEOUT_MS = 20_000L

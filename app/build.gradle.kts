@@ -68,7 +68,7 @@ val selfHosted = parseBooleanProperty(
 val doviStaticLibPath = resolveProperty(devProperties, localProperties, "DOVI_LIBDOVI_STATIC_LIB")
 val doviIncludeDirPath = resolveProperty(devProperties, localProperties, "DOVI_LIBDOVI_INCLUDE_DIR")
 val doviPrebuiltRootPath = resolveProperty(devProperties, localProperties, "DOVI_LIBDOVI_PREBUILT_ROOT")
-val sponsorNames = resolveProperty(devProperties, localProperties, "SPONSOR_NAMES", "ragmehos.")
+val sponsorNames = resolveProperty(devProperties, localProperties, "SPONSOR_NAMES")
 val sentryDsn = providers.environmentVariable("SENTRY_DSN").orNull?.trim()?.takeIf { it.isNotBlank() }
     ?: resolveProperty(devProperties, localProperties, "SENTRY_DSN")
 val sentryAuthToken = providers.environmentVariable("SENTRY_AUTH_TOKEN").orNull?.trim()?.takeIf { it.isNotBlank() }
@@ -95,13 +95,20 @@ val useLocalFfmpegDecoder = truthy(
         ?: localProperties.getProperty("USE_LOCAL_FFMPEG_DECODER")
 )
 val releaseStoreFilePath = env("SLUGYARD_RELEASE_STORE_FILE")
-    ?: localProperties.getProperty("SLUGYARD_RELEASE_STORE_FILE")
+    ?: localProperties.getProperty("SLUGYARD_RELEASE_STORE_FILE")?.trim()?.takeIf { it.isNotBlank() }
 val releaseKeyAliasValue = env("SLUGYARD_RELEASE_KEY_ALIAS")
-    ?: localProperties.getProperty("SLUGYARD_RELEASE_KEY_ALIAS", "sluggyard")
+    ?: localProperties.getProperty("SLUGYARD_RELEASE_KEY_ALIAS")?.trim()?.takeIf { it.isNotBlank() }
+    ?: "sluggyard"
 val releaseKeyPasswordValue = env("SLUGYARD_RELEASE_KEY_PASSWORD")
-    ?: localProperties.getProperty("SLUGYARD_RELEASE_KEY_PASSWORD", "815787")
+    ?: localProperties.getProperty("SLUGYARD_RELEASE_KEY_PASSWORD")?.trim().orEmpty()
 val releaseStorePasswordValue = env("SLUGYARD_RELEASE_STORE_PASSWORD")
-    ?: localProperties.getProperty("SLUGYARD_RELEASE_STORE_PASSWORD", "815787")
+    ?: localProperties.getProperty("SLUGYARD_RELEASE_STORE_PASSWORD")?.trim().orEmpty()
+val releaseStoreFileResolved = releaseStoreFilePath
+    ?.let { path -> rootProject.file(path).takeIf { it.isFile } ?: file(path).takeIf { it.isFile } }
+    ?: rootProject.file("sluggyard.jks").takeIf { it.isFile }
+val hasReleaseSigning = releaseStoreFileResolved != null &&
+    releaseKeyPasswordValue.isNotBlank() &&
+    releaseStorePasswordValue.isNotBlank()
 val tmdbApiKey = env("TMDB_API_KEY")
     ?: localProperties.getProperty("TMDB_API_KEY", "")
 
@@ -186,16 +193,23 @@ android {
 
     signingConfigs {
         create("release") {
-            keyAlias = releaseKeyAliasValue
-            keyPassword = releaseKeyPasswordValue
-            storeFile = releaseStoreFilePath?.let(::file) ?: file("../sluggyard.jks")
-            storePassword = releaseStorePasswordValue
+            if (hasReleaseSigning) {
+                keyAlias = releaseKeyAliasValue
+                keyPassword = releaseKeyPasswordValue
+                storeFile = releaseStoreFileResolved
+                storePassword = releaseStorePasswordValue
+            }
         }
     }
 
     buildTypes {
         debug {
-            signingConfig = signingConfigs.getByName("release")
+            // Prefer release signing when configured (in-place TV updates); else debug keystore.
+            signingConfig = if (hasReleaseSigning) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
             isDebuggable = false
             isMinifyEnabled = false
 
@@ -230,10 +244,10 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = if (useDebugReleaseSigning) {
-                signingConfigs.getByName("debug")
-            } else {
-                signingConfigs.getByName("release")
+            signingConfig = when {
+                useDebugReleaseSigning -> signingConfigs.getByName("debug")
+                hasReleaseSigning -> signingConfigs.getByName("release")
+                else -> signingConfigs.getByName("debug")
             }
 
             buildConfigField("boolean", "IS_DEBUG_BUILD", "false")

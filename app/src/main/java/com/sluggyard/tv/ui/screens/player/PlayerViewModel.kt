@@ -181,20 +181,20 @@ class PlayerViewModel @Inject constructor(
         controller.onEvent(event)
     }
 
-    fun enableRewriteSubtitleMode() {
-        controller.enableRewriteSubtitleMode()
+    fun enableSubtitleMode() {
+        controller.enableSubtitleMode()
     }
 
-    fun configureRewriteLaunch(source: ResolvedPlaybackSource) {
-        controller.configureRewriteLaunch(source)
+    fun configureLaunch(source: ResolvedPlaybackSource) {
+        controller.configureLaunch(source)
     }
 
-    fun rewriteContentGenres(): String? = controller.effectiveContentGenres()
+    fun contentGenres(): String? = controller.effectiveContentGenres()
 
-    fun rewriteContentLanguage(): String? = controller.contentLanguage
+    fun contentLanguage(): String? = controller.contentLanguage
 
-    fun setRewriteAddonSubtitles(subtitles: List<Subtitle>) {
-        controller.setRewriteAddonSubtitles(subtitles)
+    fun setAddonSubtitles(subtitles: List<Subtitle>) {
+        controller.setAddonSubtitles(subtitles)
     }
 
     fun consumePendingExitReason() {

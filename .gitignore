@@ -95,4 +95,8 @@ HANDOFF_*.md
 CLAUDE_UI_HANDOFF.md
 PUREFIRE_ADDON_CONFIG.md
 BEHAVIOR_SPEC.md
+AUDIT_REPORT.md
 .superpowers/
+.cursor/
+.ignore
+qa-visual-audit/

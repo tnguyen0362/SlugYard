@@ -14,7 +14,7 @@ internal fun PlayerRuntimeController.attachHostActivity(activity: Activity?) {
     hostActivityRef = activity?.let { WeakReference(it) }
 }
 
-internal fun PlayerRuntimeController.configureRewriteLaunch(source: ResolvedPlaybackSource) {
+internal fun PlayerRuntimeController.configureLaunch(source: ResolvedPlaybackSource) {
     if (initialPlaybackStarted) return
     initialStreamUrl = source.url
     currentStreamUrl = source.url

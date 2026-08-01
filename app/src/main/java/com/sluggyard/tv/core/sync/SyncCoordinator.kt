@@ -82,7 +82,7 @@ interface LocalSyncStore {
  * Adapter for Rewrite-owned progress storage. The main sync snapshot remains the durable outbox
  * source, while this bridge keeps the Rewrite presentation state in step with merged records.
  */
-interface RewriteProgressSyncBridge {
+interface ProgressSyncBridge {
     suspend fun snapshot(): List<CloudWatchProgress>
 
     suspend fun apply(progress: List<CloudWatchProgress>)
@@ -95,23 +95,23 @@ interface RewriteProgressSyncBridge {
     suspend fun flushPending() = Unit
 }
 
-data class RewriteLibraryWatchSyncSnapshot(
+data class LibraryWatchSyncSnapshot(
     val library: List<CloudLibraryItem> = emptyList(),
     val watchedItems: List<CloudWatchedItem> = emptyList(),
 )
 
 /** Adapter for Rewrite-owned library and watched state. */
-interface RewriteLibraryWatchSyncBridge {
-    suspend fun snapshot(): RewriteLibraryWatchSyncSnapshot
+interface LibraryWatchSyncBridge {
+    suspend fun snapshot(): LibraryWatchSyncSnapshot
 
-    suspend fun apply(snapshot: RewriteLibraryWatchSyncSnapshot)
+    suspend fun apply(snapshot: LibraryWatchSyncSnapshot)
 }
 
 /**
  * Promotes guest/local rewrite debrid keys into the account vault on sign-in, and applies
  * remote provider credentials back into the rewrite credential store.
  */
-interface RewriteProviderCredentialSyncBridge {
+interface ProviderCredentialSyncBridge {
     suspend fun snapshot(): List<ProviderCredentialRecord>
 
     suspend fun apply(records: List<ProviderCredentialRecord>)
@@ -142,9 +142,9 @@ class SyncCoordinator(
     private val nowEpochMs: () -> Long = { System.currentTimeMillis() },
     private val wait: suspend (Long) -> Unit = { delay(it) },
     private val maxAttempts: Int = 3,
-    private val rewriteProgress: RewriteProgressSyncBridge? = null,
-    private val rewriteLibraryWatch: RewriteLibraryWatchSyncBridge? = null,
-    private val rewriteProviderCredentials: RewriteProviderCredentialSyncBridge? = null,
+    private val progress: ProgressSyncBridge? = null,
+    private val libraryWatch: LibraryWatchSyncBridge? = null,
+    private val providerCredentials: ProviderCredentialSyncBridge? = null,
 ) {
     private val synchronizeMutex = Mutex()
 
@@ -156,35 +156,35 @@ class SyncCoordinator(
         val session = (sessions.read() as? SupabaseSessionState.Active)?.session
             ?: return SyncResult.Success(SyncSummary(0, 0, local.pending().size))
         (local as? AccountBoundLocalSyncStore)?.bindOwner(session.userId)
-        rewriteProgress?.flushPending()
-        rewriteProviderCredentials?.flushPending()
+        progress?.flushPending()
+        providerCredentials?.flushPending()
 
         val remoteSnapshot = when (val result = remote.pull(session.userId)) {
             is SyncResult.Success -> result.value
             is SyncResult.Failure -> return result
             SyncResult.SessionExpired -> return SyncResult.SessionExpired
         }
-        val rewriteLocalProgress = rewriteProgress?.snapshot().orEmpty()
-        val rewriteLocalLibraryWatch = rewriteLibraryWatch?.snapshot()
-        val rewriteLocalCredentials = rewriteProviderCredentials?.snapshot().orEmpty()
+        val localProgress = progress?.snapshot().orEmpty()
+        val localLibraryWatch = libraryWatch?.snapshot()
+        val localCredentials = providerCredentials?.snapshot().orEmpty()
         val localSnapshot = local.snapshot().let { snapshot ->
             snapshot.copy(
-                progress = rewriteProgress?.let {
-                    SupabaseMergePolicy.mergeProgress(snapshot.progress, rewriteLocalProgress)
+                progress = progress?.let {
+                    SupabaseMergePolicy.mergeProgress(snapshot.progress, localProgress)
                 } ?: snapshot.progress,
-                library = rewriteLibraryWatch?.let {
-                    SupabaseMergePolicy.mergeLibrary(snapshot.library, rewriteLocalLibraryWatch?.library.orEmpty())
+                library = libraryWatch?.let {
+                    SupabaseMergePolicy.mergeLibrary(snapshot.library, localLibraryWatch?.library.orEmpty())
                 } ?: snapshot.library,
-                watchedItems = rewriteLibraryWatch?.let {
+                watchedItems = libraryWatch?.let {
                     SupabaseMergePolicy.mergeWatchedItems(
                         snapshot.watchedItems,
-                        rewriteLocalLibraryWatch?.watchedItems.orEmpty(),
+                        localLibraryWatch?.watchedItems.orEmpty(),
                     )
                 } ?: snapshot.watchedItems,
-                providerCredentials = rewriteProviderCredentials?.let {
+                providerCredentials = providerCredentials?.let {
                     SupabaseMergePolicy.mergeProviderCredentials(
                         snapshot.providerCredentials,
-                        rewriteLocalCredentials,
+                        localCredentials,
                     )
                 } ?: snapshot.providerCredentials,
             )
@@ -192,16 +192,16 @@ class SyncCoordinator(
         val pendingBeforeMerge = local.pending()
         val merged = merge(localSnapshot, remoteSnapshot)
             .withoutPendingDeletes(pendingBeforeMerge)
-            .withoutStaleRewriteProgress(rewriteLocalProgress, remoteSnapshot.progress, pendingBeforeMerge)
+            .withoutStaleProgress(localProgress, remoteSnapshot.progress, pendingBeforeMerge)
         local.apply(merged.toRemoteSnapshot())
-        rewriteProgress?.apply(merged.progress)
-        rewriteLibraryWatch?.apply(
-            RewriteLibraryWatchSyncSnapshot(
+        progress?.apply(merged.progress)
+        libraryWatch?.apply(
+            LibraryWatchSyncSnapshot(
                 library = merged.library,
                 watchedItems = merged.watchedItems,
             ),
         )
-        rewriteProviderCredentials?.apply(merged.providerCredentials)
+        providerCredentials?.apply(merged.providerCredentials)
 
         var pushed = 0
         var firstFailure: SyncResult<Unit>? = null
@@ -309,16 +309,16 @@ private fun LocalSnapshot.withoutPendingDeletes(pending: List<SyncMutation>): Lo
     }
 
 /** Treats an authenticated remote snapshot as authoritative for Rewrite rows already promoted. */
-private fun LocalSnapshot.withoutStaleRewriteProgress(
-    rewriteLocal: List<CloudWatchProgress>,
+private fun LocalSnapshot.withoutStaleProgress(
+    local: List<CloudWatchProgress>,
     remote: List<CloudWatchProgress>,
     pending: List<SyncMutation>,
 ): LocalSnapshot {
-    if (rewriteLocal.isEmpty()) return this
+    if (local.isEmpty()) return this
     val remoteKeys = remote.mapTo(mutableSetOf()) { it.profileId to it.progressKey }
     val pendingKeys = pending.filterIsInstance<SyncMutation.Progress>()
         .mapTo(mutableSetOf()) { it.value.profileId to it.value.progressKey }
-    val staleKeys = rewriteLocal
+    val staleKeys = local
         .map { it.profileId to it.progressKey }
         .filterNot { it in remoteKeys || it in pendingKeys }
         .toSet()

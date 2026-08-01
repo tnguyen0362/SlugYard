@@ -141,16 +141,16 @@ fun PlayerScreen(
     onBackPress: (currentVideoId: String?, currentSeason: Int?, currentEpisode: Int?, autoPlayEnabled: Boolean, playbackCompleted: Boolean) -> Unit,
     onPlaybackErrorBack: () -> Unit = { onBackPress(null, null, null, false, false) },
     onBeforeExit: ((PlaybackTimelineState) -> Unit)? = null,
-    onRewriteNextEpisode: (() -> Boolean)? = null,
+    onNextEpisode: (() -> Boolean)? = null,
     onPlaybackEnded: ((nextVideoId: String?, nextSeason: Int?, nextEpisode: Int?, exitReason: PlayerExitReason?) -> Unit)? = null,
-    controlsOverlay: @Composable (PlayerUiState, RewritePlayerControlActions, FocusRequester, PlaybackTimelineState) -> Unit,
-    secondaryOverlay: @Composable (PlayerUiState, RewritePlayerSecondaryActions) -> Unit,
-    trackOverlay: @Composable (PlayerUiState, RewritePlayerTrackActions) -> Unit,
-    skipOverlay: @Composable (PlayerUiState, RewritePlayerSkipActions, FocusRequester) -> Unit,
-    postPlayOverlay: @Composable (PlayerUiState, RewritePlayerPostPlayActions) -> Unit,
-    diagnosticsOverlay: @Composable (PlayerUiState, RewritePlayerDiagnosticsActions) -> Unit,
-    subtitleTimingOverlay: @Composable (PlayerUiState, Long, RewritePlayerSubtitleTimingActions) -> Unit,
-    systemOverlay: @Composable (PlayerUiState, RewritePlayerSystemActions) -> Unit,
+    controlsOverlay: @Composable (PlayerUiState, PlayerControlActions, FocusRequester, PlaybackTimelineState) -> Unit,
+    secondaryOverlay: @Composable (PlayerUiState, PlayerSecondaryActions) -> Unit,
+    trackOverlay: @Composable (PlayerUiState, PlayerTrackActions) -> Unit,
+    skipOverlay: @Composable (PlayerUiState, PlayerSkipActions, FocusRequester) -> Unit,
+    postPlayOverlay: @Composable (PlayerUiState, PlayerPostPlayActions) -> Unit,
+    diagnosticsOverlay: @Composable (PlayerUiState, PlayerDiagnosticsActions) -> Unit,
+    subtitleTimingOverlay: @Composable (PlayerUiState, Long, PlayerSubtitleTimingActions) -> Unit,
+    systemOverlay: @Composable (PlayerUiState, PlayerSystemActions) -> Unit,
     legacyChromeEnabled: Boolean = true,
     playbackPositionMs: Long = 0L,
     onOpenSourcesPanel: () -> Unit = { viewModel.onEvent(PlayerEvent.OnShowSourcesPanel) },
@@ -212,7 +212,7 @@ fun PlayerScreen(
     val continueToNextEpisodeFromEndPrompt = nextAction@{
         val next = nextEpisodeForEndPrompt
         if (next != null) {
-            if (onRewriteNextEpisode?.invoke() == true) return@nextAction
+            if (onNextEpisode?.invoke() == true) return@nextAction
             viewModel.stopAndRelease()
             val cb = currentOnPlaybackEnded
             if (cb != null) {
@@ -744,7 +744,7 @@ fun PlayerScreen(
                 showStreamInfoOverlay =
                     uiState.showStreamInfoOverlay && uiState.error == null && !uiState.showLoadingOverlay,
             ),
-            RewritePlayerDiagnosticsActions(onDismiss = dismissStreamInfoOverlay),
+            PlayerDiagnosticsActions(onDismiss = dismissStreamInfoOverlay),
         )
 
         // Torrent stats overlay (top-right corner)
@@ -776,7 +776,7 @@ fun PlayerScreen(
 
         systemOverlay.invoke(
             uiState,
-            RewritePlayerSystemActions(
+            PlayerSystemActions(
                 onDismissPause = { viewModel.onEvent(PlayerEvent.OnDismissPauseOverlay) },
                 onExitError = exitPlayerFromError,
             ),
@@ -799,7 +799,7 @@ fun PlayerScreen(
 
         skipOverlay(
             uiState,
-            RewritePlayerSkipActions(
+            PlayerSkipActions(
                 onSkip = { viewModel.onEvent(PlayerEvent.OnSkipIntro) },
                 onDismiss = { viewModel.onEvent(PlayerEvent.OnDismissSkipIntro) },
                 onVisibilityChanged = { skipButtonActuallyVisible = it },
@@ -824,9 +824,9 @@ fun PlayerScreen(
         }
         postPlayOverlay(
             uiState.copy(postPlayMode = visiblePostPlayMode),
-            RewritePlayerPostPlayActions(
+            PlayerPostPlayActions(
                 onPlayNext = {
-                    if (onRewriteNextEpisode?.invoke() != true) {
+                    if (onNextEpisode?.invoke() != true) {
                         viewModel.onEvent(PlayerEvent.OnPlayNextEpisode)
                     }
                 },
@@ -881,7 +881,7 @@ fun PlayerScreen(
             !uiState.showMoreDialog &&
             !uiState.showDisplayModeInfo
 
-        val rewriteActions = RewritePlayerControlActions(
+        val actions = PlayerControlActions(
             onPlayPause = { viewModel.onEvent(PlayerEvent.OnPlayPause) },
             onSeekForward = { viewModel.onEvent(PlayerEvent.OnSeekForward) },
             onSeekBackward = { viewModel.onEvent(PlayerEvent.OnSeekBackward) },
@@ -931,7 +931,7 @@ fun PlayerScreen(
             ControlsOverlayHost(
                 viewModel = viewModel,
                 uiState = uiState,
-                actions = rewriteActions,
+                actions = actions,
                 playPauseFocusRequester = playPauseFocusRequester,
                 controlsOverlay = controlsOverlay,
             )
@@ -1021,7 +1021,7 @@ fun PlayerScreen(
 
         secondaryOverlay(
             uiState,
-            RewritePlayerSecondaryActions(
+            PlayerSecondaryActions(
                 onDismissSources = { viewModel.onEvent(PlayerEvent.OnDismissSourcesPanel) },
                 onReloadSources = { viewModel.onEvent(PlayerEvent.OnReloadSourceStreams) },
                 onSelectSourceAddon = { viewModel.onEvent(PlayerEvent.OnSourceAddonFilterSelected(it)) },
@@ -1038,7 +1038,7 @@ fun PlayerScreen(
 
         trackOverlay(
             uiState,
-            RewritePlayerTrackActions(
+            PlayerTrackActions(
                 onDismiss = { viewModel.onEvent(PlayerEvent.OnDismissTransientOverlay) },
                 onSelectAudio = { viewModel.onEvent(PlayerEvent.OnSelectAudioTrack(it)) },
                 onSelectSubtitleTrack = { viewModel.onEvent(PlayerEvent.OnSelectSubtitleTrack(it)) },
@@ -1064,7 +1064,7 @@ fun PlayerScreen(
         subtitleTimingOverlay(
             uiState,
             playbackPositionMs,
-            RewritePlayerSubtitleTimingActions(
+            PlayerSubtitleTimingActions(
                 onAdjustDelay = { delta -> viewModel.onEvent(PlayerEvent.OnAdjustSubtitleDelay(delta)) },
                 onOpenSyncByLine = {
                     subtitleTimingConsumeNextConfirmKeyUp = true
@@ -1556,9 +1556,9 @@ private fun SeekOverlay(
 private fun ControlsOverlayHost(
     viewModel: PlayerViewModel,
     uiState: PlayerUiState,
-    actions: RewritePlayerControlActions,
+    actions: PlayerControlActions,
     playPauseFocusRequester: FocusRequester,
-    controlsOverlay: @Composable (PlayerUiState, RewritePlayerControlActions, FocusRequester, PlaybackTimelineState) -> Unit,
+    controlsOverlay: @Composable (PlayerUiState, PlayerControlActions, FocusRequester, PlaybackTimelineState) -> Unit,
 ) {
     val playbackTimeline by viewModel.playbackTimeline.collectAsState()
     controlsOverlay(uiState, actions, playPauseFocusRequester, playbackTimeline)

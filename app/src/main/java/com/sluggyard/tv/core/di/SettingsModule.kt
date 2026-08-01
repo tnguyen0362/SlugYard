@@ -1,7 +1,7 @@
 package com.sluggyard.tv.core.di
 
-import com.sluggyard.tv.ui.rewrite.settings.DefaultRewriteSettingsFacade
-import com.sluggyard.tv.ui.rewrite.settings.RewriteSettingsFacade
+import com.sluggyard.tv.ui.app.settings.DefaultSettingsFacade
+import com.sluggyard.tv.ui.app.settings.SettingsFacade
 import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
@@ -13,7 +13,7 @@ import javax.inject.Singleton
 abstract class SettingsModule {
     @Binds
     @Singleton
-    abstract fun bindRewriteSettingsFacade(
-        facade: DefaultRewriteSettingsFacade,
-    ): RewriteSettingsFacade
+    abstract fun bindSettingsFacade(
+        facade: DefaultSettingsFacade,
+    ): SettingsFacade
 }

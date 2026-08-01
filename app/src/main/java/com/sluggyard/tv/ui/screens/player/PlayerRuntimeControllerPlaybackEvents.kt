@@ -1011,7 +1011,7 @@ fun PlayerRuntimeController.onEvent(event: PlayerEvent) {
         PlayerEvent.OnReloadSourceStreams -> loadSourceStreams(forceRefresh = true)
         is PlayerEvent.OnSourceAddonFilterSelected -> filterSourceStreamsByAddon(event.addonName)
         is PlayerEvent.OnSourceStreamSelected -> switchToSourceStream(event.stream)
-        is PlayerEvent.OnRewritePlaybackSourceSelected -> switchToRewritePlaybackSource(event.handoff)
+        is PlayerEvent.OnPlaybackSourceSelected -> switchToPlaybackSource(event.handoff)
         PlayerEvent.OnDismissTransientOverlay -> dismissTransientOverlay()
         PlayerEvent.OnRetry -> handleRetry()
         PlayerEvent.OnReportPlaybackIssue -> submitPlaybackIssueReport()

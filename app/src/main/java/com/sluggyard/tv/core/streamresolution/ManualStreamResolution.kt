@@ -36,7 +36,7 @@ data class ResolvedPlaybackSource(
     val trackers: List<String> = emptyList(),
 )
 
-data class RewritePlaybackHandoff(
+data class PlaybackHandoff(
     val source: ResolvedPlaybackSource,
     val contentId: String,
     val contentType: String,

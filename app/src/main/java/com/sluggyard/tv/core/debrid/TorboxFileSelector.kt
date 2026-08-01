@@ -6,7 +6,7 @@ import com.sluggyard.tv.domain.model.StreamClientResolve
 import javax.inject.Inject
 import javax.inject.Singleton
 
-private const val TAG = "RewriteTorboxFiles"
+private const val TAG = "TorboxFiles"
 
 @Singleton
 class TorboxFileSelector @Inject constructor() {

@@ -106,7 +106,7 @@ internal class DolbyVisionMatroskaTransformer(
         }
 
         val mode = config.conversionMode(profile)
-        val baseChanged = rewriteMp4HevcSampleInto(sample, sampleLength, nalUnitLengthFieldLength, mode)
+        val baseChanged = mp4HevcSampleInto(sample, sampleLength, nalUnitLengthFieldLength, mode)
 
         if (blockAdditionalData == null) {
             if (!baseChanged) {
@@ -191,7 +191,7 @@ internal class DolbyVisionMatroskaTransformer(
         return null
     }
 
-    private fun rewriteMp4HevcSampleInto(
+    private fun mp4HevcSampleInto(
         sample: ByteArray,
         sampleLength: Int,
         nalUnitLengthFieldLength: Int,

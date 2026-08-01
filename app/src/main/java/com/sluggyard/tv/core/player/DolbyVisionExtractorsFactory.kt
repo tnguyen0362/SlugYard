@@ -277,7 +277,7 @@ private class NativeOptimizedVideoTrackOutput(
         nalLengthFieldLength = parseNalLengthFieldLength(format)
 
         val strippedCodecs = if (stripDvRpu) stripDvCodecString(format.codecs) else null
-        val codecsToUse = strippedCodecs ?: if (converting) rewriteDvCodecString(format.codecs) else format.codecs
+        val codecsToUse = strippedCodecs ?: if (converting) dvCodecString(format.codecs) else format.codecs
 
         var outFormat = format
         if (codecsToUse != null && codecsToUse != format.codecs) {
@@ -287,10 +287,10 @@ private class NativeOptimizedVideoTrackOutput(
             outFormat = outFormat.buildUpon().setSampleMimeType(MimeTypes.VIDEO_H265).build()
         }
 
-        val rewriteSamples = converting && !(profile == 5 && !config.convertDv5Rpu)
+        val samples = converting && !(profile == 5 && !config.convertDv5Rpu)
         val shouldStripDovi = stripDvRpu && strippedCodecs != null && strippedCodecs != format.codecs
         
-        shouldProcess = rewriteSamples || shouldStripDovi || stripHdr10PlusSei
+        shouldProcess = samples || shouldStripDovi || stripHdr10PlusSei
         codecs = outFormat.codecs
         delegate.format(outFormat)
     }
@@ -388,7 +388,7 @@ private class NativeOptimizedVideoTrackOutput(
             return m.groupValues[1].toIntOrNull()
         }
 
-        fun rewriteDvCodecString(codecs: String?): String? {
+        fun dvCodecString(codecs: String?): String? {
             if (codecs.isNullOrBlank()) return null
             return Regex("(?i)(dvhe|dvav|dvh1|dva1)\\.0[57]\\.")
                 .replace(codecs) { mr -> "${mr.groupValues[1]}.08." }

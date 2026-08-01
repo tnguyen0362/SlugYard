@@ -6,41 +6,26 @@ import androidx.activity.compose.setContent
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.remember
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.Modifier
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.sluggyard.tv.ui.design.SlugYardTvTheme
 import com.sluggyard.tv.core.sync.auth.SupabaseAuthGateway
 import com.sluggyard.tv.core.sync.auth.SupabaseSessionStore
-import com.sluggyard.tv.core.sync.RewriteProgressSyncBridge
-import com.sluggyard.tv.core.sync.RewriteProviderCredentialSyncBridge
+import com.sluggyard.tv.core.sync.ProgressSyncBridge
+import com.sluggyard.tv.core.sync.ProviderCredentialSyncBridge
 import com.sluggyard.tv.core.profile.ProfileManager
-import com.sluggyard.tv.ui.rewrite.RewriteAppGraph
-import com.sluggyard.tv.ui.rewrite.RewriteAppShell
-import com.sluggyard.tv.ui.rewrite.data.RewriteLibraryWatchRepository
-import com.sluggyard.tv.ui.rewrite.settings.RewriteSettingsFacade
+import com.sluggyard.tv.ui.app.AppGraph
+import com.sluggyard.tv.ui.app.AppShell
+import com.sluggyard.tv.ui.app.data.LibraryWatchRepository
+import com.sluggyard.tv.ui.app.settings.SettingsFacade
 import com.sluggyard.tv.domain.repository.WatchProgressRepository
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 import javax.inject.Named
 import kotlinx.coroutines.flow.first
 
-// Compatibility-only symbols for compiled, unreachable legacy screens. They are not provided by
-// the rewrite activity and will disappear with those screens during the final provenance sweep.
-val LocalSidebarExpanded = compositionLocalOf { false }
-val LocalContentFocusRequester = compositionLocalOf { FocusRequester.Default }
-
-data class DrawerItem(
-    val route: String,
-    val label: String,
-    val iconRes: Int? = null,
-    val icon: ImageVector? = null,
-)
-
-/** Application-scoped locale cache retained for infrastructure that is outside the rewrite shell. */
+/** Application-scoped locale cache retained for infrastructure outside the app shell. */
 object LocaleCache {
     const val UNSET = "__unset__"
 
@@ -49,11 +34,11 @@ object LocaleCache {
 }
 
 /**
- * Rewrite-owned Android TV activity.
+ * Android TV activity for the SlugYard app shell.
  *
  * Playback is deliberately not initialized here: the Media3/mpv owner remains behind the narrow
  * player-route handoff, while browsing, profiles, addon management, and navigation belong to the
- * Compose rewrite graph.
+ * Compose app graph.
  */
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -64,23 +49,23 @@ class MainActivity : ComponentActivity() {
     lateinit var sessions: SupabaseSessionStore
 
     @Inject
-    lateinit var settingsFacade: RewriteSettingsFacade
+    lateinit var settingsFacade: SettingsFacade
 
     @Inject
     lateinit var profileManager: ProfileManager
 
     @Inject
-    @Named("rewrite")
-    lateinit var rewriteDataStore: DataStore<Preferences>
+    @Named("app")
+    lateinit var dataStore: DataStore<Preferences>
 
     @Inject
-    lateinit var rewriteProgressSyncBridge: RewriteProgressSyncBridge
+    lateinit var progressSyncBridge: ProgressSyncBridge
 
     @Inject
-    lateinit var rewriteProviderCredentialSyncBridge: RewriteProviderCredentialSyncBridge
+    lateinit var providerCredentialSyncBridge: ProviderCredentialSyncBridge
 
     @Inject
-    lateinit var rewriteLibraryWatchRepository: RewriteLibraryWatchRepository
+    lateinit var libraryWatchRepository: LibraryWatchRepository
 
     @Inject
     lateinit var tmdbMetadataService: com.sluggyard.tv.core.tmdb.TmdbMetadataService
@@ -112,7 +97,7 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val graph = remember {
-                val relatedDataSource = com.sluggyard.tv.ui.rewrite.details.RewriteRelatedDataSource(
+                val relatedDataSource = com.sluggyard.tv.ui.app.details.RelatedDataSource(
                     tmdbMetadata = tmdbMetadataService,
                     tmdbService = tmdbService,
                     traktApi = traktApi,
@@ -122,26 +107,26 @@ class MainActivity : ComponentActivity() {
                         settingsFacade.traktSettings.moreLikeThisSource.first()
                     },
                 )
-                val tmdbHomeDataSource = com.sluggyard.tv.ui.rewrite.home.RewriteTmdbHomeDataSource(
+                val tmdbHomeDataSource = com.sluggyard.tv.ui.app.home.TmdbHomeDataSource(
                     tmdbApi = tmdbApi,
                     tmdbSettings = { settingsFacade.tmdbSettings.first() },
                     // Details resolves tmdb:→IMDb and falls back to Cinemeta by manifest URL.
                     metadataAddonId = { null },
                 )
-                RewriteAppGraph(
+                AppGraph(
                     context = applicationContext,
                     profileManager = profileManager,
-                    rewriteDataStore = rewriteDataStore,
-                    progressSyncBridge = rewriteProgressSyncBridge,
-                    providerCredentialSyncBridge = rewriteProviderCredentialSyncBridge,
-                    libraryWatchRepository = rewriteLibraryWatchRepository,
+                    dataStore = dataStore,
+                    progressSyncBridge = progressSyncBridge,
+                    providerCredentialSyncBridge = providerCredentialSyncBridge,
+                    libraryWatchRepository = libraryWatchRepository,
                     relatedDataSource = relatedDataSource,
                     tmdbHomeDataSource = tmdbHomeDataSource,
-                    digitalReleaseLookup = com.sluggyard.tv.ui.rewrite.streams.RewriteDigitalReleaseLookup(
+                    digitalReleaseLookup = com.sluggyard.tv.ui.app.streams.DigitalReleaseLookup(
                         tmdbApi = tmdbApi,
                     ),
                     resolveMetaContentId = { type, id ->
-                        com.sluggyard.tv.ui.rewrite.details.resolveRewriteMetaContentId(
+                        com.sluggyard.tv.ui.app.details.resolveMetaContentId(
                             type = type,
                             id = id,
                             tmdbToImdb = { tmdbId, mediaType -> tmdbService.tmdbToImdb(tmdbId, mediaType) },
@@ -150,7 +135,7 @@ class MainActivity : ComponentActivity() {
                 )
             }
             SlugYardTvTheme {
-                RewriteAppShell(
+                AppShell(
                     context = applicationContext,
                     graph = graph,
                     auth = auth,

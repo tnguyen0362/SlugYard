@@ -11,7 +11,7 @@ import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.platform.LocalFocusManager
-import com.sluggyard.tv.ui.rewrite.requestFocusReliably
+import com.sluggyard.tv.ui.app.requestFocusReliably
 import kotlinx.coroutines.launch
 
 val LocalFastHorizontalNavigationEnabled = compositionLocalOf { false }
@@ -29,7 +29,7 @@ val LocalFastHorizontalNavigationEnabled = compositionLocalOf { false }
  * `focusManager.moveFocus(direction)` -- a geometric 2D search that only considers
  * currently-composed nodes -- and this ran *instead of*, not *in addition to*, any
  * explicit neighbor-based routing a descendant had wired up for itself (e.g.
- * RewritePosterCard's row-to-row FocusRequesters in RewriteHomeScreen.kt). Since
+ * PosterCard's row-to-row FocusRequesters in HomeScreen.kt). Since
  * LazyColumn/LazyRow decompose off-screen items, the default search would walk straight
  * past scrolled-out rows to whatever was still composed and geometrically closest --
  * which was the hero panel. Registering neighbors here lets the ancestor prefer the

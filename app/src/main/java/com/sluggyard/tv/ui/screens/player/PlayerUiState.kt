@@ -6,7 +6,7 @@ import androidx.media3.common.C
 import androidx.media3.common.TrackGroup
 import androidx.media3.ui.AspectRatioFrameLayout
 import com.sluggyard.tv.core.streams.StreamBadgePlacement
-import com.sluggyard.tv.core.streamresolution.RewritePlaybackHandoff
+import com.sluggyard.tv.core.streamresolution.PlaybackHandoff
 import com.sluggyard.tv.data.local.FrameRateMatchingMode
 import com.sluggyard.tv.data.local.InternalPlayerEngine
 import com.sluggyard.tv.data.local.LibassRenderType
@@ -287,7 +287,7 @@ data class SubtitleSyncCue(
  * It deliberately exposes user intents only: Media3/mpv configuration and source-selection
  * semantics remain owned by the retained component.
  */
-data class RewritePlayerControlActions(
+data class PlayerControlActions(
     val onPlayPause: () -> Unit,
     val onSeekForward: () -> Unit,
     val onSeekBackward: () -> Unit,
@@ -305,14 +305,14 @@ data class RewritePlayerControlActions(
 )
 
 /** Intent-only contract for the persistent rewrite skip action. */
-data class RewritePlayerSkipActions(
+data class PlayerSkipActions(
     val onSkip: () -> Unit,
     val onDismiss: () -> Unit,
     val onVisibilityChanged: (Boolean) -> Unit,
 )
 
 /** Intent-only contract for rewrite-owned post-play presentation. */
-data class RewritePlayerPostPlayActions(
+data class PlayerPostPlayActions(
     val onPlayNext: () -> Unit,
     val onContinueStillWatching: () -> Unit,
     /** Dismiss Up next / Still watching without starting the next episode. */
@@ -320,18 +320,18 @@ data class RewritePlayerPostPlayActions(
 )
 
 /** Intent-only contract for the rewrite-owned playback diagnostics sheet. */
-data class RewritePlayerDiagnosticsActions(
+data class PlayerDiagnosticsActions(
     val onDismiss: () -> Unit,
 )
 
 /** Intent-only contract for rewrite-owned loading, pause, and failure presentation. */
-data class RewritePlayerSystemActions(
+data class PlayerSystemActions(
     val onDismissPause: () -> Unit,
     val onExitError: () -> Unit,
 )
 
 /** Intent-only bridge for rewrite-owned subtitle delay and line-sync presentation. */
-data class RewritePlayerSubtitleTimingActions(
+data class PlayerSubtitleTimingActions(
     val onAdjustDelay: (Int) -> Unit,
     val onOpenSyncByLine: () -> Unit,
     val onDismissDelay: () -> Unit,
@@ -344,7 +344,7 @@ data class RewritePlayerSubtitleTimingActions(
  * UI-only intents for rewrite-owned player sheets. The retained playback controller still owns
  * source loading, filtering, episode resolution, and the actual player transition.
  */
-data class RewritePlayerSecondaryActions(
+data class PlayerSecondaryActions(
     val onDismissSources: () -> Unit,
     val onReloadSources: () -> Unit,
     val onSelectSourceAddon: (String?) -> Unit,
@@ -359,7 +359,7 @@ data class RewritePlayerSecondaryActions(
 )
 
 /** Intent-only bridge for track and subtitle presentation. */
-data class RewritePlayerTrackActions(
+data class PlayerTrackActions(
     val onDismiss: () -> Unit,
     val onSelectAudio: (Int) -> Unit,
     val onSelectSubtitleTrack: (Int) -> Unit,
@@ -426,7 +426,7 @@ sealed class PlayerEvent {
     data object OnReloadSourceStreams : PlayerEvent()
     data class OnSourceAddonFilterSelected(val addonName: String?) : PlayerEvent()
     data class OnSourceStreamSelected(val stream: Stream) : PlayerEvent()
-    data class OnRewritePlaybackSourceSelected(val handoff: RewritePlaybackHandoff) : PlayerEvent()
+    data class OnPlaybackSourceSelected(val handoff: PlaybackHandoff) : PlayerEvent()
     data object OnDismissTransientOverlay : PlayerEvent()
     data object OnRetry : PlayerEvent()
     data object OnReportPlaybackIssue : PlayerEvent()

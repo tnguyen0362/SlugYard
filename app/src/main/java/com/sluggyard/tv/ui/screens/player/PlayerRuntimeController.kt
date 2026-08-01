@@ -391,8 +391,8 @@ class PlayerRuntimeController(
     internal val autoSkippedIntervalKeys: MutableSet<String> = mutableSetOf()
     internal var lastActiveSkipType: String? = null
     internal var autoSubtitleSelected: Boolean = false
-    internal var rewriteSubtitleMode: Boolean = false
-    internal var rewriteAddonSubtitles: List<Subtitle> = emptyList()
+    internal var subtitleMode: Boolean = false
+    internal var addonSubtitles: List<Subtitle> = emptyList()
     internal var lastSubtitlePreferredLanguage: String? = null
     internal var lastSubtitleSecondaryLanguage: String? = null
     internal var lastUseForcedSubtitles: Boolean? = null

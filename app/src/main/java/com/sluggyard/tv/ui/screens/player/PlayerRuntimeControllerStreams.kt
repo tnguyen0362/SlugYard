@@ -7,7 +7,7 @@ import com.sluggyard.tv.core.debrid.DirectDebridPlayableResult
 import com.sluggyard.tv.core.network.NetworkResult
 import com.sluggyard.tv.core.player.StreamAutoPlaySelector
 import com.sluggyard.tv.core.player.StreamScoringEngine
-import com.sluggyard.tv.core.streamresolution.RewritePlaybackHandoff
+import com.sluggyard.tv.core.streamresolution.PlaybackHandoff
 import com.sluggyard.tv.data.local.PlayerSettings
 import com.sluggyard.tv.data.local.StreamAutoPlayMode
 import com.sluggyard.tv.data.local.StreamAutoPlaySource
@@ -21,7 +21,7 @@ import com.sluggyard.tv.domain.model.WatchProgress
 import com.sluggyard.tv.domain.model.enabledAddons
 import com.sluggyard.tv.ui.components.SourceChipItem
 import com.sluggyard.tv.ui.components.SourceChipStatus
-import com.sluggyard.tv.ui.rewrite.regularSeasonsThenSpecials
+import com.sluggyard.tv.ui.app.regularSeasonsThenSpecials
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -691,7 +691,7 @@ internal fun PlayerRuntimeController.switchToSourceStream(stream: Stream, resume
  * Narrow bridge for the Rewrite source sheet. Rewrite performs discovery, ranking, and debrid
  * resolution itself; the retained player only receives the already-resolved URL at this boundary.
  */
-internal fun PlayerRuntimeController.switchToRewritePlaybackSource(handoff: RewritePlaybackHandoff) {
+internal fun PlayerRuntimeController.switchToPlaybackSource(handoff: PlaybackHandoff) {
     val previousSeason = currentSeason
     val previousEpisode = currentEpisode
     val previousVideoId = currentVideoId

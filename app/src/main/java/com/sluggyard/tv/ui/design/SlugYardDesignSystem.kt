@@ -68,7 +68,7 @@ object SlugYardTvMetrics {
      */
     val HomeHeroHeight = 520.dp
 
-    /** Height reserved for [RewriteRootNavigation] when it floats over non-hero screens so the
+    /** Height reserved for [RootNavigation] when it floats over non-hero screens so the
      * first row of content doesn't render underneath it. Keep ≥ real nav chrome (not Figma's
      * 68px web header) so shelf titles never sit under the bar. */
     val RootNavBarHeight = 76.dp
