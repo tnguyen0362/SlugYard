@@ -72,6 +72,15 @@ object SlugYardCommunitySourcePolicy {
                 !normalized.contains("meteor", ignoreCase = true))
     }
 
+    /** True when a Sources group comes from the bundled PlayFlix / Purefire host. */
+    fun isPlayFlixStreamAddon(addonId: String, addonName: String): Boolean {
+        if (addonName.equals(PLAYFLIX_DISPLAY_NAME, ignoreCase = true)) return true
+        val haystack = "$addonId $addonName".lowercase()
+        if ("playflix" in haystack || "purefire" in haystack) return true
+        return haystack.contains("mediafusionfortheweebs.midnightignite.me") &&
+            !haystack.contains("meteor")
+    }
+
     fun isOptionalCommunityManifest(url: String): Boolean = isPlayFlixManifest(url)
 
     fun addonDisplayName(addon: ManagedAddon): String =

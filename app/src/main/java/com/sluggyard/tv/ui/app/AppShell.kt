@@ -137,6 +137,8 @@ import com.sluggyard.tv.ui.app.home.HomeScreen
 import com.sluggyard.tv.ui.app.home.HomeState
 import com.sluggyard.tv.ui.app.home.TmdbHomeDataSource
 import com.sluggyard.tv.ui.app.home.withHeroEnrichments
+import com.sluggyard.tv.ui.app.home.enrichContinueWatchingPosters
+import com.sluggyard.tv.ui.app.home.withContinueWatchingPosters
 import com.sluggyard.tv.ui.app.home.CatalogRequest
 import com.sluggyard.tv.ui.app.streams.selectAutoPlayCandidate
 import com.sluggyard.tv.ui.app.streams.hasPendingCacheChecks
@@ -191,6 +193,7 @@ class AppGraph(
     private val watchProgressRepository: WatchProgressRepository? = null,
     relatedDataSource: RelatedDataSource? = null,
     tmdbHomeDataSource: TmdbHomeDataSource? = null,
+    val tmdbService: com.sluggyard.tv.core.tmdb.TmdbService? = null,
     val resolveMetaContentId: suspend (type: String, id: String) -> String = { _, id -> id },
     val digitalReleaseLookup: DigitalReleaseLookup? = null,
     val profiles: ProfileStore = ProfileStore(dataStore),
@@ -701,6 +704,7 @@ private fun AppContent(
         initial = com.sluggyard.tv.core.streams.StreamBadgeSettings(),
     )
     val debridConnection by graph.debridRuntime.connection.collectAsState(initial = DebridConnection())
+    val landscapePostersOnFocus by settingsFacade.layoutPreferences.modernLandscapePostersEnabled.collectAsState(initial = true)
     val destination = routeStack.last()
     var catalogState by remember { mutableStateOf(HomeCatalogState(emptyList())) }
     var browseCatalogState by remember { mutableStateOf(HomeCatalogState(emptyList())) }
@@ -715,6 +719,7 @@ private fun AppContent(
     val browseHeroIndexState = remember { mutableStateOf(0) }
     val browseLastHeroKeyState = remember { mutableStateOf<String?>(null) }
     var heroEnrichments by remember { mutableStateOf<Map<String, HeroEnrichment>>(emptyMap()) }
+    var continueWatchingTmdbPosters by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     val communityProvisioningReport by graph.communityProvisioningReport.collectAsState()
     var detailsState by remember { mutableStateOf<DetailsState?>(null) }
     var detailsMessage by remember { mutableStateOf<String?>(null) }
@@ -1121,6 +1126,7 @@ private fun AppContent(
     val cloudSyncNotice by CloudSyncNotices.latestNotice.collectAsState(initial = null)
     val enrichedHomeState = baseHomeState
         .withHeroEnrichments(heroEnrichments)
+        .withContinueWatchingPosters(continueWatchingTmdbPosters)
         .let { state ->
             state.copy(
                 statusMessage = state.statusMessage
@@ -1129,6 +1135,35 @@ private fun AppContent(
                     ?: integrityStatusMessage,
             )
         }
+    LaunchedEffect(
+        continueWatchingCheckpoints,
+        tmdbSettings.enabled,
+        tmdbSettings.enrichContinueWatching,
+        tmdbSettings.useArtwork,
+    ) {
+        val tmdb = graph.tmdbService
+        if (
+            tmdb == null ||
+            !tmdbSettings.enabled ||
+            !tmdbSettings.enrichContinueWatching ||
+            !tmdbSettings.useArtwork
+        ) {
+            continueWatchingTmdbPosters = emptyMap()
+            return@LaunchedEffect
+        }
+        val grouped = groupPlaybackCheckpoints(continueWatchingCheckpoints)
+        val posters = enrichContinueWatchingPosters(grouped, tmdb)
+        continueWatchingTmdbPosters = posters
+        if (!useTraktCw) {
+            for (checkpoint in grouped) {
+                val poster = posters[checkpoint.contentId] ?: continue
+                if (checkpoint.posterUrl == poster) continue
+                runCatching {
+                    graph.playbackProgress.save(checkpoint.copy(posterUrl = poster))
+                }
+            }
+        }
+    }
     LaunchedEffect(heroCandidateKey, homeHeroIndexState.value) {
         // Enrich the visible hero first — not all carousel candidates — so cold start
         // isn't blocked by up to 8 parallel meta fetches.
@@ -1327,6 +1362,9 @@ private fun AppContent(
     val displayStreamGroups = remember(streamGroups, cacheWaitExpired, streamBadgeSettings.rules) {
         val remapped = if (!cacheWaitExpired) streamGroups else remapCheckingCacheStates(streamGroups)
         StreamBadgeApplicator.apply(remapped, streamBadgeSettings.rules)
+            .filterNot {
+                SlugYardCommunitySourcePolicy.isPlayFlixStreamAddon(it.addonId, it.addonName)
+            }
     }
 
     fun resolveStreamCandidate(candidate: StreamCandidate, streams: RootDestination.Streams) {
@@ -1442,7 +1480,10 @@ private fun AppContent(
         if (!cacheWaitExpired && !hasCachedAlready && hasPendingCacheChecks(streamGroups)) {
             return@LaunchedEffect
         }
-        val groupsForPick = if (cacheWaitExpired) displayStreamGroups else streamGroups
+        val groupsForPick = (if (cacheWaitExpired) displayStreamGroups else streamGroups)
+            .filterNot {
+                SlugYardCommunitySourcePolicy.isPlayFlixStreamAddon(it.addonId, it.addonName)
+            }
         val genreList = streams.contentGenres
             ?.split(',', '|', '/')
             ?.map { it.trim() }
@@ -1461,6 +1502,11 @@ private fun AppContent(
             "DigitalRelease",
             "auto-pick id=${streams.id} lookupId=$releaseLookupId type=${streams.type} status=$digitalReleaseStatus",
         )
+        if (digitalReleaseStatus == DigitalReleasePolicy.Status.NOT_YET) {
+            autoPickFinishedFor = streams.id
+            streamMessage = "This title is not digitally released yet. Open Sources if you still want to browse listings."
+            return@LaunchedEffect
+        }
         val candidate = selectAutoPlayCandidate(
             groups = groupsForPick,
             context = com.sluggyard.tv.ui.app.streams.StreamScoringEngine.Context(
@@ -1637,6 +1683,7 @@ private fun AppContent(
                      headerFocusRequester = homeHeaderFocusRequester,
                      requestInitialFocus = !homeInitialFocusRequested && !homeSplashVisible,
                      onInitialFocusRequested = { homeInitialFocusRequested = true },
+                    expandOnFocus = landscapePostersOnFocus,
                     rowScrollStates = homeRowScrollStates,
                     heroIndexState = homeHeroIndexState,
                     lastHeroKeyState = homeLastHeroKeyState,
@@ -1737,7 +1784,7 @@ private fun AppContent(
                     smoothFocusMovement = smoothFocusMovement,
                     contentFocusRequester = homeContentFocusRequester,
                     headerFocusRequester = homeHeaderFocusRequester,
-                    expandOnFocus = destination.filter != BrowseFilter.WATCHLIST,
+                    expandOnFocus = landscapePostersOnFocus && destination.filter != BrowseFilter.WATCHLIST,
                     rowScrollStates = browseRowScrollStates,
                     heroIndexState = browseHeroIndexState,
                     lastHeroKeyState = browseLastHeroKeyState,

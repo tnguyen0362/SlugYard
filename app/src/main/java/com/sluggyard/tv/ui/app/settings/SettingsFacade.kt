@@ -75,6 +75,7 @@ interface SettingsFacade {
     suspend fun setSubtitleBold(enabled: Boolean)
     suspend fun setSubtitleOutlineEnabled(enabled: Boolean)
     suspend fun setSubtitleOutlineWidth(width: Int)
+    suspend fun setSubtitleTextColor(color: Int)
     suspend fun setPreferredAudioLanguage(language: String)
     suspend fun setSecondaryPreferredAudioLanguage(language: String?)
     suspend fun setDownmixEnabled(enabled: Boolean)
@@ -221,6 +222,9 @@ class DefaultSettingsFacade @Inject constructor(
 
     override suspend fun setSubtitleOutlineWidth(width: Int) =
         trackSetting("player.subtitle_outline_width", width) { playerStore.setSubtitleOutlineWidth(width) }
+
+    override suspend fun setSubtitleTextColor(color: Int) =
+        trackSetting("player.subtitle_text_color", color) { playerStore.setSubtitleTextColor(color) }
 
     override suspend fun setPreferredAudioLanguage(language: String) =
         trackSetting("player.audio_preferred_language", language) { playerStore.setPreferredAudioLanguage(language) }

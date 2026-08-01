@@ -6,6 +6,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.collectAsState
 import com.sluggyard.tv.core.sync.auth.SupabaseSessionState
 import com.sluggyard.tv.ui.app.data.HomeSettings
 import com.sluggyard.tv.ui.app.data.ProfileState
@@ -60,13 +61,26 @@ internal fun ProfilesSettings(state: ProfileState, onOpenProfiles: () -> Unit) {
 
 @Composable
 internal fun LayoutSettings(
+    facade: SettingsFacade,
     homeSettings: HomeSettings,
     profileState: ProfileState,
     onHideUnreleasedChanged: (Boolean) -> Unit,
     onRememberProfileChanged: (Boolean) -> Unit,
 ) {
+    val scope = rememberCoroutineScope()
+    val landscapeExpand by facade.layoutPreferences.modernLandscapePostersEnabled.collectAsState(initial = true)
     SettingsGroup("Home and navigation") {
-        ToggleRow("Hide unreleased titles", "Filter titles with a known future release date.", homeSettings.hideUnreleased, onHideUnreleasedChanged)
+        ToggleRow(
+            "Hide unreleased titles",
+            "Hides Home catalog rows whose addon release date is still in the future. Does not block Play — that uses the separate digital-release gate.",
+            homeSettings.hideUnreleased,
+            onHideUnreleasedChanged,
+        )
+        ToggleRow(
+            "Landscape posters on focus",
+            "When off, Home cards stay portrait (no landscape expand).",
+            landscapeExpand,
+        ) { enabled -> scope.launch { facade.layoutPreferences.setModernLandscapePostersEnabled(enabled) } }
         ToggleRow("Remember active profile", "Open the last selected profile automatically.", profileState.rememberLastProfile, onRememberProfileChanged)
     }
 }

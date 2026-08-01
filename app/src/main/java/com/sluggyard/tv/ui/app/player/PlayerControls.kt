@@ -264,6 +264,15 @@ fun PlayerControls(
                     previewPositionMs = state.pendingPreviewSeekPosition,
                     onSeekPreview = actions.onSeekPreview,
                     onSeekCommit = actions.onSeekCommit,
+                    onConfirm = {
+                        // After a long scrub focus stays on the bar; OK used to do nothing
+                        // while the media Play/Pause key still worked — map Center/Enter
+                        // to play/pause (and commit any in-flight preview seek first).
+                        if (state.pendingPreviewSeekPosition != null) {
+                            actions.onSeekCommit()
+                        }
+                        actions.onPlayPause()
+                    },
                     focusRequester = scrubberFocusRequester,
                     upFocusRequester = backFocusRequester,
                     downFocusRequester = subtitlesFocusRequester,
@@ -355,6 +364,7 @@ private fun PlayerScrubber(
     previewPositionMs: Long?,
     onSeekPreview: (Long) -> Unit,
     onSeekCommit: () -> Unit,
+    onConfirm: () -> Unit = {},
     focusRequester: FocusRequester,
     upFocusRequester: FocusRequester? = null,
     downFocusRequester: FocusRequester? = null,
@@ -403,6 +413,13 @@ private fun PlayerScrubber(
                                 if (isScrubbing) onSeekCommit()
                                 true
                             }
+                            AndroidKeyEvent.KEYCODE_DPAD_CENTER,
+                            AndroidKeyEvent.KEYCODE_ENTER,
+                            AndroidKeyEvent.KEYCODE_NUMPAD_ENTER,
+                            -> {
+                                onConfirm()
+                                true
+                            }
                             else -> false
                         }
                     } else if (native.action == AndroidKeyEvent.ACTION_DOWN) {
@@ -418,6 +435,10 @@ private fun PlayerScrubber(
                                 onSeekPreview(if (isLeft) -stepMs else stepMs)
                                 true
                             }
+                            AndroidKeyEvent.KEYCODE_DPAD_CENTER,
+                            AndroidKeyEvent.KEYCODE_ENTER,
+                            AndroidKeyEvent.KEYCODE_NUMPAD_ENTER,
+                            -> true
                             else -> false
                         }
                     } else {

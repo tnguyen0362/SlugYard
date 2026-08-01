@@ -55,7 +55,7 @@ fun SettingsScreen(
         when (category) {
             SettingsCategory.Account -> AccountSettings(facade, onSignedOut, onOpenAuth)
             SettingsCategory.Profiles -> ProfilesSettings(profileState, onOpenProfiles)
-            SettingsCategory.Layout -> LayoutSettings(homeSettings, profileState, onHideUnreleasedChanged, onRememberProfileChanged)
+            SettingsCategory.Layout -> LayoutSettings(facade, homeSettings, profileState, onHideUnreleasedChanged, onRememberProfileChanged)
             SettingsCategory.Addons -> AddonsSettings(
                 addons = addons,
                 onInstallAddon = onInstallAddon,

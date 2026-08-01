@@ -60,10 +60,34 @@ internal fun SubtitleSettings(facade: SettingsFacade, player: PlayerSettings, sc
     SettingsGroup("Subtitle appearance") {
         CycleRow("Size", "${style.size}%", listOf(80, 100, 120, 140, 160, 180).map { "$it%" }) { value -> scope.launch { facade.setSubtitleSize(value.removeSuffix("%").toInt()) } }
         CycleRow("Position", "${style.verticalOffset}%", listOf(-10, 0, 5, 15, 25, 40).map { "$it%" }) { value -> scope.launch { facade.setSubtitleVerticalOffset(value.removeSuffix("%").toInt()) } }
+        CycleRow(
+            "Text color",
+            subtitleColorLabel(style.textColor),
+            listOf("White", "Yellow", "Cyan", "Green", "Magenta"),
+        ) { value ->
+            scope.launch { facade.setSubtitleTextColor(subtitleColorArgb(value)) }
+        }
         ToggleRow("Bold text", "Increase subtitle weight for distance viewing.", style.bold) { scope.launch { facade.setSubtitleBold(it) } }
         ToggleRow("Outline", "Draw a readable edge around subtitle glyphs.", style.outlineEnabled) { scope.launch { facade.setSubtitleOutlineEnabled(it) } }
         CycleRow("Outline width", "${style.outlineWidth}px", (1..5).map { "${it}px" }) { value -> scope.launch { facade.setSubtitleOutlineWidth(value.removeSuffix("px").toInt()) } }
     }
+}
+
+private fun subtitleColorLabel(argb: Int): String = when (argb or 0xFF000000.toInt()) {
+    android.graphics.Color.WHITE or 0xFF000000.toInt() -> "White"
+    android.graphics.Color.YELLOW or 0xFF000000.toInt() -> "Yellow"
+    android.graphics.Color.CYAN or 0xFF000000.toInt() -> "Cyan"
+    android.graphics.Color.GREEN or 0xFF000000.toInt() -> "Green"
+    android.graphics.Color.MAGENTA or 0xFF000000.toInt() -> "Magenta"
+    else -> "White"
+}
+
+private fun subtitleColorArgb(label: String): Int = when (label) {
+    "Yellow" -> android.graphics.Color.YELLOW
+    "Cyan" -> android.graphics.Color.CYAN
+    "Green" -> android.graphics.Color.GREEN
+    "Magenta" -> android.graphics.Color.MAGENTA
+    else -> android.graphics.Color.WHITE
 }
 
 @Composable

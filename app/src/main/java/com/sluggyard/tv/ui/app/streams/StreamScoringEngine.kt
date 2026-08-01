@@ -10,7 +10,7 @@ import com.sluggyard.tv.core.streamresolution.StreamCacheState
  * 2. Soft rank by content kind:
  *    - Anime: softsubs → Dual-Audio → seeders → decode → quality → size
  *    - K/J drama: softsubs → seeders → quality → size (Dual-Audio ignored)
- *    - Movies / mainstream: seeders → quality → size → light softsub signal
+ *    - Movies / mainstream: softsub language → seeders → quality → size
  *
  * Preferred subtitle language is never English-hardcoded.
  */
@@ -68,14 +68,16 @@ internal object StreamScoringEngine {
                 { it.quality },
                 { it.sizeFit },
             )
-            // Movies / live / mainstream: seeders + quality first.
+            // Movies / live / mainstream: softsub language fit before seeders/quality so a
+            // PT-only 4K remux cannot beat an English-tagged candidate when preferred=en
+            // (softsubFit 3–4 vs conflict/other-lang 1).
             ContentKind.MAINSTREAM, ContentKind.LIVE -> compareValuesBy(
                 this,
                 other,
+                { it.softsubFit },
                 { it.seeders },
                 { it.quality },
                 { it.sizeFit },
-                { it.softsubFit },
             )
         }
 
@@ -97,18 +99,33 @@ internal object StreamScoringEngine {
         // multi-file season packs (Judas/Anime Time Dual+Multi-Subs) so episode file-select
         // can pick SxxExx out of the pack. Resolve failure still rejects and tries the next.
         val sizedPool = instantPool.filter { it.isSaneAutoPlaySize(context) }
-        // With a subtitle preference, skip anime releases that advertise the wrong language
-        // (A&C Spanish Multi-Sub, Spanish ASS). If nothing language-safe remains, return null
-        // so Play opens Sources instead of auto-starting junk.
+        // With a subtitle preference, prefer language-safe releases:
+        // - If any candidate advertises the preferred language, auto-play only among those.
+        // - Else drop releases that advertise a conflicting subtitle language (PT-only when
+        //   preferred=en). Anime refuses rather than auto-starting conflicting packs;
+        //   mainstream may fall back to unmarked remuxes so Play still works.
         val preferred = normalizePreferredSubtitle(context.preferredSubtitleLanguage)
-        val languageSafePool = if (preferred != null && classify(context) == ContentKind.ANIME) {
-            sizedPool.filter { candidate ->
-                !hasConflictingSubtitleLanguage(candidate.releaseText().lowercase(), preferred)
+        val languageSafePool = if (preferred != null) {
+            val mentioningPreferred = sizedPool.filter { candidate ->
+                textMentionsLanguage(candidate.releaseText().lowercase(), preferred)
+            }
+            when {
+                mentioningPreferred.isNotEmpty() -> mentioningPreferred
+                else -> {
+                    val nonConflicting = sizedPool.filter { candidate ->
+                        !hasConflictingSubtitleLanguage(candidate.releaseText().lowercase(), preferred)
+                    }
+                    when {
+                        nonConflicting.isNotEmpty() -> nonConflicting
+                        classify(context) == ContentKind.ANIME -> emptyList()
+                        else -> sizedPool
+                    }
+                }
             }
         } else {
             sizedPool
         }
-        // Pre-digital movies: never auto-start CAM/TS/SCR/trailer dud rips.
+        // Pre-digital movies: refuse all auto-play until TMDB shows a past digital release.
         val playPool = languageSafePool.filter { candidate ->
             DigitalReleasePolicy.allowsAutoPlay(
                 context.digitalReleaseStatus,
@@ -163,7 +180,7 @@ internal object StreamScoringEngine {
             ContentKind.K_DRAMA, ContentKind.J_DRAMA ->
                 r.softsubFit * 1_000_000 + r.seeders * 1_000 + r.quality * 10 + r.sizeFit
             ContentKind.MAINSTREAM, ContentKind.LIVE ->
-                r.seeders * 1_000_000 + r.quality * 1_000 + r.sizeFit * 10 + r.softsubFit
+                r.softsubFit * 1_000_000 + r.seeders * 1_000 + r.quality * 10 + r.sizeFit
         }
     }
 

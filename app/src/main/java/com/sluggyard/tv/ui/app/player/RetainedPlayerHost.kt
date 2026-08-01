@@ -154,6 +154,14 @@ fun RetainedPlayerHost(
     var episodeHandoffTitle by remember { mutableStateOf("") }
     var episodeHandoffArtUrl by remember { mutableStateOf<String?>(null) }
 
+    // Hand off prepare chrome to PlayerSystemOverlay once the player owns loading.
+    LaunchedEffect(episodeHandoffPreparing, playerState.showLoadingOverlay, playerState.error) {
+        if (!episodeHandoffPreparing) return@LaunchedEffect
+        if (playerState.error != null || playerState.showLoadingOverlay) {
+            episodeHandoffPreparing = false
+        }
+    }
+
     // Re-apply when the default pack finishes installing after sources already loaded.
     LaunchedEffect(streamBadgeRules) {
         val groups = secondaryState.sourceGroups
@@ -201,6 +209,7 @@ fun RetainedPlayerHost(
             sourceError = null,
             selectedSourceAddon = if (forceRefresh) null else secondaryState.selectedSourceAddon,
             failedSourceIds = if (forceRefresh) emptySet() else secondaryState.failedSourceIds,
+            preferredSubtitleLanguage = playerState.subtitleStyle.preferredLanguage,
         )
         secondaryJob = scope.launch {
             try {
@@ -214,9 +223,13 @@ fun RetainedPlayerHost(
                     configuredDebrid = configuredDebrid(),
                 )
                 groups.collect { next ->
+                    val withoutPlayFlix = next.filterNot {
+                        com.sluggyard.tv.core.addonprotocol.SlugYardCommunitySourcePolicy
+                            .isPlayFlixStreamAddon(it.addonId, it.addonName)
+                    }
                     secondaryState = secondaryState.copy(
-                        sourceGroups = StreamBadgeApplicator.apply(next, latestStreamBadgeRules),
-                        sourceLoading = next.isEmpty() || next.all { it.state is StreamGroupState.Loading },
+                        sourceGroups = StreamBadgeApplicator.apply(withoutPlayFlix, latestStreamBadgeRules),
+                        sourceLoading = withoutPlayFlix.isEmpty() || withoutPlayFlix.all { it.state is StreamGroupState.Loading },
                         digitalReleaseStatus = digitalReleaseStatus ?: secondaryState.digitalReleaseStatus,
                     )
                 }
@@ -327,7 +340,7 @@ fun RetainedPlayerHost(
         // Same full-bleed prepare chrome as outside-player auto-pick (BuildingPlayerScreen).
         secondaryJob?.cancel()
         episodeHandoffPreparing = true
-        episodeHandoffTitle = "S${selectedSeason}E${selectedEpisode.displayNumber} · ${selectedEpisode.title}"
+        episodeHandoffTitle = "S${selectedSeason}E${selectedEpisode.number} · ${selectedEpisode.title}"
         episodeHandoffArtUrl = playPreparingArtUrl(
             selectedEpisode.thumbnailUrl,
             activeContext.posterUrl ?: latestPosterUrl.ifBlank { null },
@@ -440,7 +453,9 @@ fun RetainedPlayerHost(
                     // distance-gate blocks all checkpoint writes for the new source until
                     // the user scrubs past the old baseline.
                     lastSavedPositionMs = 0L
-                    episodeHandoffPreparing = false
+                    // Fire handoff first so PlayerSystemOverlay can show Building player
+                    // on the same art. Clearing preparing before that flashed the old
+                    // Lottie/black loading gap between Finding stream and Building player.
                     viewModel.onEvent(PlayerEvent.OnPlaybackSourceSelected(handoff))
                     secondaryState = secondaryState.copy(
                         panel = PlayerSecondaryPanel.HIDDEN,
@@ -475,71 +490,91 @@ fun RetainedPlayerHost(
     fun playNextEpisode(): Boolean {
         val next = playerState.nextEpisode ?: return false
         if (addonId == null || parentId == null || parentType == null) return false
+        // Keep preparing chrome up while we search — previously we only dismissed the
+        // Up-next card, so Play next looked dead and left a blank gap until handoff.
+        episodeHandoffPreparing = true
+        episodeHandoffTitle = "S${next.season}E${next.episode} · ${next.title}"
+        episodeHandoffArtUrl = playPreparingArtUrl(
+            next.thumbnail,
+            activeContext.posterUrl ?: latestPosterUrl.ifBlank { null },
+        )
         viewModel.onEvent(PlayerEvent.OnDismissNextEpisodeCard)
         scope.launch {
-            var groups = emptyList<StreamGroup>()
-            val settled = withTimeoutOrNull(NEXT_EPISODE_SEARCH_HARD_CAP_MS) {
-                streamsDataSource.streamGroups(
-                    type = "series",
-                    id = next.videoId,
-                    configuredDebrid = configuredDebrid(),
-                ).collect { groups = it }
-            }
-            if (settled == null) {
-                // Hung provider left the discovery flow incomplete — fall back to the Sources
-                // panel instead of passing a partial groups snapshot to scoring.
-                openSources()
-                return@launch
-            }
-            val candidate = selectAutoPlayCandidate(
-                groups = groups,
-                context = com.sluggyard.tv.ui.app.streams.StreamScoringEngine.Context(
-                    title = activeContext.title,
-                    contentType = "series",
-                    genres = viewModel.contentGenres()
-                        ?.split(',')
-                        ?.map { it.trim() }
-                        ?.filter { it.isNotEmpty() }
-                        .orEmpty(),
-                    language = viewModel.contentLanguage(),
-                    preferredSubtitleLanguage = playerState.subtitleStyle.preferredLanguage,
-                ),
-            ) ?: run {
-                openSources()
-                return@launch
-            }
-            when (val result = manualResolution.prepare(
-                candidate.toManualSelection(
-                    season = next.season,
-                    episode = next.episode,
-                    forceDebridForTorrent = !candidate.infoHash.isNullOrBlank(),
-                ),
-                configuredDebrid(),
-            )) {
-                is ManualResolutionResult.Ready -> {
-                    val handoff = PlaybackHandoff(
-                        source = result.source,
-                        contentId = next.videoId,
-                        contentType = "series",
-                        title = activeContext.title,
-                        season = next.season,
-                        episode = next.episode,
-                        episodeTitle = next.title,
-                        addonId = addonId,
-                        parentId = parentId,
-                        parentType = parentType,
-                    )
-                    activeContext = activeContext.copy(
-                        contentId = next.videoId,
-                        season = next.season,
-                        episode = next.episode,
-                        episodeTitle = next.title,
-                    )
-                    viewModel.onEvent(PlayerEvent.OnPlaybackSourceSelected(handoff))
+            try {
+                var groups = emptyList<StreamGroup>()
+                val settled = withTimeoutOrNull(NEXT_EPISODE_SEARCH_HARD_CAP_MS) {
+                    streamsDataSource.streamGroups(
+                        type = "series",
+                        id = next.videoId,
+                        configuredDebrid = configuredDebrid(),
+                    ).collect { groups = it }
                 }
-                is ManualResolutionResult.Unavailable,
-                is ManualResolutionResult.Failed,
-                -> openSources()
+                if (settled == null) {
+                    episodeHandoffPreparing = false
+                    openSources()
+                    return@launch
+                }
+                val candidate = selectAutoPlayCandidate(
+                    groups = groups,
+                    context = com.sluggyard.tv.ui.app.streams.StreamScoringEngine.Context(
+                        title = activeContext.title,
+                        contentType = "series",
+                        genres = viewModel.contentGenres()
+                            ?.split(',')
+                            ?.map { it.trim() }
+                            ?.filter { it.isNotEmpty() }
+                            .orEmpty(),
+                        language = viewModel.contentLanguage(),
+                        preferredSubtitleLanguage = playerState.subtitleStyle.preferredLanguage,
+                    ),
+                ) ?: run {
+                    episodeHandoffPreparing = false
+                    openSources()
+                    return@launch
+                }
+                when (val result = manualResolution.prepare(
+                    candidate.toManualSelection(
+                        season = next.season,
+                        episode = next.episode,
+                        forceDebridForTorrent = !candidate.infoHash.isNullOrBlank(),
+                    ),
+                    configuredDebrid(),
+                )) {
+                    is ManualResolutionResult.Ready -> {
+                        val handoff = PlaybackHandoff(
+                            source = result.source,
+                            contentId = next.videoId,
+                            contentType = "series",
+                            title = activeContext.title,
+                            season = next.season,
+                            episode = next.episode,
+                            episodeTitle = next.title,
+                            addonId = addonId,
+                            parentId = parentId,
+                            parentType = parentType,
+                        )
+                        activeContext = activeContext.copy(
+                            contentId = next.videoId,
+                            season = next.season,
+                            episode = next.episode,
+                            episodeTitle = next.title,
+                        )
+                        // Keep preparing until the player loading overlay owns the frame.
+                        viewModel.onEvent(PlayerEvent.OnPlaybackSourceSelected(handoff))
+                    }
+                    is ManualResolutionResult.Unavailable,
+                    is ManualResolutionResult.Failed,
+                    -> {
+                        episodeHandoffPreparing = false
+                        openSources()
+                    }
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                episodeHandoffPreparing = false
+                throw cancelled
+            } catch (_: Exception) {
+                episodeHandoffPreparing = false
+                openSources()
             }
         }
         return true

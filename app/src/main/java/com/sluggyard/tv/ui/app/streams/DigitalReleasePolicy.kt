@@ -63,11 +63,14 @@ object DigitalReleasePolicy {
 
     /**
      * Auto-play eligibility for a candidate given digital-release status.
-     * Only [Status.NOT_YET] blocks junk; everything else allows the candidate through.
+     *
+     * [Status.NOT_YET] blocks **all** auto-play — not only CAM/TS tags. Early WEB-DL /
+     * REMUX leaks for theatrical titles were still winning auto-pick (e.g. Brand New Day).
+     * UNKNOWN / AVAILABLE / null fail open so missing TMDB data does not brick Play.
      */
     fun allowsAutoPlay(status: Status?, text: String): Boolean {
         if (status != Status.NOT_YET) return true
-        return !isEarlyReleaseJunk(text)
+        return false
     }
 
     fun parseReleaseDate(raw: String?): LocalDate? {

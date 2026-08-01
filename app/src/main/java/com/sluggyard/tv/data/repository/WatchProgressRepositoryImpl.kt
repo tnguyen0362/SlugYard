@@ -911,13 +911,15 @@ class WatchProgressRepositoryImpl @Inject constructor(
                     ?: episodeRuntimeMs.takeIf { it > 0 }
                     ?: metadata.runtimeMs
 
-                // If addon returned no backdrop or poster, fall back to TMDB
+                // Prefer TMDB artwork when enriching progress (and when addon art is missing).
                 var backdropToSave = progress.backdrop ?: metadata.backdrop
                 var posterToSave = progress.poster ?: metadata.poster
-                if (backdropToSave == null && posterToSave == null) {
-                    val tmdbImages = tmdbService.fetchImdbImages(progress.contentId, progress.contentType)
-                    backdropToSave = tmdbImages?.backdropUrl
-                    posterToSave = tmdbImages?.posterUrl
+                val imdbLookupId = progress.contentId.substringBefore(':').trim()
+                    .takeIf { it.startsWith("tt", ignoreCase = true) }
+                if (imdbLookupId != null && (backdropToSave == null || posterToSave == null)) {
+                    val tmdbImages = tmdbService.fetchImdbImages(imdbLookupId, progress.contentType)
+                    backdropToSave = backdropToSave ?: tmdbImages?.backdropUrl
+                    posterToSave = posterToSave ?: tmdbImages?.posterUrl
                 }
 
                 val hasNewData = posterToSave != null || backdropToSave != null

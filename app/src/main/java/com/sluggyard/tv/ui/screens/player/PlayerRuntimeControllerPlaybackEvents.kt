@@ -81,14 +81,23 @@ internal fun PlayerRuntimeController.skipActiveInterval(): Boolean {
 }
 
 internal fun PlayerRuntimeController.skipInterval(interval: SkipInterval): Boolean {
-    val duration = currentPlaybackDurationMs().takeIf { it > 0 } ?: Long.MAX_VALUE
-    val targetMs = if (interval.endTime == Double.MAX_VALUE) {
+    // Unknown duration → do not seek to Long.MAX_VALUE (native seek crash risk).
+    val duration = currentPlaybackDurationMs().takeIf { it > 0 } ?: return false
+    if (!interval.endTime.isFinite() || interval.endTime < 0.0) return false
+    val rawTargetMs = if (interval.endTime == Double.MAX_VALUE) {
         duration
     } else {
-        (interval.endTime * 1_000).toLong()
+        (interval.endTime * 1_000.0).toLong()
     }
-    seekPlaybackTo(targetMs.coerceAtMost(duration), SeekParameters.NEXT_SYNC)
-    scheduleProgressSyncAfterSeek()
+    if (rawTargetMs <= 0L) return false
+    val targetMs = rawTargetMs.coerceIn(0L, duration)
+    runCatching {
+        seekPlaybackTo(targetMs, SeekParameters.NEXT_SYNC)
+        scheduleProgressSyncAfterSeek()
+    }.onFailure { failure ->
+        android.util.Log.w("PlayerRuntime", "Skip intro seek failed: ${failure.message}", failure)
+        return false
+    }
     _uiState.update { it.copy(activeSkipInterval = null, skipIntervalDismissed = true) }
     return true
 }

@@ -77,7 +77,7 @@ class DigitalReleasePolicyTest {
     fun earlyJunkBlockedOnlyWhenNotYet() {
         assertFalse(DigitalReleasePolicy.allowsAutoPlay(DigitalReleasePolicy.Status.NOT_YET, "Movie 2026 CAM"))
         assertFalse(DigitalReleasePolicy.allowsAutoPlay(DigitalReleasePolicy.Status.NOT_YET, "Movie.2026.CAMRip.x264"))
-        assertTrue(DigitalReleasePolicy.allowsAutoPlay(DigitalReleasePolicy.Status.NOT_YET, "Movie 2026 1080p WEB-DL"))
+        assertFalse(DigitalReleasePolicy.allowsAutoPlay(DigitalReleasePolicy.Status.NOT_YET, "Movie 2026 1080p WEB-DL"))
         assertTrue(DigitalReleasePolicy.allowsAutoPlay(DigitalReleasePolicy.Status.AVAILABLE, "Movie 2026 CAM"))
         assertTrue(DigitalReleasePolicy.allowsAutoPlay(null, "Movie 2026 CAM"))
     }

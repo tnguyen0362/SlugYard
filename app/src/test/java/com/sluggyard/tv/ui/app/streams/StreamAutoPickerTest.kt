@@ -241,7 +241,7 @@ class StreamAutoPickerTest {
     }
 
     @Test
-    fun preDigitalMovieRefusesCamJunkForAutoPlay() {
+    fun preDigitalMovieBlocksAllAutoPlayNotJustCam() {
         val cam = candidate("cam", cacheState = StreamCacheState.CACHED, infoHash = "cam-hash")
             .copy(title = "Blockbuster.2026.CAM.x264", seeders = 200)
         val web = candidate("web", cacheState = StreamCacheState.CACHED, infoHash = "web-hash")
@@ -252,11 +252,9 @@ class StreamAutoPickerTest {
             digitalReleaseStatus = DigitalReleasePolicy.Status.NOT_YET,
         )
 
-        assertEquals(web, selectAutoPlayCandidate(groups(cam, web), context))
-        assertEquals(
-            null,
-            selectAutoPlayCandidate(groups(cam), context),
-        )
+        assertEquals(null, selectAutoPlayCandidate(groups(cam, web), context))
+        assertEquals(null, selectAutoPlayCandidate(groups(cam), context))
+        assertEquals(null, selectAutoPlayCandidate(groups(web), context))
     }
 
     @Test

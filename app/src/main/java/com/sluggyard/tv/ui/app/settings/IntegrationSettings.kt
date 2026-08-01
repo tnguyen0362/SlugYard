@@ -131,6 +131,24 @@ internal fun IntegrationsSettings(
         traktMessage?.let { ValueRow("Trakt", it) }
         if (traktAuth.isAuthenticated) ActionRow("Disconnect Trakt", "Remove the Trakt token for this profile.") { scope.launch { facade.disconnectTrakt() } }
     }
+    val tmdb by facade.tmdbSettings.collectAsState(initial = com.sluggyard.tv.domain.model.TmdbSettings())
+    SettingsGroup("TMDB") {
+        ToggleRow(
+            "Enable TMDB",
+            "Use The Movie Database for Home catalogs, artwork, and metadata.",
+            tmdb.enabled,
+        ) { scope.launch { facade.setTmdbEnabled(it) } }
+        ToggleRow(
+            "Continue Watching artwork",
+            "Refresh Continue Watching posters from TMDB when artwork is missing or stale.",
+            tmdb.enrichContinueWatching && tmdb.enabled,
+        ) { enabled ->
+            scope.launch {
+                if (enabled && !tmdb.enabled) facade.setTmdbEnabled(true)
+                facade.setTmdbEnrichContinueWatching(enabled)
+            }
+        }
+    }
     SettingsGroup("Cloud / Debrid") {
         Text(
             "Connecting a provider in Cloud Manager turns debrid playback on automatically.",

@@ -135,7 +135,9 @@ class DetailsDataSource(
                             DetailsEpisode(
                                 id = episodeId,
                                 number = episodeNumber,
-                                displayNumber = index + 1,
+                                // Absolute episode number from meta — not list index.
+                                // Index+1 mislabeled mid-season eps (e.g. S2E8 as "Episode 20").
+                                displayNumber = episodeNumber,
                                 title = episode.title.unescapeHtmlEntities(),
                                 releaseLabel = formatEpisodeReleaseLabel(episode.released) ?: episode.released,
                                 thumbnailUrl = episode.thumbnailUrl,

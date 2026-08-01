@@ -330,12 +330,16 @@ class MpvPlayerSurfaceView @JvmOverloads constructor(
             )
             val outlineSize = when {
                 !style.outlineEnabled -> 0.0
-                isAssOrSsaSubtitleSelectedNow() -> style.outlineWidth.coerceIn(1, 6).toDouble()
-                else -> 1.0
+                else -> style.outlineWidth.coerceIn(1, 6).toDouble()
             }
             val backgroundAlpha = (style.backgroundColor ushr 24) and 0xFF
             val borderStyle = if (backgroundAlpha > 0) "opaque-box" else "outline-and-shadow"
 
+            // ASS/SSA embeds its own Style (often heavy Bold + Outline). With
+            // sub-ass-override=no those completely ignore Settings / in-player
+            // size, color, bold, and outline — so user tweaks looked broken.
+            // force applies sub-* properties to every subtitle type including ASS.
+            mpv.setPropertyString("sub-ass-override", "force")
             mpv.setPropertyDouble("sub-scale", scale)
             mpv.setPropertyBoolean("sub-bold", style.bold)
             mpv.setPropertyDouble("sub-outline-size", outlineSize)
@@ -349,10 +353,6 @@ class MpvPlayerSurfaceView @JvmOverloads constructor(
             mpv.setPropertyString("sub-outline-color", toMpvColor(style.outlineColor))
         }.onFailure { Log.w(TAG, "Failed to apply subtitle style on mpv: ${it.message}") }
     }
-
-    private fun isAssOrSsaSubtitleSelectedNow(): Boolean =
-        readTrackSnapshot().subtitleTracks.firstOrNull { it.isSelected }?.codec?.trim()?.lowercase(Locale.US)
-            ?.let { it.contains("ass") || it.contains("ssa") } ?: false
 
     fun selectAudioTrackById(trackId: Int): Boolean {
         if (!initialized) return false
@@ -642,8 +642,10 @@ class MpvPlayerSurfaceView @JvmOverloads constructor(
         // Network / user agent.
         mpv.setOptionString("user-agent", PlayerMediaSourceFactory.DEFAULT_USER_AGENT)
 
-        // Subtitles — preserve native ASS/SSA styling, optimized for TV viewing distance.
-        mpv.setOptionString("sub-ass-override", "no")
+        // Subtitles — applySubtitleStyle sets sub-ass-override=force so Settings /
+        // in-player size/color/bold/outline win over embedded ASS Style blocks.
+        // Default here matches that; embedded ASS fonts are not separately selectable.
+        mpv.setOptionString("sub-ass-override", "force")
         mpv.setOptionString("sub-font", "sans-serif")
         mpv.setOptionString("sub-use-margins", "yes")
         mpv.setOptionString("sub-ass-force-margins", "yes")

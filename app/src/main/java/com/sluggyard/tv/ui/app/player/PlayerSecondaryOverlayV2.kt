@@ -79,6 +79,7 @@ data class PlayerSecondaryState(
     val selectedSourceAddon: String? = null,
     val failedSourceIds: Set<String> = emptySet(),
     val digitalReleaseStatus: DigitalReleasePolicy.Status? = null,
+    val preferredSubtitleLanguage: String? = null,
     val episodeLoading: Boolean = false,
     val episodeError: String? = null,
     val seasons: List<Int> = emptyList(),
@@ -236,6 +237,7 @@ private fun ColumnScope.SourceContent(
         state.failedSourceIds,
         state.title,
         state.contentType,
+        state.preferredSubtitleLanguage,
         state.digitalReleaseStatus,
     ) {
         val next = withContext(Dispatchers.Default) {
@@ -251,6 +253,7 @@ private fun ColumnScope.SourceContent(
                         com.sluggyard.tv.ui.app.streams.StreamScoringEngine.Context(
                             title = state.title,
                             contentType = state.contentType,
+                            preferredSubtitleLanguage = state.preferredSubtitleLanguage,
                             digitalReleaseStatus = state.digitalReleaseStatus,
                         ),
                     )

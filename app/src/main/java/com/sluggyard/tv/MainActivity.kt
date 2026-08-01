@@ -129,6 +129,7 @@ class MainActivity : ComponentActivity() {
                     watchProgressRepository = watchProgressRepository,
                     relatedDataSource = relatedDataSource,
                     tmdbHomeDataSource = tmdbHomeDataSource,
+                    tmdbService = tmdbService,
                     digitalReleaseLookup = com.sluggyard.tv.ui.app.streams.DigitalReleaseLookup(
                         tmdbApi = tmdbApi,
                     ),

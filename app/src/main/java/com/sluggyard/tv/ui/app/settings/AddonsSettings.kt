@@ -301,24 +301,8 @@ private fun buildAddonCards(
 }
 
 private fun buildCommunityCatalog(installed: List<ManagedAddon>): List<AddonCardModel> {
-    val playFlixInstalled = installed.firstOrNull {
-        SlugYardCommunitySourcePolicy.isPlayFlixManifest(it.manifestUrl)
-    }
-    return listOf(communityPlayFlixCard(playFlixInstalled))
-}
-
-private fun communityPlayFlixCard(installed: ManagedAddon?): AddonCardModel {
-    if (installed != null) return installed.toCardModel(installed = true)
-    return AddonCardModel(
-        manifestUrl = SlugYardCommunitySourcePolicy.PLAYFLIX_MANIFEST_URL,
-        name = SlugYardCommunitySourcePolicy.PLAYFLIX_DISPLAY_NAME,
-        version = null,
-        categoryLine = "Movie & Series",
-        description = "PlayFlix community streams and catalogs. Install when you want this source enabled.",
-        logoUrl = null,
-        showLogo = false,
-        installed = false,
-    )
+    // PlayFlix is no longer offered as a Community/Sources install option.
+    return emptyList()
 }
 
 private fun ManagedAddon.toCardModel(installed: Boolean): AddonCardModel {

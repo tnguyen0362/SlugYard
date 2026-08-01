@@ -121,7 +121,6 @@ import com.sluggyard.tv.data.local.SubtitleStyleSettings
 import com.sluggyard.tv.data.local.StreamAutoPlayMode
 import com.sluggyard.tv.domain.model.Subtitle
 import com.sluggyard.tv.domain.model.WatchProgress
-import com.sluggyard.tv.ui.components.LoadingIndicator
 import android.text.format.DateFormat
 import java.util.Date
 import java.util.Locale
@@ -1976,7 +1975,11 @@ private fun formatSubtitleDelay(delayMs: Int): String {
 /**
  * Buffering indicator extracted into its own composable to isolate
  * recomposition scope. When [isBuffering] toggles, only this subtree
- * is recomposed Ã¢â‚¬â€ the rest of [PlayerScreen] is skipped by Compose.
+ * is recomposed — the rest of [PlayerScreen] is skipped by Compose.
+ *
+ * Never uses the old Lottie LoadingIndicator during prepare — that flash
+ * between Finding stream and Building player is owned by PlayPreparingSurface.
+ * Mid-playback rebuffer keeps a quiet Material spinner only.
  */
 @Composable
 private fun PlayerBufferingIndicator(
@@ -1993,11 +1996,14 @@ private fun PlayerBufferingIndicator(
         contentAlignment = Alignment.Center
     ) {
         if (isTorrentStream && torrentBufferingMessage != null) {
-            // Torrent rebuffer: spinner + download stats + progress bar
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                LoadingIndicator()
+                androidx.compose.material3.CircularProgressIndicator(
+                    color = Color.White.copy(alpha = 0.85f),
+                    strokeWidth = 2.dp,
+                    modifier = Modifier.size(36.dp),
+                )
                 Spacer(modifier = Modifier.height(SlugYardTheme.spacing.md))
                 Text(
                     text = torrentBufferingMessage,
@@ -2028,7 +2034,11 @@ private fun PlayerBufferingIndicator(
                 }
             }
         } else {
-            LoadingIndicator()
+            androidx.compose.material3.CircularProgressIndicator(
+                color = Color.White.copy(alpha = 0.85f),
+                strokeWidth = 2.dp,
+                modifier = Modifier.size(36.dp),
+            )
         }
     }
 }
