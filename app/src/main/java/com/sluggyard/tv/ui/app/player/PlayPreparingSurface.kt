@@ -64,11 +64,14 @@ fun PlayPreparingSurface(
     Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
         if (!artUrl.isNullOrBlank()) {
             val enlargedUrl = preferTvBackdropUrl(artUrl).orEmpty()
+            // Isolate prepare-art cache entries from Home card keys so a blocked Play
+            // (full-bleed Spider-Man, etc.) cannot paint into recycled poster tiles.
             AsyncImage(
                 model = ImageRequest.Builder(context)
                     .data(enlargedUrl)
-                    // Bound decode size — full-bleed original at 1920×1080 OOMs on leanback boxes.
                     .size(Size(1280, 720))
+                    .memoryCacheKey("play-prepare:$enlargedUrl")
+                    .diskCacheKey("play-prepare:$enlargedUrl")
                     .build(),
                 contentDescription = null,
                 contentScale = ContentScale.Crop,

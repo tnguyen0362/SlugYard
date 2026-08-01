@@ -88,6 +88,7 @@ import coil3.request.ImageRequest
 import coil3.size.Size
 import com.sluggyard.tv.ui.design.SlugYardPalette
 import com.sluggyard.tv.ui.design.SlugYardTvMetrics
+import com.sluggyard.tv.ui.theme.QuicksandFamily
 import com.sluggyard.tv.ui.app.preferCardBackdropUrl
 import com.sluggyard.tv.ui.app.preferLargePosterUrl
 import com.sluggyard.tv.ui.app.preferTvBackdropUrl
@@ -122,6 +123,10 @@ data class HomePoster(
     val backdropUrl: String? = null,
     val contentGenres: String? = null,
     val contentLanguage: String? = null,
+    /** Numeric score for landscape focus chrome, e.g. "7.8". */
+    val ratingLabel: String? = null,
+    /** "IMDb" or "TMDB" when [ratingLabel] is set. */
+    val ratingSource: String? = null,
 )
 
 data class HomeRow(
@@ -715,10 +720,12 @@ private fun HeroPanel(
         val heroContext = LocalContext.current
         hero.backdropUrl?.takeIf(String::isNotBlank)?.let { backdropUrl ->
             AsyncImage(
-                model = remember(backdropUrl) {
+                model = remember(hero.id, backdropUrl) {
                     ImageRequest.Builder(heroContext)
                         .data(preferTvBackdropUrl(backdropUrl))
                         .size(Size(1280, 720))
+                        .memoryCacheKey("hero-backdrop:${hero.id}:$backdropUrl")
+                        .diskCacheKey("hero-backdrop:${hero.id}:$backdropUrl")
                         .build()
                 },
                 contentDescription = null,
@@ -727,10 +734,12 @@ private fun HeroPanel(
                 alpha = 0.88f,
             )
         } ?: hero.posterUrl?.let { posterUrl ->
-            val posterModel = remember(posterUrl) {
+            val posterModel = remember(hero.id, posterUrl) {
                 ImageRequest.Builder(heroContext)
                     .data(preferLargePosterUrl(posterUrl))
                     .size(Size(500, 750))
+                    .memoryCacheKey("hero-poster:${hero.id}:$posterUrl")
+                    .diskCacheKey("hero-poster:${hero.id}:$posterUrl")
                     .build()
             }
             AsyncImage(
@@ -1447,31 +1456,56 @@ internal fun PosterCard(
                     onError = { landscapePainted = false },
                 )
             }
-            if (focused) {
+            if (showLandscape) {
+                // Top chrome: rating (IMDb/TMDB) left, genres right.
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .fillMaxWidth()
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(SlugYardPalette.Canvas.copy(alpha = 0.72f), Color.Transparent),
+                            ),
+                        )
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    poster.ratingLabel?.takeIf { it.isNotBlank() }?.let { score ->
+                        LandscapeMetaChip(
+                            label = buildString {
+                                poster.ratingSource?.takeIf { it.isNotBlank() }?.let { append("$it ") }
+                                append(score)
+                            },
+                        )
+                    } ?: Spacer(modifier = Modifier.width(1.dp))
+                    poster.contentGenres?.takeIf { it.isNotBlank() }?.let { genres ->
+                        LandscapeMetaChip(label = genres)
+                    }
+                }
+                // Bottom: Quicksand SemiBold title + description.
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .fillMaxWidth()
                         .background(
                             Brush.verticalGradient(
-                                listOf(Color.Transparent, SlugYardPalette.Canvas.copy(alpha = 0.88f)),
+                                listOf(Color.Transparent, SlugYardPalette.Canvas.copy(alpha = 0.9f)),
                             ),
                         )
                         .padding(horizontal = 12.dp, vertical = 10.dp),
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        // Landscape backdrops almost never bake in the title — match Settings
-                        // group titles (titleLarge + SemiBold) so focused 16:9 cards read clearly.
-                        if (showLandscape) {
-                            Text(
-                                poster.title,
-                                style = MaterialTheme.typography.titleLarge,
+                        Text(
+                            poster.title,
+                            style = MaterialTheme.typography.titleLarge.copy(
+                                fontFamily = QuicksandFamily,
                                 fontWeight = FontWeight.SemiBold,
-                                color = SlugYardPalette.OnCanvas,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
+                            ),
+                            color = SlugYardPalette.OnCanvas,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                         episodeLabel?.let { label ->
                             Text(
                                 label,
@@ -1486,7 +1520,40 @@ internal fun PosterCard(
                                 text,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = SlugYardPalette.OnCanvas,
-                                maxLines = if (showLandscape) 1 else 2,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+            } else if (focused) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(Color.Transparent, SlugYardPalette.Canvas.copy(alpha = 0.88f)),
+                            ),
+                        )
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        episodeLabel?.let { label ->
+                            Text(
+                                label,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = SlugYardPalette.Accent,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                            )
+                        }
+                        summary?.takeIf { it.isNotBlank() }?.let { text ->
+                            Text(
+                                text,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = SlugYardPalette.OnCanvas,
+                                maxLines = 2,
                                 overflow = TextOverflow.Ellipsis,
                             )
                         }
@@ -1510,7 +1577,7 @@ internal fun PosterCard(
                     )
                 }
             }
-            if (showTypeBadge) {
+            if (showTypeBadge && !showLandscape) {
                 contentTypeLabel(poster.contentType)?.let { typeLabel ->
                     Box(
                         modifier = Modifier
@@ -1539,5 +1606,24 @@ internal fun PosterCard(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun LandscapeMetaChip(label: String) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(3.dp))
+            .background(SlugYardPalette.Canvas.copy(alpha = 0.78f))
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelMedium,
+            color = SlugYardPalette.OnCanvas,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }

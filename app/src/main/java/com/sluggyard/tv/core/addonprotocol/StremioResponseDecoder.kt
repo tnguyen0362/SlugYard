@@ -16,6 +16,8 @@ data class AddonCatalogItem(
     val backgroundUrl: String?,
     val description: String?,
     val releaseInfo: String?,
+    val imdbRating: String? = null,
+    val genres: List<String> = emptyList(),
 )
 
 data class AddonStreamItem(
@@ -72,6 +74,8 @@ object StremioResponseDecoder {
             backgroundUrl = objectValue.string("background"),
             description = objectValue.string("description"),
             releaseInfo = objectValue.string("releaseInfo"),
+            imdbRating = objectValue.string("imdbRating")?.trim()?.takeIf { it.isNotBlank() },
+            genres = objectValue.stringArray("genres"),
         )
     }
 
@@ -133,6 +137,10 @@ object StremioResponseDecoder {
 
     private fun JsonObject.array(name: String): JsonArray? = this[name] as? JsonArray
     private fun JsonObject.string(name: String): String? = (this[name] as? JsonPrimitive)?.contentOrNull
+    private fun JsonObject.stringArray(name: String): List<String> =
+        array(name).orEmpty().mapNotNull { element ->
+            (element as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf { it.isNotBlank() }
+        }
     private fun JsonObject.objectValue(name: String): JsonObject? = this[name] as? JsonObject
     private fun JsonObject.int(name: String): Int? = (this[name] as? JsonPrimitive)?.intOrNull
     private fun JsonObject.long(name: String): Long? = (this[name] as? JsonPrimitive)?.longOrNull

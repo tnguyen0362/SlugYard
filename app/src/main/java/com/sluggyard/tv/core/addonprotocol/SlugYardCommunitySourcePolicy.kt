@@ -23,8 +23,14 @@ object SlugYardCommunitySourcePolicy {
     const val PLAYFLIX_MANIFEST_URL =
         "https://mediafusionfortheweebs.midnightignite.me/manifest.json"
 
-    /** User-visible name for the bundled community addon (formerly Purefire). */
+    /** User-visible name for the bundled community addon (formerly Purefire / MediaFusion). */
     const val PLAYFLIX_DISPLAY_NAME = "PlayFlix"
+
+    /** Product-facing version shown in Community addons (not the upstream MediaFusion build). */
+    const val PLAYFLIX_DISPLAY_VERSION = "1.1.0"
+
+    /** Product-facing blurb — never surface MediaFusion branding in Settings. */
+    const val PLAYFLIX_DISPLAY_DESCRIPTION = "Third-party scrape"
 
     val bootstrapManifestUrls: List<String> = buildList {
         add("https://v3-cinemeta.strem.io/manifest.json")
@@ -85,6 +91,20 @@ object SlugYardCommunitySourcePolicy {
 
     fun addonDisplayName(addon: ManagedAddon): String =
         if (isPlayFlixManifest(addon.manifestUrl)) PLAYFLIX_DISPLAY_NAME else addon.manifest.name
+
+    fun addonDisplayVersion(addon: ManagedAddon): String? =
+        if (isPlayFlixManifest(addon.manifestUrl)) {
+            PLAYFLIX_DISPLAY_VERSION
+        } else {
+            addon.manifest.version?.takeIf { it.isNotBlank() }
+        }
+
+    fun addonDisplayDescription(addon: ManagedAddon): String =
+        if (isPlayFlixManifest(addon.manifestUrl)) {
+            PLAYFLIX_DISPLAY_DESCRIPTION
+        } else {
+            addon.manifest.description?.takeIf { it.isNotBlank() } ?: "Stremio-compatible addon"
+        }
 
     fun isContentSourceManifest(url: String): Boolean {
         val normalized = url.lowercase()

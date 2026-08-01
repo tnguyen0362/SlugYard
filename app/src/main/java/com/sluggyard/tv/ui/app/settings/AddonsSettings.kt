@@ -301,8 +301,27 @@ private fun buildAddonCards(
 }
 
 private fun buildCommunityCatalog(installed: List<ManagedAddon>): List<AddonCardModel> {
-    // PlayFlix is no longer offered as a Community/Sources install option.
-    return emptyList()
+    // Optional allowlisted community packs — never auto-provisioned; Install is explicit.
+    return SlugYardCommunitySourcePolicy.optionalCommunityManifestUrls.map { url ->
+        val existing = installed.firstOrNull {
+            SlugYardCommunitySourcePolicy.isPlayFlixManifest(it.manifestUrl) &&
+                SlugYardCommunitySourcePolicy.isPlayFlixManifest(url)
+        }
+        if (existing != null) {
+            existing.toCardModel(installed = true)
+        } else {
+            AddonCardModel(
+                manifestUrl = url,
+                name = SlugYardCommunitySourcePolicy.PLAYFLIX_DISPLAY_NAME,
+                version = SlugYardCommunitySourcePolicy.PLAYFLIX_DISPLAY_VERSION,
+                categoryLine = "Movie & Series",
+                description = SlugYardCommunitySourcePolicy.PLAYFLIX_DISPLAY_DESCRIPTION,
+                logoUrl = null,
+                showLogo = false,
+                installed = false,
+            )
+        }
+    }
 }
 
 private fun ManagedAddon.toCardModel(installed: Boolean): AddonCardModel {
@@ -310,14 +329,9 @@ private fun ManagedAddon.toCardModel(installed: Boolean): AddonCardModel {
     return AddonCardModel(
         manifestUrl = manifestUrl,
         name = SlugYardCommunitySourcePolicy.addonDisplayName(this),
-        version = manifest.version,
+        version = SlugYardCommunitySourcePolicy.addonDisplayVersion(this),
         categoryLine = formatAddonTypes(manifest),
-        description = manifest.description?.takeIf { it.isNotBlank() }
-            ?: if (isPlayFlix) {
-                "PlayFlix community streams and catalogs."
-            } else {
-                "Stremio-compatible addon"
-            },
+        description = SlugYardCommunitySourcePolicy.addonDisplayDescription(this),
         logoUrl = manifest.logoUrl,
         showLogo = !isPlayFlix,
         installed = installed,

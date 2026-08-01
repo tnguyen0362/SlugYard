@@ -123,7 +123,11 @@ class CommunityAddonProvisioner(
         registryUrl: String,
         manifest: com.sluggyard.tv.core.addonprotocol.AddonManifestContract,
     ) = if (SlugYardCommunitySourcePolicy.isPlayFlixManifest(registryUrl)) {
-        manifest.copy(name = SlugYardCommunitySourcePolicy.PLAYFLIX_DISPLAY_NAME)
+        manifest.copy(
+            name = SlugYardCommunitySourcePolicy.PLAYFLIX_DISPLAY_NAME,
+            version = SlugYardCommunitySourcePolicy.PLAYFLIX_DISPLAY_VERSION,
+            description = SlugYardCommunitySourcePolicy.PLAYFLIX_DISPLAY_DESCRIPTION,
+        )
     } else {
         manifest
     }

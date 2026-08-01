@@ -62,6 +62,13 @@ class HomeDataSource(
                                                 contentType = item.type,
                                                 summary = item.description?.takeIf { it.isNotBlank() },
                                                 backdropUrl = item.backgroundUrl?.takeIf { it.isNotBlank() },
+                                                contentGenres = item.genres.take(2)
+                                                    .joinToString(" · ")
+                                                    .takeIf { it.isNotBlank() },
+                                                ratingLabel = item.imdbRating?.takeIf { it.isNotBlank() },
+                                                ratingSource = item.imdbRating
+                                                    ?.takeIf { it.isNotBlank() }
+                                                    ?.let { "IMDb" },
                                             )
                                         }
                                     ExperimentalDiagnostics.event(

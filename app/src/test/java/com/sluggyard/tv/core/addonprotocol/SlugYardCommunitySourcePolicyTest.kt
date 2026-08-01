@@ -58,9 +58,18 @@ class SlugYardCommunitySourcePolicyTest {
     fun `playflix display name overrides mediafusion branding`() {
         val addon = ManagedAddon(
             manifestUrl = SlugYardCommunitySourcePolicy.PLAYFLIX_MANIFEST_URL,
-            manifest = AddonManifestContract(id = "mediafusion", name = "MediaFusion"),
+            manifest = AddonManifestContract(
+                id = "mediafusion",
+                name = "MediaFusion",
+                version = "6.1.1",
+                description = "MediaFusion — universal torrent addon",
+            ),
         )
-        assertEquals(SlugYardCommunitySourcePolicy.PLAYFLIX_DISPLAY_NAME, (SlugYardCommunitySourcePolicy.addonDisplayName(addon)))
+        assertEquals(SlugYardCommunitySourcePolicy.PLAYFLIX_DISPLAY_NAME, SlugYardCommunitySourcePolicy.addonDisplayName(addon))
+        assertEquals(SlugYardCommunitySourcePolicy.PLAYFLIX_DISPLAY_VERSION, (SlugYardCommunitySourcePolicy.addonDisplayVersion(addon)))
+        assertEquals(SlugYardCommunitySourcePolicy.PLAYFLIX_DISPLAY_DESCRIPTION, SlugYardCommunitySourcePolicy.addonDisplayDescription(addon))
+        assertEquals("1.1.0", SlugYardCommunitySourcePolicy.PLAYFLIX_DISPLAY_VERSION)
+        assertEquals("Third-party scrape", SlugYardCommunitySourcePolicy.PLAYFLIX_DISPLAY_DESCRIPTION)
     }
 
     @Test

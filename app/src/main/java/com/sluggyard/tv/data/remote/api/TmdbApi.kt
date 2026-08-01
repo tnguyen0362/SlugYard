@@ -647,7 +647,8 @@ data class TmdbDiscoverResult(
     @Json(name = "first_air_date") val firstAirDate: String? = null,
     @Json(name = "vote_average") val voteAverage: Double? = null,
     @Json(name = "vote_count") val voteCount: Int? = null,
-    @Json(name = "popularity") val popularity: Double? = null
+    @Json(name = "popularity") val popularity: Double? = null,
+    @Json(name = "genre_ids") val genreIds: List<Int>? = null,
 )
 
 @JsonClass(generateAdapter = true)
