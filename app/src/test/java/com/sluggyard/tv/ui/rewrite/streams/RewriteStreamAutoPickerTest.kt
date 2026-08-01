@@ -212,6 +212,54 @@ class RewriteStreamAutoPickerTest {
     }
 
     @Test
+    fun preferredLanguageAssBeatsPreferredLanguageSrtForAnime() {
+        // Repro: auto-play matched Eng preference via SRT while AnimeTosho had Eng ASS
+        // (no dub title — ASS styling/signs matter).
+        val srt = candidate("srt", cacheState = StreamCacheState.CACHED, infoHash = "srt-hash")
+            .copy(
+                title = "AnimeTosho | Show S01E01 1080p English SRT",
+                filename = "Show.S01E01.1080p.WEB-DL.English.SRT.mkv",
+                seeders = 80,
+            )
+        val ass = candidate("ass", cacheState = StreamCacheState.CACHED, infoHash = "ass-hash")
+            .copy(
+                title = "AnimeTosho | Show S01E01 1080p English ASS",
+                filename = "Show.S01E01.1080p.BluRay.English.ASS.mkv",
+                seeders = 40,
+            )
+        val context = RewriteStreamScoringEngine.Context(
+            title = "Show",
+            contentType = "series",
+            genres = listOf("Animation"),
+            language = "ja",
+            preferredSubtitleLanguage = "en",
+        )
+
+        assertEquals(4, RewriteStreamScoringEngine.rank(ass, context).softsubFit)
+        assertEquals(3, RewriteStreamScoringEngine.rank(srt, context).softsubFit)
+        assertEquals(ass, selectRewriteAutoPlayCandidate(groups(srt, ass), context))
+    }
+
+    @Test
+    fun preDigitalMovieRefusesCamJunkForAutoPlay() {
+        val cam = candidate("cam", cacheState = StreamCacheState.CACHED, infoHash = "cam-hash")
+            .copy(title = "Blockbuster.2026.CAM.x264", seeders = 200)
+        val web = candidate("web", cacheState = StreamCacheState.CACHED, infoHash = "web-hash")
+            .copy(title = "Blockbuster.2026.1080p.WEB-DL", seeders = 20)
+        val context = RewriteStreamScoringEngine.Context(
+            title = "Blockbuster",
+            contentType = "movie",
+            digitalReleaseStatus = DigitalReleasePolicy.Status.NOT_YET,
+        )
+
+        assertEquals(web, selectRewriteAutoPlayCandidate(groups(cam, web), context))
+        assertEquals(
+            null,
+            selectRewriteAutoPlayCandidate(groups(cam), context),
+        )
+    }
+
+    @Test
     fun knownSoftsubGroupBeatsRawWithoutSayingAss() {
         // Real anime releases almost never put "ASS" in the title — SubsPlease is softsub.
         val raw = candidate("raw", cacheState = StreamCacheState.CACHED, infoHash = "raw-hash")

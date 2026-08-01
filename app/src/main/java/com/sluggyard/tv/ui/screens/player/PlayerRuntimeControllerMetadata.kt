@@ -357,7 +357,11 @@ internal fun PlayerRuntimeController.evaluatePostPlayOverlayVisibility(positionM
         enterStillWatchingPromptMode()
     } else {
         _uiState.update {
-            it.copy(postPlayMode = PostPlayMode.AutoPlay(nextEpisode = state.nextEpisode))
+            it.copy(
+                postPlayMode = PostPlayMode.AutoPlay(nextEpisode = state.nextEpisode),
+                // Up next owns the end card — drop Skip outro so the two never stack.
+                activeSkipInterval = null,
+            )
         }
         if (state.nextEpisode.hasAired && streamAutoPlayNextEpisodeEnabledSetting) {
             playNextEpisode()
@@ -391,8 +395,14 @@ internal fun PlayerRuntimeController.updateActiveSkipInterval(positionMs: Long) 
     }
 
     val positionSec = positionMs / 1000.0
-    val active = skipIntervals.find { interval ->
+    val matched = skipIntervals.find { interval ->
         positionSec >= interval.startTime && positionSec < (interval.endTime - 0.5)
+    }
+    // Intro/recap clear as soon as the window ends (matched == null below → fade out).
+    // Outro/credits yield to Up next when that card is showing or about to show, so Skip
+    // outro and the next-episode banner never fight for the same remote focus.
+    val active = matched?.takeUnless { interval ->
+        isOutroLikeSkipType(interval.type) && shouldPreferNextEpisodeOverOutroSkip(positionMs)
     }
 
     val currentActive = _uiState.value.activeSkipInterval
@@ -414,8 +424,36 @@ internal fun PlayerRuntimeController.updateActiveSkipInterval(positionMs: Long) 
             skipInterval(active)
         }
     } else if (currentActive != null) {
+        // Past intro/outro end (or suppressed for Up next) — clear so the button fades out.
         _uiState.update { it.copy(activeSkipInterval = null, skipIntervalDismissed = false) }
     }
+}
+
+private fun isOutroLikeSkipType(type: String): Boolean {
+    val normalized = type.trim().lowercase()
+    if (normalized in PlayerNextEpisodeRules.OUTRO_SEGMENT_TYPES) return true
+    return "outro" in normalized ||
+        "ending" in normalized ||
+        "credits" in normalized ||
+        normalized == "ed" ||
+        "mixed-ed" in normalized
+}
+
+private fun PlayerRuntimeController.shouldPreferNextEpisodeOverOutroSkip(positionMs: Long): Boolean {
+    val state = _uiState.value
+    if (state.postPlayMode != null) return true
+    if (state.nextEpisode == null || nextEpisodeVideo == null) return false
+    if (state.postPlayDismissedForCurrentEpisode) return false
+    val durationMs = lastKnownDuration
+    if (durationMs <= 0L) return false
+    return PlayerNextEpisodeRules.shouldShowNextEpisodeCard(
+        positionMs = positionMs,
+        durationMs = durationMs,
+        skipIntervals = skipIntervals,
+        thresholdMode = nextEpisodeThresholdModeSetting,
+        thresholdPercent = nextEpisodeThresholdPercentSetting,
+        thresholdMinutesBeforeEnd = nextEpisodeThresholdMinutesBeforeEndSetting,
+    )
 }
 
 private fun SkipInterval.autoSkipKey(): String = "$provider:$type:$startTime:$endTime"

@@ -133,6 +133,9 @@ class MainActivity : ComponentActivity() {
                     libraryWatchRepository = rewriteLibraryWatchRepository,
                     relatedDataSource = relatedDataSource,
                     tmdbHomeDataSource = tmdbHomeDataSource,
+                    digitalReleaseLookup = com.sluggyard.tv.ui.rewrite.streams.RewriteDigitalReleaseLookup(
+                        tmdbApi = tmdbApi,
+                    ),
                     resolveMetaContentId = { type, id ->
                         com.sluggyard.tv.ui.rewrite.details.resolveRewriteMetaContentId(
                             type = type,

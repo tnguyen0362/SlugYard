@@ -141,6 +141,8 @@ import com.sluggyard.tv.ui.rewrite.streams.RewriteSubtitleDataSource
 import com.sluggyard.tv.ui.rewrite.streams.RewriteStreamsScreen
 import com.sluggyard.tv.ui.rewrite.streams.selectRewriteAutoPlayCandidate
 import com.sluggyard.tv.ui.rewrite.streams.hasRewritePendingCacheChecks
+import com.sluggyard.tv.ui.rewrite.streams.RewriteDigitalReleaseLookup
+import com.sluggyard.tv.ui.rewrite.streams.DigitalReleasePolicy
 import com.sluggyard.tv.ui.rewrite.profiles.RewriteProfilesScreen
 import com.sluggyard.tv.ui.rewrite.settings.RewriteSettingsScreen
 import com.sluggyard.tv.ui.rewrite.settings.RewriteSettingsFacade
@@ -183,6 +185,7 @@ class RewriteAppGraph(
     relatedDataSource: RewriteRelatedDataSource? = null,
     tmdbHomeDataSource: RewriteTmdbHomeDataSource? = null,
     resolveMetaContentId: suspend (type: String, id: String) -> String = { _, id -> id },
+    val digitalReleaseLookup: RewriteDigitalReleaseLookup? = null,
 ) {
     private val playbackSources = java.util.concurrent.ConcurrentHashMap<String, ResolvedPlaybackSource>()
 
@@ -531,6 +534,7 @@ fun RewriteAppShell(
                         graph.debridRuntime.configuredService()
                             .takeIf { settingsFacade.debridSettings.first().enabled }
                     },
+                    digitalReleaseLookup = graph.digitalReleaseLookup,
                     onBack = {
                         graph.clearPlaybackSource(playbackKey)
                         navController.popBackStack()
@@ -1261,6 +1265,10 @@ private fun RewriteAppContent(
             ?.filter { it.isNotEmpty() }
             .orEmpty()
             .ifEmpty { detailsState?.genres.orEmpty() }
+        val digitalReleaseStatus = graph.digitalReleaseLookup?.movieStatus(
+            contentId = streams.id,
+            contentType = streams.type,
+        ) ?: DigitalReleasePolicy.Status.UNKNOWN
         val candidate = selectRewriteAutoPlayCandidate(
             groups = groupsForPick,
             context = com.sluggyard.tv.ui.rewrite.streams.RewriteStreamScoringEngine.Context(
@@ -1269,6 +1277,7 @@ private fun RewriteAppContent(
                 genres = genreList,
                 language = streams.contentLanguage ?: detailsState?.contentLanguage,
                 preferredSubtitleLanguage = playerSettings.subtitleStyle.preferredLanguage,
+                digitalReleaseStatus = digitalReleaseStatus,
             ),
             excludedCandidateIds = autoPickRejectedIds,
         )

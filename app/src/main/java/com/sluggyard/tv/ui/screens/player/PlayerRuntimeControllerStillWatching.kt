@@ -37,6 +37,7 @@ internal fun PlayerRuntimeController.enterStillWatchingPromptMode() {
                 nextEpisode = upcoming,
                 countdownSec = STILL_WATCHING_COUNTDOWN_SECONDS,
             ),
+            activeSkipInterval = null,
             showControls = false,
         )
     }

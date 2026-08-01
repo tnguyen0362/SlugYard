@@ -56,6 +56,7 @@ import com.sluggyard.tv.ui.design.SlugYardTvMetrics
 import com.sluggyard.tv.ui.rewrite.details.RewriteDetailsEpisode
 import com.sluggyard.tv.ui.rewrite.details.RewriteNetflixEpisodeRow
 import com.sluggyard.tv.ui.rewrite.seasonDisplayLabel
+import com.sluggyard.tv.ui.rewrite.streams.DigitalReleasePolicy
 import com.sluggyard.tv.ui.rewrite.streams.RewriteStreamCandidate
 import com.sluggyard.tv.ui.rewrite.streams.RewriteStreamGroup
 import com.sluggyard.tv.ui.rewrite.streams.RewriteStreamGroupState
@@ -77,6 +78,7 @@ data class RewritePlayerSecondaryState(
     val sourceError: String? = null,
     val selectedSourceAddon: String? = null,
     val failedSourceIds: Set<String> = emptySet(),
+    val digitalReleaseStatus: DigitalReleasePolicy.Status? = null,
     val episodeLoading: Boolean = false,
     val episodeError: String? = null,
     val seasons: List<Int> = emptyList(),
@@ -243,6 +245,7 @@ private fun ColumnScope.SourceContent(
                         com.sluggyard.tv.ui.rewrite.streams.RewriteStreamScoringEngine.Context(
                             title = state.title,
                             contentType = state.contentType,
+                            digitalReleaseStatus = state.digitalReleaseStatus,
                         ),
                     )
                 }

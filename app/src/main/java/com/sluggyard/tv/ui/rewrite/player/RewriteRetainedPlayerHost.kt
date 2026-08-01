@@ -31,6 +31,7 @@ import com.sluggyard.tv.ui.rewrite.streams.RewriteStreamGroupState
 import com.sluggyard.tv.ui.rewrite.streams.RewriteStreamsDataSource
 import com.sluggyard.tv.ui.rewrite.streams.RewriteSubtitleDataSource
 import com.sluggyard.tv.ui.rewrite.streams.RewriteSubtitleGroupState
+import com.sluggyard.tv.ui.rewrite.streams.RewriteDigitalReleaseLookup
 import com.sluggyard.tv.ui.rewrite.streams.selectRewriteAutoPlayCandidate
 import com.sluggyard.tv.domain.model.Subtitle
 import com.sluggyard.tv.ui.screens.player.PlayerEvent
@@ -80,6 +81,7 @@ fun RewriteRetainedPlayerHost(
     detailsDataSource: RewriteDetailsDataSource,
     manualResolution: ManualStreamResolutionCoordinator,
     configuredDebrid: suspend () -> DebridService?,
+    digitalReleaseLookup: RewriteDigitalReleaseLookup? = null,
     onBack: () -> Unit,
 ) {
     val viewModel: PlayerViewModel = hiltViewModel()
@@ -179,6 +181,10 @@ fun RewriteRetainedPlayerHost(
         )
         secondaryJob = scope.launch {
             try {
+                val digitalReleaseStatus = digitalReleaseLookup?.movieStatus(
+                    contentId = requestId,
+                    contentType = requestType,
+                )
                 val groups = streamsDataSource.streamGroups(
                     type = requestType,
                     id = requestId,
@@ -188,6 +194,7 @@ fun RewriteRetainedPlayerHost(
                     secondaryState = secondaryState.copy(
                         sourceGroups = next,
                         sourceLoading = next.isEmpty() || next.all { it.state is RewriteStreamGroupState.Loading },
+                        digitalReleaseStatus = digitalReleaseStatus ?: secondaryState.digitalReleaseStatus,
                     )
                 }
                 secondaryState = secondaryState.copy(sourceLoading = false)

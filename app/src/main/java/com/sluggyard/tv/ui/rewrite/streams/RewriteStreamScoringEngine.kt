@@ -27,6 +27,11 @@ internal object RewriteStreamScoringEngine {
          * Empty / "none" means no language preference — still prefer softsubs over RAW for anime.
          */
         val preferredSubtitleLanguage: String? = null,
+        /**
+         * TMDB digital-release status for movies. When [DigitalReleasePolicy.Status.NOT_YET],
+         * auto-play refuses CAM/TS/SCR/trailer junk. Null / UNKNOWN fails open.
+         */
+        val digitalReleaseStatus: DigitalReleasePolicy.Status? = null,
     )
 
     /**
@@ -96,12 +101,19 @@ internal object RewriteStreamScoringEngine {
         // (A&C Spanish Multi-Sub, Spanish ASS). If nothing language-safe remains, return null
         // so Play opens Sources instead of auto-starting junk.
         val preferred = normalizePreferredSubtitle(context.preferredSubtitleLanguage)
-        val playPool = if (preferred != null && classify(context) == ContentKind.ANIME) {
+        val languageSafePool = if (preferred != null && classify(context) == ContentKind.ANIME) {
             sizedPool.filter { candidate ->
                 !hasConflictingSubtitleLanguage(candidate.releaseText().lowercase(), preferred)
             }
         } else {
             sizedPool
+        }
+        // Pre-digital movies: never auto-start CAM/TS/SCR/trailer dud rips.
+        val playPool = languageSafePool.filter { candidate ->
+            DigitalReleasePolicy.allowsAutoPlay(
+                context.digitalReleaseStatus,
+                candidate.releaseText(),
+            )
         }
         return playPool.maxWithOrNull(rankComparator(context))
     }
@@ -133,7 +145,7 @@ internal object RewriteStreamScoringEngine {
             dualFit = tracks.dualFit,
             seeders = seederFit(candidate),
             decodeFit = decodeFit(text, animeEpisode),
-            quality = qualityFit(text, animeEpisode),
+            quality = qualityFit(text, animeEpisode, context.digitalReleaseStatus),
             sizeFit = sizeFit(candidate, context, episodeLike),
         )
     }
@@ -168,7 +180,8 @@ internal object RewriteStreamScoringEngine {
 
     /**
      * SoftsubFit (higher better):
-     * 3 preferred-lang match (e.g. Eng Sub when preferred is en)
+     * 4 preferred-lang + ASS/SSA (styled softsubs — preferred over plain SRT for anime)
+     * 3 preferred-lang match (e.g. Eng Sub / Eng SRT when preferred is en)
      * 2 softsub / multi-subs without an explicit preferred-lang tag
      * 1 none / conflicting language (Spanish ASS / A&C when preferred is en)
      * 0 RAW / hardsub
@@ -186,7 +199,9 @@ internal object RewriteStreamScoringEngine {
         val softsub = isLikelySoftsubRelease(text)
         val multiSubs = MULTI_SUBS_REGEX.containsMatchIn(text)
         val explicitSub = EXPLICIT_SUB_REGEX.containsMatchIn(text) || textHasBracketLanguageTag(text)
-        val hasSoftSignal = softsub || multiSubs || explicitSub
+        val assFormat = ASS_SOFTSUB_FORMAT.containsMatchIn(text)
+        val srtFormat = SRT_SOFTSUB_FORMAT.containsMatchIn(text)
+        val hasSoftSignal = softsub || multiSubs || explicitSub || assFormat || srtFormat
         val dualAudio = DUAL_AUDIO_REGEX.containsMatchIn(text)
         val hardsub = HARD_SUB_REGEX.containsMatchIn(text)
         val raw = RAW_REGEX.containsMatchIn(text)
@@ -196,8 +211,12 @@ internal object RewriteStreamScoringEngine {
         val softsubFit = when {
             raw || (hardsub && !hasSoftSignal) -> 0
             conflictingLang -> 1
+            // AnimeTosho-style Eng ASS must beat Eng SRT / plain "English Subs" when both
+            // match the preference — SRT is often dialogue-only dumps with no styling.
+            hasSoftSignal && hasPreferred && assFormat -> 4
             hasSoftSignal && hasPreferred -> 3
-            hasSoftSignal && preferred == null && (multiSubs || softsub) -> 3
+            hasSoftSignal && preferred == null && assFormat -> 4
+            hasSoftSignal && preferred == null && (multiSubs || softsub || srtFormat) -> 3
             hasSoftSignal -> 2
             else -> 1
         }
@@ -216,7 +235,7 @@ internal object RewriteStreamScoringEngine {
         return if (isLikelyAvc10BitSoftwareDecode(text)) 1 else 5
     }
 
-    private fun qualityFit(text: String, animeEpisode: Boolean): Int {
+    private fun qualityFit(text: String, animeEpisode: Boolean, digitalReleaseStatus: DigitalReleasePolicy.Status?): Int {
         var base = when {
             RESOLUTION_UHD.containsMatchIn(text) -> if (animeEpisode) 70 else 100
             RESOLUTION_1080.containsMatchIn(text) -> 85
@@ -228,6 +247,12 @@ internal object RewriteStreamScoringEngine {
         if (HDR_TAG.containsMatchIn(text)) base += 5
         if (CAM_TAG.containsMatchIn(text)) base -= 35
         if (AI_UPSCALE.containsMatchIn(text)) base -= 40
+        // Sources ranking: bury early-release junk when digital isn't out yet.
+        if (digitalReleaseStatus == DigitalReleasePolicy.Status.NOT_YET &&
+            DigitalReleasePolicy.isEarlyReleaseJunk(text)
+        ) {
+            base -= 50
+        }
         return base.coerceIn(0, 100)
     }
 
@@ -601,6 +626,10 @@ internal object RewriteStreamScoringEngine {
     private val HARD_SUB_REGEX = Regex("\\b(hardsub|hard.?subs?|burned.?in)\\b")
     private val RAW_REGEX = Regex("\\b(raw|no.?subs?|unsubbed)\\b")
     private val SOFTSUB_KEYWORD = Regex("\\b(softsub|soft.?subs?|ass|ssa)\\b")
+    /** Styled softsub container — higher softsubFit than SRT/VTT when language matches. */
+    private val ASS_SOFTSUB_FORMAT = Regex("\\b(ass|ssa)\\b")
+    /** Plain softsub dumps — still softsubs, but lose to ASS when language is equal. */
+    private val SRT_SOFTSUB_FORMAT = Regex("\\b(srt|subrip|vtt|webvtt)\\b")
     private val SEASON_PACK_MARKER = Regex(
         "\\b(season\\s*\\d+|complete|batch|s\\d{1,2}\\s*\\+\\s*specials|ep(?:isodes?)?\\s*\\d+\\s*[-~]\\s*\\d+)\\b",
     )

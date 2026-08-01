@@ -1,6 +1,7 @@
 package com.sluggyard.tv.ui.rewrite.player
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.Box
@@ -57,7 +58,11 @@ fun RewritePlayerSkipOverlay(
         }
         focusRequester.requestFocusReliably(retries = 10)
     }
-    AnimatedVisibility(visible = visible, enter = fadeIn(), exit = fadeOut()) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(animationSpec = tween(durationMillis = 180)),
+        exit = fadeOut(animationSpec = tween(durationMillis = 220)),
+    ) {
         Box(modifier = modifier.fillMaxSize()) {
             Row(
                 modifier = Modifier
