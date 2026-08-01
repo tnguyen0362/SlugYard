@@ -19,6 +19,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -40,12 +45,12 @@ fun ContinueWatchingOptionsDialog(
     val cancelFocusRequester = remember { FocusRequester() }
     var actionsArmed by remember { mutableStateOf(false) }
     Dialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (actionsArmed) onDismiss() },
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
-        BackHandler(onBack = onDismiss)
-        // Long-press Select KeyUp would otherwise activate the newly focused primary button
-        // and jump straight into View details before the user can choose.
+        BackHandler(enabled = actionsArmed, onBack = onDismiss)
+        // Long-press Select is still down when this dialog opens. Consume Center/Enter until
+        // armed so the trailing KeyUp cannot fire Cancel / View details / Remove.
         LaunchedEffect(Unit) {
             delay(900)
             actionsArmed = true
@@ -56,6 +61,13 @@ fun ContinueWatchingOptionsDialog(
                 .fillMaxWidth(0.42f)
                 .background(SlugYardPalette.Surface, RoundedCornerShape(SlugYardTvMetrics.SheetCornerRadius))
                 .border(1.dp, SlugYardPalette.Divider, RoundedCornerShape(SlugYardTvMetrics.SheetCornerRadius))
+                .onPreviewKeyEvent { event ->
+                    if (actionsArmed) return@onPreviewKeyEvent false
+                    val isSelect = event.key == Key.DirectionCenter ||
+                        event.key == Key.Enter ||
+                        event.key == Key.NumPadEnter
+                    isSelect
+                }
                 .padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
@@ -72,9 +84,9 @@ fun ContinueWatchingOptionsDialog(
             )
             TvButton(
                 label = "Cancel",
-                onClick = onDismiss,
+                onClick = { if (actionsArmed) onDismiss() },
                 style = ButtonStyle.Secondary,
-                enabled = true,
+                enabled = actionsArmed,
                 fillMaxWidth = true,
                 focusRequester = cancelFocusRequester,
             )

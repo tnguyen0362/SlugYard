@@ -138,7 +138,6 @@ import com.sluggyard.tv.ui.app.home.HomeState
 import com.sluggyard.tv.ui.app.home.TmdbHomeDataSource
 import com.sluggyard.tv.ui.app.home.withHeroEnrichments
 import com.sluggyard.tv.ui.app.home.CatalogRequest
-import com.sluggyard.tv.ui.app.settings.effectiveProfileId
 import com.sluggyard.tv.ui.app.streams.selectAutoPlayCandidate
 import com.sluggyard.tv.ui.app.streams.hasPendingCacheChecks
 import com.sluggyard.tv.ui.app.streams.DigitalReleaseLookup
@@ -191,7 +190,7 @@ class AppGraph(
     libraryWatchRepository: LibraryWatchRepository,
     relatedDataSource: RelatedDataSource? = null,
     tmdbHomeDataSource: TmdbHomeDataSource? = null,
-    resolveMetaContentId: suspend (type: String, id: String) -> String = { _, id -> id },
+    val resolveMetaContentId: suspend (type: String, id: String) -> String = { _, id -> id },
     val digitalReleaseLookup: DigitalReleaseLookup? = null,
 ) {
     private val playbackSources = java.util.concurrent.ConcurrentHashMap<String, ResolvedPlaybackSource>()
@@ -447,10 +446,11 @@ fun AppShell(
     val navController = rememberNavController()
     var accessGranted by remember { mutableStateOf(false) }
     var forceAuthChoice by remember { mutableStateOf(false) }
+    var sessionBootKey by remember { mutableStateOf(0) }
     // Must live above the player route: navigating to app_player disposes app_root,
     // which would otherwise reset in-shell navigation to Home ("No home content…").
     var routeStack by remember {
-        mutableStateOf(listOf<RootDestination>(RootDestination.Home))
+        mutableStateOf(listOf<RootDestination>(RootDestination.Profiles))
     }
     val streamBadgeSettings by settingsFacade.streamBadgeSettings.collectAsState(
         initial = com.sluggyard.tv.core.streams.StreamBadgeSettings(),
@@ -471,8 +471,14 @@ fun AppShell(
                     watchProgressRepository = watchProgressRepository,
                     routeStack = routeStack,
                     onRouteStackChange = { routeStack = it },
-                    onSignedOut = { accessGranted = false; forceAuthChoice = false },
+                    onSignedOut = {
+                        accessGranted = false
+                        forceAuthChoice = false
+                        sessionBootKey += 1
+                        routeStack = listOf(RootDestination.Profiles)
+                    },
                     onOpenAuth = { forceAuthChoice = true; accessGranted = false },
+                    sessionBootKey = sessionBootKey,
                     onLaunchRetainedPlayer = { source, title, type, id, posterUrl, backdropUrl, season, episode, addonId, parentId, parentType, resumePositionMs, contentGenres, contentLanguage ->
                         runCatching {
                             navController.navigate(
@@ -506,7 +512,11 @@ fun AppShell(
                     sessions = sessions,
                         guestSession = graph.guestSession,
                         forceChoice = forceAuthChoice,
-                        onAuthenticated = { accessGranted = true },
+                        onAuthenticated = {
+                            sessionBootKey += 1
+                            routeStack = listOf(RootDestination.Profiles)
+                            accessGranted = true
+                        },
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -603,6 +613,7 @@ private fun AppContent(
     onRouteStackChange: (List<RootDestination>) -> Unit,
     onSignedOut: () -> Unit,
     onOpenAuth: () -> Unit,
+    sessionBootKey: Int,
     onLaunchRetainedPlayer: (ResolvedPlaybackSource, String, String, String, String, String, Int?, Int?, String?, String?, String?, Long, String?, String?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -627,8 +638,10 @@ private fun AppContent(
     val dataCorruptionNotices by graph.dataIntegrity.notices.collectAsState(initial = emptyList())
     val debridSettings by settingsFacade.debridSettings.collectAsState(initial = DebridSettings())
     val tmdbSettings by settingsFacade.tmdbSettings.collectAsState(initial = com.sluggyard.tv.domain.model.TmdbSettings())
-    val smoothFocusMovement by settingsFacade.layoutPreferences.smoothBringIntoViewEnabled.collectAsState(initial = true)
-    val fastHorizontalNavigation by settingsFacade.layoutPreferences.fastHorizontalNavigationEnabled.collectAsState(initial = false)
+    // Focus polish defaults — not user-facing settings (smooth scroll-into-view on;
+    // horizontal D-pad hold uses the standard throttle, not the "fast" 48ms gate).
+    val smoothFocusMovement = true
+    val fastHorizontalNavigation = false
     val playerSettings by settingsFacade.playerSettings.collectAsState(
         initial = com.sluggyard.tv.data.local.PlayerSettings(),
     )
@@ -668,8 +681,9 @@ private fun AppContent(
     var resolvingCandidateId by remember { mutableStateOf<String?>(null) }
     var continueWatchingMenuPoster by remember { mutableStateOf<HomePoster?>(null) }
     var navigationRoot by remember { mutableStateOf<RootDestination>(RootDestination.Home) }
-    // Cold-start splash: brief cover until the first catalog paint, not an extra forced wait.
-    var homeSplashVisible by remember { mutableStateOf(true) }
+    // Who's watching first; logo heartbeat splash only after a profile is chosen.
+    var needsStartupProfilePick by remember(sessionBootKey) { mutableStateOf(true) }
+    var homeSplashVisible by remember(sessionBootKey) { mutableStateOf(false) }
     var homeSplashStartedAt by remember { mutableStateOf(0L) }
     var watchHubPlatforms by remember { mutableStateOf<List<WatchHubPlatform>>(emptyList()) }
     var watchHubLoading by remember { mutableStateOf(false) }
@@ -880,16 +894,13 @@ private fun AppContent(
         profileBridgeReady = true
     }
 
-    // Apply the startup preference once after legacy profiles are bridged. A later profile choice
-    // is an in-session selection and must not be reset when the setting snapshot recomposes.
-    LaunchedEffect(graph, profileBridgeReady) {
-        if (!profileBridgeReady) return@LaunchedEffect
-        val profileId = effectiveProfileId(
-            activeProfileId = profiles.activeProfileId,
-            rememberLastProfile = profiles.rememberLastProfile,
-            profileIds = profiles.profiles.map { it.id },
-        )
-        if (profileId != profiles.activeProfileId) graph.selectProfile(profileId)
+    // Who's watching is mandatory on cold start — do not re-apply effectiveProfileId
+    // after the user picks (that used to overwrite the choice when rememberLastProfile=false).
+
+    LaunchedEffect(needsStartupProfilePick) {
+        if (needsStartupProfilePick && destination !is RootDestination.Profiles) {
+            openRoot(RootDestination.Profiles)
+        }
     }
 
     LaunchedEffect(
@@ -916,7 +927,13 @@ private fun AppContent(
         }
     }
 
-    BackHandler(enabled = destination !is RootDestination.Home) {
+    BackHandler(
+        enabled = when {
+            needsStartupProfilePick && destination is RootDestination.Profiles -> false
+            destination is RootDestination.Home -> false
+            else -> true
+        },
+    ) {
         streamResolutionJob?.cancel()
         streamResolutionJob = null
         resolvingCandidateId = null
@@ -1346,8 +1363,12 @@ private fun AppContent(
             ?.filter { it.isNotEmpty() }
             .orEmpty()
             .ifEmpty { detailsState?.genres.orEmpty() }
+        // Resolve tmdb:→tt when possible so release-date lookup matches Details meta ids.
+        val releaseLookupId = runCatching {
+            graph.resolveMetaContentId(streams.type, streams.id)
+        }.getOrDefault(streams.id)
         val digitalReleaseStatus = graph.digitalReleaseLookup?.movieStatus(
-            contentId = streams.id,
+            contentId = releaseLookupId,
             contentType = streams.type,
         ) ?: DigitalReleasePolicy.Status.UNKNOWN
         val candidate = selectAutoPlayCandidate(
@@ -1639,13 +1660,22 @@ private fun AppContent(
                     onSelect = { profile ->
                         scope.launch {
                             graph.selectProfile(profile.id)
-                            openRoot(profilesReturnDestination)
+                            if (needsStartupProfilePick) {
+                                needsStartupProfilePick = false
+                                homeSplashStartedAt = 0L
+                                homeSplashVisible = true
+                                openRoot(RootDestination.Home)
+                            } else {
+                                openRoot(profilesReturnDestination)
+                            }
                         }
                     },
                     onCreate = { name -> scope.launch { graph.createProfile(name) } },
                     onRename = { profile, name -> scope.launch { graph.renameProfile(profile, name) } },
                     onRemove = { profile -> scope.launch { graph.removeProfile(profile) } },
-                    onBack = ::popRoute,
+                    onBack = {
+                        if (!needsStartupProfilePick) popRoute()
+                    },
                     contentFocusRequester = profilesContentFocusRequester,
                     modifier = Modifier.fillMaxSize(),
                 )
@@ -1983,19 +2013,25 @@ private fun AppContent(
                 ) {
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(18.dp),
+                        verticalArrangement = Arrangement.spacedBy(22.dp),
                     ) {
-                        androidx.compose.material3.CircularProgressIndicator(color = SlugYardPalette.Accent)
-                        Text(
-                            "Loading SlugYard…",
-                            style = MaterialTheme.typography.titleLarge,
-                            color = SlugYardPalette.OnCanvas,
+                        androidx.compose.foundation.Image(
+                            painter = androidx.compose.ui.res.painterResource(
+                                id = com.sluggyard.tv.R.drawable.app_logo_wordmark,
+                            ),
+                            contentDescription = "SlugYard",
+                            modifier = Modifier
+                                .fillMaxWidth(0.42f)
+                                .padding(horizontal = 24.dp),
+                        )
+                        com.sluggyard.tv.ui.components.LoadingIndicator(
+                            color = SlugYardPalette.Accent,
                         )
                         Text(
                             if (catalogTotal > 0) {
                                 "Loading catalogs ($catalogDone / $catalogTotal)"
                             } else {
-                                "Getting your home catalogs ready"
+                                "Getting your home ready"
                             },
                             style = MaterialTheme.typography.bodyMedium,
                             color = SlugYardPalette.OnCanvasMuted,

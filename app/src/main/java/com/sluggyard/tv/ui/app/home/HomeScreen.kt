@@ -1104,22 +1104,28 @@ internal fun PosterCard(
             return@LaunchedEffect
         }
         if (landscapeBitmapReady && landscapeReady) return@LaunchedEffect
-        delay(HomeLandscapeFocusSettleMs)
+        val cacheKey = "card-backdrop:${poster.id}:$url"
+        val memoryHit = runCatching {
+            context.imageLoader.memoryCache?.get(coil3.memory.MemoryCache.Key(cacheKey)) != null
+        }.getOrDefault(false)
+        if (!memoryHit) {
+            delay(HomeLandscapeFocusSettleMs)
+        }
         val request = ImageRequest.Builder(context)
             .data(url)
             .size(landscapeDecode)
-            .memoryCacheKey("card-backdrop:${poster.id}:$url")
-            .diskCacheKey("card-backdrop:${poster.id}:$url")
+            .memoryCacheKey(cacheKey)
+            .diskCacheKey(cacheKey)
             .build()
         val result = withContext(Dispatchers.IO) { context.imageLoader.execute(request) }
         landscapeBitmapReady = result is SuccessResult
-        // Expand on success or failure — failure still avoids gutters by filling with portrait.
         landscapeReady = true
     }
+    // Expand only when landscape is actually painted — never widen on portrait interim.
     val layoutWidth = if (
         focused &&
         expandOnFocus &&
-        (landscapeUrl == null || landscapeReady)
+        (landscapeUrl == null || landscapeBitmapReady)
     ) {
         focusedWidth
     } else {
@@ -1184,11 +1190,12 @@ internal fun PosterCard(
     var longPressFired by remember { mutableStateOf(false) }
 
     val interactionModifier = if (onLongClick != null) {
-        Modifier.combinedClickable(
+        // D-pad long-press is owned by onPreviewKeyEvent below. Do not also use
+        // combinedClickable(onLongClick) — that double-fires and races the options dialog.
+        Modifier.clickable(
             interactionSource = interactions,
             indication = null,
             onClick = onClick,
-            onLongClick = onLongClick,
         )
     } else {
         Modifier.clickable(
@@ -1295,9 +1302,10 @@ internal fun PosterCard(
                 maxLines = 4,
                 overflow = TextOverflow.Ellipsis,
             )
-            // Portrait is the always-on base layer. Landscape only paints after the prefetch
-            // above marks ready, and layout width waits on the same signal.
-            if (posterUrl != null) {
+            // Portrait only while not showing landscape. Never paint portrait as the focused
+            // interim once a backdrop URL exists — that was the portrait→landscape flash.
+            val showLandscape = focused && landscapeUrl != null && landscapeBitmapReady
+            if (posterUrl != null && !showLandscape) {
                 // Stable by content id + URL; reloadToken remounts after error so fast
                 // LazyRow reuse / cancelled fetches cannot leave a permanently empty tile.
                 var posterReloadToken by remember(poster.id, posterUrl) { mutableIntStateOf(0) }
@@ -1309,18 +1317,10 @@ internal fun PosterCard(
                         .diskCacheKey("poster:${poster.id}:$posterUrl")
                         .build()
                 }
-                val fillExpandedPortrait = focused && expandOnFocus &&
-                    (landscapeUrl == null || (landscapeReady && !landscapeBitmapReady))
                 AsyncImage(
                     model = posterRequest,
                     contentDescription = null,
-                    // Keep the portrait bitmap at its native card bounds while waiting for
-                    // landscape. Once expanded without a backdrop bitmap, crop-fill the wide frame.
-                    modifier = if (fillExpandedPortrait) {
-                        Modifier.fillMaxSize()
-                    } else {
-                        Modifier.size(cardWidth, cardHeight).align(Alignment.Center)
-                    },
+                    modifier = Modifier.size(cardWidth, cardHeight).align(Alignment.Center),
                     contentScale = ContentScale.Crop,
                     alignment = Alignment.Center,
                     onError = {
@@ -1332,7 +1332,7 @@ internal fun PosterCard(
                         }
                     },
                 )
-            } else if (!poster.backdropUrl.isNullOrBlank() && !expandOnFocus) {
+            } else if (!showLandscape && !poster.backdropUrl.isNullOrBlank() && !expandOnFocus) {
                 // Search / non-expand tiles with backdrop-only art still need a visible frame.
                 val fallbackUrl = remember(poster.id, poster.backdropUrl) {
                     preferLargePosterUrl(poster.backdropUrl)
@@ -1362,8 +1362,7 @@ internal fun PosterCard(
                     )
                 }
             }
-            // Landscape layer — request hits Coil cache from the focus-settled prefetch above.
-            if (focused && landscapeUrl != null && landscapeBitmapReady) {
+            if (showLandscape) {
                 val landscapeRequest = remember(poster.id, landscapeUrl, landscapeDecode) {
                     ImageRequest.Builder(context)
                         .data(landscapeUrl)
@@ -1376,7 +1375,6 @@ internal fun PosterCard(
                     model = landscapeRequest,
                     contentDescription = null,
                     modifier = Modifier.fillMaxSize(),
-                    // 16:9 art in a 16:9 frame — center crop keeps the subject framed.
                     contentScale = ContentScale.Crop,
                     alignment = Alignment.Center,
                 )

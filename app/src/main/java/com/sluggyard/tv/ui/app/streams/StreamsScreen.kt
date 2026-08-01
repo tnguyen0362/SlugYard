@@ -246,9 +246,9 @@ private fun StreamCandidateRow(
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Medium,
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(stream.sourceLabel, style = MaterialTheme.typography.labelMedium, color = SlugYardPalette.OnCanvasMuted)
-                stream.detailLabel?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = SlugYardPalette.OnCanvasMuted) }
+            val detail = StreamPresentation.detailLine(stream)
+            if (detail.isNotBlank()) {
+                Text(detail, style = MaterialTheme.typography.labelMedium, color = SlugYardPalette.OnCanvasMuted)
             }
             if (stream.badges.isNotEmpty() || stream.videoSizeBytes != null) {
                 StreamBadgeChips(

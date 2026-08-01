@@ -1,6 +1,20 @@
 package com.sluggyard.tv.ui.app.settings
 
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import com.sluggyard.tv.BuildConfig
 import com.sluggyard.tv.data.local.AVAILABLE_SUBTITLE_LANGUAGES
 import com.sluggyard.tv.data.local.AudioLanguageOption
 import com.sluggyard.tv.data.local.AudioOutputChannels
@@ -68,23 +82,114 @@ internal fun AudioSettings(facade: SettingsFacade, player: PlayerSettings, scope
 }
 
 @Composable
-internal fun AdvancedSettings(player: PlayerSettings) {
-    SettingsGroup("Automatic playback policy") {
-        ValueRow("Engine", "Automatic")
-        ValueRow("Buffering", if (player.bufferEngineEnabled) "Managed automatically" else "Standard")
-        ValueRow("Dolby Vision", "Automatic")
-        ValueRow("Cache", if (player.vodCacheEnabled) "Enabled" else "Managed automatically")
-        ValueRow("Diagnostics", if (player.playbackIssueReportsEnabled) "Opted in" else "Local only")
-        ValueRow("Performance", if (player.exoPerformanceModeEnabled) "Enabled" else "Automatic")
+internal fun AboutSettings() {
+    var openDoc by remember { mutableStateOf<AboutDoc?>(null) }
+    SettingsGroup("About SlugYard") {
+        ValueRow("Application", "SlugYard TV")
+        ValueRow("Version", BuildConfig.VERSION_NAME)
+        ValueRow("Playback", "Automatic dual-player fallback (ExoPlayer + mpv)")
+        ActionRow(
+            title = "License",
+            description = "GNU General Public License v3.0 (GPLv3)",
+            actionLabel = "View",
+            onClick = { openDoc = AboutDoc.License },
+        )
+        ActionRow(
+            title = "Terms of Service",
+            description = "Rules for using this pre-release app.",
+            actionLabel = "View",
+            onClick = { openDoc = AboutDoc.Terms },
+        )
+        ActionRow(
+            title = "Privacy Policy",
+            description = "What stays on-device and what optional sync does.",
+            actionLabel = "View",
+            onClick = { openDoc = AboutDoc.Privacy },
+        )
+        ActionRow(
+            title = "Credits & attribution",
+            description = "ExoPlayer / Media3, mpv, Kodi downmix, NuvioTV, and more.",
+            actionLabel = "View",
+            onClick = { openDoc = AboutDoc.Credits },
+        )
+    }
+    openDoc?.let { doc ->
+        AlertDialog(
+            onDismissRequest = { openDoc = null },
+            title = {
+                Text(
+                    when (doc) {
+                        AboutDoc.License -> "License"
+                        AboutDoc.Terms -> "Terms of Service"
+                        AboutDoc.Privacy -> "Privacy Policy"
+                        AboutDoc.Credits -> "Credits & attribution"
+                    },
+                )
+            },
+            text = {
+                Text(
+                    text = when (doc) {
+                        AboutDoc.License -> ABOUT_LICENSE
+                        AboutDoc.Terms -> ABOUT_TERMS
+                        AboutDoc.Privacy -> ABOUT_PRIVACY
+                        AboutDoc.Credits -> ABOUT_CREDITS
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 360.dp)
+                        .verticalScroll(rememberScrollState()),
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { openDoc = null }) { Text("Close") }
+            },
+        )
     }
 }
 
-@Composable
-internal fun AboutSettings() {
-    SettingsGroup("About SlugYard") {
-        ValueRow("Application", "SlugYard TV")
-        ValueRow("Version", com.sluggyard.tv.BuildConfig.VERSION_NAME)
-        ValueRow("Playback", "Automatic dual-player fallback")
-        ValueRow("Privacy", "Credentials are stored securely on this device.")
-    }
-}
+private enum class AboutDoc { License, Terms, Privacy, Credits }
+
+private val ABOUT_LICENSE = """
+SlugYard is free software under the GNU General Public License, version 3.
+
+You may copy, modify, and redistribute it under the terms of that license.
+There is no warranty. Full text: LICENSE in the project repository.
+
+https://www.gnu.org/licenses/gpl-3.0.en.html
+""".trimIndent()
+
+private val ABOUT_TERMS = """
+SlugYard is a client-side Android TV app. It does not host or distribute media.
+
+You are responsible for the content you play and for any debrid keys, addons, and third-party accounts you connect.
+
+This is a public pre-release (beta). Features may change or break.
+
+Full Terms: TERMS.md in the project repository
+(https://github.com/tnguyen0362/SlugYard).
+""".trimIndent()
+
+private val ABOUT_PRIVACY = """
+Debrid API keys stay on this device and are not uploaded with SlugYard sync.
+
+Optional sign-in can sync profiles, watch progress, and non-secret preferences via Supabase. Trakt tokens may sync if you link Trakt. Guest mode needs no account.
+
+Third-party services (debrid, addons, TMDB, Trakt, etc.) have their own policies.
+
+Full Privacy Policy: PRIVACY.md in the project repository.
+""".trimIndent()
+
+private val ABOUT_CREDITS = """
+Playback stack:
+• ExoPlayer / AndroidX Media3 (Apache-2.0)
+• mpv / libmpv-android
+• Kodi-derived FFmpeg audio downmix (ffmpeg-decoder-downmix/)
+
+Lineage:
+• Substantial modifications of NuvioTV (see NOTICE)
+
+Also: Jetpack Compose, Hilt, OkHttp, Coil, and other libraries declared in Gradle.
+
+Full notices: NOTICE and ffmpeg-decoder-downmix/NOTICE.md
+""".trimIndent()
+

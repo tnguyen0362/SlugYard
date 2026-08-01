@@ -23,15 +23,11 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.unit.dp
 import com.sluggyard.tv.core.addonprotocol.ManagedAddon
 import com.sluggyard.tv.core.addonprotocol.SlugYardCommunitySourcePolicy
-import com.sluggyard.tv.domain.model.TmdbSettings
 import com.sluggyard.tv.core.logging.ExperimentalDiagnostics
 import kotlinx.coroutines.launch
 
 @Composable
 internal fun ContentDiscoverySettings(
-    tmdb: TmdbSettings,
-    onTmdbEnabled: (Boolean) -> Unit,
-    onTmdbEnrichContinueWatching: (Boolean) -> Unit,
     addons: List<ManagedAddon>,
     debridConnected: Boolean,
     onInstallCommunityAddons: suspend () -> Unit,
@@ -49,10 +45,6 @@ internal fun ContentDiscoverySettings(
     val catalogAddons = addons.filter { addon ->
         !SlugYardCommunitySourcePolicy.isContentSourceManifest(addon.manifestUrl) &&
             !SlugYardCommunitySourcePolicy.isWatchHubManifest(addon.manifestUrl)
-    }
-    SettingsGroup("Content enrichment") {
-        ToggleRow("TMDB enrichment", "Improve artwork, metadata, cast, and details.", tmdb.enabled, onTmdbEnabled)
-        ToggleRow("Continue Watching artwork", "Use TMDB enrichment for saved playback tiles.", tmdb.enrichContinueWatching, onTmdbEnrichContinueWatching)
     }
     SettingsGroup("Community addons") {
         Text(

@@ -9,7 +9,10 @@ import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Resolves whether a movie has a past digital release via TMDB (types 4–6).
- * Results are cached per IMDb id for the process lifetime.
+ * Results are cached per IMDb / TMDB id for the process lifetime.
+ *
+ * Home TMDB rails navigate with `tmdb:{id}` — those must hit release-dates directly.
+ * Requiring IMDb-only used to fail open (UNKNOWN) and let CAM junk auto-play.
  */
 class DigitalReleaseLookup(
     private val tmdbApi: TmdbApi,
@@ -22,29 +25,43 @@ class DigitalReleaseLookup(
             val type = contentType?.trim()?.lowercase().orEmpty()
             if (type !in MOVIE_TYPES) return@withContext DigitalReleasePolicy.Status.UNKNOWN
             if (apiKey.isBlank()) return@withContext DigitalReleasePolicy.Status.UNKNOWN
-            val imdb = normalizeImdbId(contentId) ?: return@withContext DigitalReleasePolicy.Status.UNKNOWN
-            cache[imdb]?.let { return@withContext it }
 
-            val status = runCatching { lookup(imdb) }
-                .onFailure { Log.w(TAG, "digital-release lookup failed for $imdb: ${it.message}") }
+            val cacheKey = cacheKey(contentId) ?: return@withContext DigitalReleasePolicy.Status.UNKNOWN
+            cache[cacheKey]?.let { return@withContext it }
+
+            val status = runCatching {
+                val tmdbId = parseTmdbId(contentId)
+                if (tmdbId != null) {
+                    lookupByTmdbId(tmdbId)
+                } else {
+                    val imdb = normalizeImdbId(contentId)
+                        ?: return@runCatching DigitalReleasePolicy.Status.UNKNOWN
+                    lookupByImdb(imdb)
+                }
+            }
+                .onFailure { Log.w(TAG, "digital-release lookup failed for $cacheKey: ${it.message}") }
                 .getOrDefault(DigitalReleasePolicy.Status.UNKNOWN)
-            cache[imdb] = status
+            cache[cacheKey] = status
             status
         }
 
-    private suspend fun lookup(imdbId: String): DigitalReleasePolicy.Status {
+    private suspend fun lookupByImdb(imdbId: String): DigitalReleasePolicy.Status {
         val find = tmdbApi.findByExternalId(imdbId, apiKey)
         if (!find.isSuccessful) return DigitalReleasePolicy.Status.UNKNOWN
         val tmdbId = find.body()?.movieResults?.firstOrNull()?.id
             ?: return DigitalReleasePolicy.Status.UNKNOWN
+        return lookupByTmdbId(tmdbId)
+    }
+
+    private suspend fun lookupByTmdbId(tmdbId: Int): DigitalReleasePolicy.Status {
         val releases = tmdbApi.getMovieReleaseDates(tmdbId, apiKey)
         if (!releases.isSuccessful) return DigitalReleasePolicy.Status.UNKNOWN
         val rows = releases.body()?.results.orEmpty()
             .flatMap { country -> country.releaseDates.orEmpty() }
             .mapNotNull { item ->
-                val type = item.type ?: return@mapNotNull null
+                val releaseType = item.type ?: return@mapNotNull null
                 val date = DigitalReleasePolicy.parseReleaseDate(item.releaseDate) ?: return@mapNotNull null
-                DigitalReleasePolicy.ReleaseRow(type = type, date = date)
+                DigitalReleasePolicy.ReleaseRow(type = releaseType, date = date)
             }
         return DigitalReleasePolicy.status(rows)
     }
@@ -53,11 +70,29 @@ class DigitalReleaseLookup(
         private const val TAG = "DigitalRelease"
         private val MOVIE_TYPES = setOf("movie", "movies", "film", "films")
 
+        fun cacheKey(raw: String?): String? {
+            parseTmdbId(raw)?.let { return "tmdb:$it" }
+            return normalizeImdbId(raw)
+        }
+
+        fun parseTmdbId(raw: String?): Int? {
+            val value = raw?.trim().orEmpty()
+            if (value.isBlank()) return null
+            if (!value.startsWith("tmdb:", ignoreCase = true)) return null
+            return value.removePrefix("tmdb:")
+                .removePrefix("TMDB:")
+                .substringBefore(':')
+                .substringBefore('/')
+                .toIntOrNull()
+                ?.takeIf { it > 0 }
+        }
+
         fun normalizeImdbId(raw: String?): String? {
             val value = raw?.trim().orEmpty()
             if (value.isBlank()) return null
             val base = value.substringBefore(':').substringBefore('/').trim()
-            return base.takeIf { it.startsWith("tt") && it.length > 2 }
+            return base.takeIf { it.startsWith("tt", ignoreCase = true) && it.length > 2 }
+                ?.lowercase()
         }
     }
 }

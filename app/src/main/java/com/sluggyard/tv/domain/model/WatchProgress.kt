@@ -54,10 +54,17 @@ data class WatchProgress(
     fun isCompleted(threshold: Float = COMPLETED_THRESHOLD): Boolean = progressPercentage >= threshold
 
     /**
-     * Returns true if the content has been started but not completed
+     * Started but not completed — aligns with SlugYard Continue Watching:
+     * ~10s absolute floor or 2%+, and under the completion threshold.
      */
-    fun isInProgress(startThreshold: Float = STARTED_THRESHOLD, endThreshold: Float = COMPLETED_THRESHOLD): Boolean =
-        progressPercentage >= startThreshold && progressPercentage < endThreshold
+    fun isInProgress(startThreshold: Float = STARTED_THRESHOLD, endThreshold: Float = COMPLETED_THRESHOLD): Boolean {
+        if (duration > 0L && position > 0L) {
+            val fraction = (position.toDouble() / duration.toDouble()).toFloat()
+            if (fraction >= endThreshold) return false
+            if (position >= 10_000L || fraction >= startThreshold) return true
+        }
+        return progressPercentage >= startThreshold && progressPercentage < endThreshold
+    }
 
     /**
      * Returns the remaining time in milliseconds

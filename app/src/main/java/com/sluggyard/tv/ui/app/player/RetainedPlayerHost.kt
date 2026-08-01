@@ -1,6 +1,9 @@
 package com.sluggyard.tv.ui.app.player
 
 import android.util.Log
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -12,6 +15,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.zIndex
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavBackStackEntry
 import com.sluggyard.tv.core.streamresolution.DebridService
@@ -144,6 +150,9 @@ fun RetainedPlayerHost(
         mutableStateOf(PlayerSecondaryState(title = title, contentType = contentType))
     }
     var secondaryJob by remember(contentId, season, episode) { mutableStateOf<Job?>(null) }
+    var episodeHandoffPreparing by remember { mutableStateOf(false) }
+    var episodeHandoffTitle by remember { mutableStateOf("") }
+    var episodeHandoffArtUrl by remember { mutableStateOf<String?>(null) }
 
     // Re-apply when the default pack finishes installing after sources already loaded.
     LaunchedEffect(streamBadgeRules) {
@@ -315,18 +324,22 @@ fun RetainedPlayerHost(
     ) -> Unit
 
     fun selectEpisode(selectedSeason: Int, selectedEpisode: DetailsEpisode) {
-        // Episode selection is a playback intent, not a request to open a second source picker.
-        // Resolve the episode through the same cached-only auto-picker used by Details and
-        // Continue Watching, then hand it to the retained player in one transition.
+        // Same full-bleed prepare chrome as outside-player auto-pick (BuildingPlayerScreen).
         secondaryJob?.cancel()
+        episodeHandoffPreparing = true
+        episodeHandoffTitle = "S${selectedSeason}E${selectedEpisode.displayNumber} · ${selectedEpisode.title}"
+        episodeHandoffArtUrl = playPreparingArtUrl(
+            selectedEpisode.thumbnailUrl,
+            activeContext.posterUrl ?: latestPosterUrl.ifBlank { null },
+        )
         secondaryState = secondaryState.copy(
-            panel = PlayerSecondaryPanel.EPISODES,
+            panel = PlayerSecondaryPanel.HIDDEN,
             sourceGroups = emptyList(),
             sourceLoading = true,
             sourceError = null,
             failedSourceIds = emptySet(),
             episodeSourceId = selectedEpisode.id,
-            episodeSourceTitle = "S${selectedSeason}E${selectedEpisode.displayNumber} · ${selectedEpisode.title}",
+            episodeSourceTitle = episodeHandoffTitle,
             episodeSourceSeason = selectedSeason,
             episodeSourceEpisode = selectedEpisode.number,
             episodeSourceEpisodeTitle = selectedEpisode.title,
@@ -342,7 +355,9 @@ fun RetainedPlayerHost(
                     ).collect { groups = it }
                 }
                 if (settled == null) {
+                    episodeHandoffPreparing = false
                     secondaryState = secondaryState.copy(
+                        panel = PlayerSecondaryPanel.EPISODES,
                         sourceLoading = false,
                         sourceError = "Episode sources took too long to respond. Try again.",
                     )
@@ -363,7 +378,9 @@ fun RetainedPlayerHost(
                     ),
                 )
                 if (candidate == null) {
+                    episodeHandoffPreparing = false
                     secondaryState = secondaryState.copy(
+                        panel = PlayerSecondaryPanel.EPISODES,
                         sourceLoading = false,
                         sourceError = "No cached playable source was found for this episode.",
                     )
@@ -371,9 +388,12 @@ fun RetainedPlayerHost(
                 }
                 selectSource(candidate, true)
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                episodeHandoffPreparing = false
                 throw cancelled
             } catch (failure: Exception) {
+                episodeHandoffPreparing = false
                 secondaryState = secondaryState.copy(
+                    panel = PlayerSecondaryPanel.EPISODES,
                     sourceLoading = false,
                     sourceError = failure.message ?: "Episode playback could not start",
                 )
@@ -420,6 +440,7 @@ fun RetainedPlayerHost(
                     // distance-gate blocks all checkpoint writes for the new source until
                     // the user scrubs past the old baseline.
                     lastSavedPositionMs = 0L
+                    episodeHandoffPreparing = false
                     viewModel.onEvent(PlayerEvent.OnPlaybackSourceSelected(handoff))
                     secondaryState = secondaryState.copy(
                         panel = PlayerSecondaryPanel.HIDDEN,
@@ -427,16 +448,26 @@ fun RetainedPlayerHost(
                         sourceError = null,
                     )
                 }
-                is ManualResolutionResult.Unavailable -> secondaryState = secondaryState.copy(
-                    sourceLoading = false,
-                    sourceError = result.message,
-                    failedSourceIds = secondaryState.failedSourceIds + candidate.id,
-                )
-                is ManualResolutionResult.Failed -> secondaryState = secondaryState.copy(
-                    sourceLoading = false,
-                    sourceError = result.message,
-                    failedSourceIds = secondaryState.failedSourceIds + candidate.id,
-                )
+                is ManualResolutionResult.Unavailable -> {
+                    val restoreEpisodes = episodeHandoffPreparing
+                    episodeHandoffPreparing = false
+                    secondaryState = secondaryState.copy(
+                        panel = if (restoreEpisodes) PlayerSecondaryPanel.EPISODES else secondaryState.panel,
+                        sourceLoading = false,
+                        sourceError = result.message,
+                        failedSourceIds = secondaryState.failedSourceIds + candidate.id,
+                    )
+                }
+                is ManualResolutionResult.Failed -> {
+                    val restoreEpisodes = episodeHandoffPreparing
+                    episodeHandoffPreparing = false
+                    secondaryState = secondaryState.copy(
+                        panel = if (restoreEpisodes) PlayerSecondaryPanel.EPISODES else secondaryState.panel,
+                        sourceLoading = false,
+                        sourceError = result.message,
+                        failedSourceIds = secondaryState.failedSourceIds + candidate.id,
+                    )
+                }
             }
         }
     }
@@ -559,13 +590,9 @@ fun RetainedPlayerHost(
                 // the final checkpoint write on back-press/nav-away races its own scope's
                 // cancellation and can be silently dropped.
                 scope.launch(kotlinx.coroutines.NonCancellable) {
-                    if (finalTimeline.currentPosition <= 0L) {
-                        progressRepository.remove(
-                            contextAtEffectStart.contentId,
-                            contextAtEffectStart.season,
-                            contextAtEffectStart.episode,
-                        )
-                    } else {
+                    // Never remove on dispose when position is 0 — that races teardown/timeline
+                    // reset and drops Continue Watching right after Back. Only persist forward.
+                    if (finalTimeline.currentPosition > 0L) {
                         progressRepository.save(
                             PlaybackCheckpoint(
                                 contentId = contextAtEffectStart.contentId,
@@ -590,6 +617,7 @@ fun RetainedPlayerHost(
         }
     }
 
+    Box(modifier = Modifier.fillMaxSize()) {
     PlayerScreen(
         viewModel = viewModel,
         onBackPress = { _, _, _, _, _ -> onBack() },
@@ -698,4 +726,32 @@ fun RetainedPlayerHost(
         },
         playbackPositionMs = timeline.currentPosition,
     )
+        if (episodeHandoffPreparing) {
+            BackHandler {
+                secondaryJob?.cancel()
+                episodeHandoffPreparing = false
+                openEpisodes()
+            }
+            val backFocus = remember { FocusRequester() }
+            LaunchedEffect(Unit) {
+                runCatching { backFocus.requestFocus() }
+            }
+            PlayPreparingSurface(
+                artUrl = episodeHandoffArtUrl,
+                title = episodeHandoffTitle.ifBlank { title },
+                statusMessage = "Finding a playable stream...",
+                showChooser = false,
+                onChooseSource = {},
+                onBack = {
+                    secondaryJob?.cancel()
+                    episodeHandoffPreparing = false
+                    openEpisodes()
+                },
+                backFocusRequester = backFocus,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .zIndex(20f),
+            )
+        }
+    }
 }

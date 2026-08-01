@@ -8,8 +8,28 @@ object StreamPresentation {
         val size = candidate.videoSizeBytes?.takeIf { it > 0L }?.let(::formatFileSize)
         val seeds = candidate.seeders?.takeIf { it > 0 }?.let { "$it seeds" }
         val source = candidate.sourceLabel.takeIf { it.isNotBlank() }
-        val detail = candidate.detailLabel?.takeIf { it.isNotBlank() && it != candidate.title }
-        return listOfNotNull(source, size, seeds, detail).joinToString(" · ")
+        val language = languageHint(candidate)
+        val detail = candidate.detailLabel
+            ?.takeIf { it.isNotBlank() && it != candidate.title }
+            ?.takeIf { language == null || !it.contains(language, ignoreCase = true) }
+        return listOfNotNull(source, size, seeds, language, detail).joinToString(" · ")
+    }
+
+    /** Best-effort language / audio tag from title/detail for Sources rows. */
+    fun languageHint(candidate: StreamCandidate): String? {
+        val text = buildString {
+            append(candidate.title)
+            append(' ')
+            append(candidate.detailLabel.orEmpty())
+        }
+        return when {
+            Regex("\\bdual[- ]?audio\\b", RegexOption.IGNORE_CASE).containsMatchIn(text) -> "Dual Audio"
+            Regex("\\bmulti[- ]?(?:audio|sub)", RegexOption.IGNORE_CASE).containsMatchIn(text) -> "Multi"
+            Regex("\\beng(?:lish)?\\b", RegexOption.IGNORE_CASE).containsMatchIn(text) -> "Eng"
+            Regex("\\b(?:esp|spa|spanish|latino)\\b", RegexOption.IGNORE_CASE).containsMatchIn(text) -> "Esp"
+            Regex("\\bjpn|japanese\\b", RegexOption.IGNORE_CASE).containsMatchIn(text) -> "Jpn"
+            else -> null
+        }
     }
 
     fun cacheLabel(state: StreamCacheState): String? = when (state) {

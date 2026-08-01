@@ -57,11 +57,8 @@ fun SettingsScreen(
         when (category) {
             SettingsCategory.Account -> AccountSettings(facade, onSignedOut, onOpenAuth)
             SettingsCategory.Profiles -> ProfilesSettings(profileState, onOpenProfiles)
-            SettingsCategory.Layout -> LayoutSettings(facade, homeSettings, profileState, onHideUnreleasedChanged, onRememberProfileChanged)
+            SettingsCategory.Layout -> LayoutSettings(homeSettings, profileState, onHideUnreleasedChanged, onRememberProfileChanged)
             SettingsCategory.ContentDiscovery -> ContentDiscoverySettings(
-                tmdb = tmdb,
-                onTmdbEnabled = { scope.launch { facade.setTmdbEnabled(it) } },
-                onTmdbEnrichContinueWatching = { scope.launch { facade.setTmdbEnrichContinueWatching(it) } },
                 addons = addons,
                 debridConnected = debridConnection.activeService != null ||
                     debridConnection.configuredServices.isNotEmpty(),
@@ -83,7 +80,6 @@ fun SettingsScreen(
             SettingsCategory.Display -> DisplaySettings(facade, player, scope)
             SettingsCategory.Subtitles -> SubtitleSettings(facade, player, scope)
             SettingsCategory.Audio -> AudioSettings(facade, player, scope)
-            SettingsCategory.Advanced -> AdvancedSettings(player)
             SettingsCategory.About -> AboutSettings()
         }
     }

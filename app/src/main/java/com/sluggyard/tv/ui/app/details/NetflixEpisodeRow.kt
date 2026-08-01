@@ -1,11 +1,10 @@
 package com.sluggyard.tv.ui.app.details
 
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.focusable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,6 +21,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -29,8 +29,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -41,11 +45,16 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.sluggyard.tv.ui.design.SlugYardPalette
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * Shared Netflix-style episode row used by player More Episodes and View Details.
+ *
+ * TV remotes: [clickable] already owns focus — do not stack a second `.focusable()`.
+ * Long-press (mark watched) uses the same D-pad KeyDown timer path as Home posters.
  */
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun NetflixEpisodeRow(
     episode: DetailsEpisode,
@@ -56,16 +65,15 @@ fun NetflixEpisodeRow(
     onLongClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
-    var focused by remember(episode.id) { mutableStateOf(false) }
+    val interactions = remember { MutableInteractionSource() }
+    val focused by interactions.collectIsFocusedAsState()
+    val scope = rememberCoroutineScope()
+    var longPressJob by remember { mutableStateOf<Job?>(null) }
+    var longPressFired by remember { mutableStateOf(false) }
     val displayTitle = remember(episode.id, episode.title, episode.description, episode.displayNumber) {
         episode.resolvedDisplayTitle()
     }
     val thumbShape = RoundedCornerShape(8.dp)
-    val interaction = if (onLongClick != null) {
-        Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)
-    } else {
-        Modifier.clickable(onClick = onClick)
-    }
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -74,7 +82,6 @@ fun NetflixEpisodeRow(
                 upFocusRequester?.let { up = it }
                 downFocusRequester?.let { down = it }
             }
-            .onFocusChanged { focused = it.isFocused }
             .semantics {
                 contentDescription = buildString {
                     append("Episode ${episode.displayNumber}: $displayTitle")
@@ -90,8 +97,51 @@ fun NetflixEpisodeRow(
                 }
                 role = Role.Button
             }
-            .focusable()
-            .then(interaction)
+            .then(
+                if (onLongClick != null) {
+                    Modifier.onPreviewKeyEvent { event ->
+                        val isSelectKey = event.key == Key.DirectionCenter ||
+                            event.key == Key.Enter ||
+                            event.key == Key.NumPadEnter
+                        when {
+                            event.type == KeyEventType.KeyDown && event.key == Key.Menu -> {
+                                onLongClick()
+                                true
+                            }
+                            isSelectKey && event.type == KeyEventType.KeyDown -> {
+                                if (longPressJob == null) {
+                                    longPressFired = false
+                                    longPressJob = scope.launch {
+                                        delay(750)
+                                        longPressFired = true
+                                        onLongClick()
+                                    }
+                                }
+                                true
+                            }
+                            isSelectKey && event.type == KeyEventType.KeyUp -> {
+                                longPressJob?.cancel()
+                                longPressJob = null
+                                if (longPressFired) {
+                                    longPressFired = false
+                                    true
+                                } else {
+                                    onClick()
+                                    true
+                                }
+                            }
+                            else -> false
+                        }
+                    }
+                } else {
+                    Modifier
+                },
+            )
+            .clickable(
+                interactionSource = interactions,
+                indication = null,
+                onClick = onClick,
+            )
             .padding(vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(18.dp),
         verticalAlignment = Alignment.Top,
