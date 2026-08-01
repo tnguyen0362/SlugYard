@@ -50,7 +50,7 @@ internal fun PlayerRuntimeController.attachMpvView(view: MpvPlayerSurfaceView?) 
         view.setPaused(false)
         applyPendingMpvSeekIfNeeded(view)
         hasRenderedFirstFrame = false
-        mpvTrackDiscoveryDeadlineElapsedMs = android.os.SystemClock.elapsedRealtime() + 6_000L
+        resetMpvTrackDiscoveryWindow()
         _uiState.update {
             it.copy(
                 isBuffering = true,
@@ -121,7 +121,7 @@ internal fun PlayerRuntimeController.initializeMpvPlayer(
         playbackAnalyticsDiagnostics.setStartupStartPosition(initialResumePosition)
         // The MPV surface is retained across episode changes; reset the bounded
         // discovery window on every load, not only when the surface attaches.
-        mpvTrackDiscoveryDeadlineElapsedMs = android.os.SystemClock.elapsedRealtime() + 6_000L
+        resetMpvTrackDiscoveryWindow()
         view.setMedia(url, headers, initialResumePosition)
         playbackAnalyticsDiagnostics.recordRawEventLine(
             "PLAYER_INIT: engine=MPV host=${url.safeMpvTraceHost()} " +
@@ -292,6 +292,16 @@ internal fun PlayerRuntimeController.updateMpvAvailableTracks() {
     }
 }
 
+/** Initial discovery window: covers typical local/cached loads before first frame. */
+private const val MPV_TRACK_DISCOVERY_INITIAL_WINDOW_MS = 15_000L
+
+internal fun PlayerRuntimeController.resetMpvTrackDiscoveryWindow() {
+    val now = android.os.SystemClock.elapsedRealtime()
+    mpvTrackDiscoveryStartedElapsedMs = now
+    mpvTrackDiscoveryDeadlineElapsedMs = now + MPV_TRACK_DISCOVERY_INITIAL_WINDOW_MS
+    hasScannedTextTracksOnce = false
+}
+
 private fun PlayerRuntimeController.applyMpvTrackSnapshot(snapshot: MpvTrackSnapshot) {
     val switchPending = pendingEngineSwitchTrackPreference
         ?.takeIf { it.streamUrl == currentStreamUrl && it.sourceEngine == InternalPlayerEngine.EXOPLAYER }
@@ -303,7 +313,33 @@ private fun PlayerRuntimeController.applyMpvTrackSnapshot(snapshot: MpvTrackSnap
             "selectedSubtitleId=${snapshot.subtitleTracks.firstOrNull { it.isSelected }?.id}"
     )
 
-    val audioTracks = snapshot.audioTracks.mapIndexed { index, track ->
+    val previouslyEmptyInternalSubs = _uiState.value.subtitleTracks.isEmpty()
+    var effectiveSnapshot = snapshot
+
+    // Late track discovery: MPV may already be painting softsubs via slang/sid=auto
+    // while preferAss never got a second chance after the early empty retries.
+    if (previouslyEmptyInternalSubs &&
+        snapshot.subtitleTracks.any { !it.isExternal } &&
+        !subtitleDisabledByPersistedPreference &&
+        rememberedTrackPreference?.subtitle !is PlayerRuntimeController.RememberedSubtitleSelection.Disabled
+    ) {
+        val preferAss = shouldPreferAssSubtitles()
+        if (preferAss || _uiState.value.selectedSubtitleTrackIndex < 0) {
+            Log.d(
+                PlayerRuntimeController.TAG,
+                "MPV_TRACKS: late discovery re-applying subtitle prefs " +
+                    "embedded=${snapshot.subtitleTracks.count { !it.isExternal }} preferAss=$preferAss"
+            )
+            mpvView?.applySubtitleLanguagePreferences(
+                preferred = _uiState.value.subtitleStyle.preferredLanguage,
+                secondary = _uiState.value.subtitleStyle.secondaryPreferredLanguage,
+                preferAss = preferAss,
+            )
+            effectiveSnapshot = mpvView?.readTrackSnapshot() ?: snapshot
+        }
+    }
+
+    val audioTracks = effectiveSnapshot.audioTracks.mapIndexed { index, track ->
         val codecSuffix = buildList {
             track.codec?.takeIf { it.isNotBlank() }?.let { add(it) }
             track.channelCount?.takeIf { it > 0 }?.let { add("${it}ch") }
@@ -320,7 +356,7 @@ private fun PlayerRuntimeController.applyMpvTrackSnapshot(snapshot: MpvTrackSnap
         )
     }
 
-    val internalSubtitleTracks = snapshot.subtitleTracks
+    val internalSubtitleTracks = effectiveSnapshot.subtitleTracks
         .filterNot { it.isExternal }
         .mapIndexed { index, track ->
             TrackInfo(
@@ -337,7 +373,7 @@ private fun PlayerRuntimeController.applyMpvTrackSnapshot(snapshot: MpvTrackSnap
 
     val selectedAudioIndex = audioTracks.indexOfFirst { it.isSelected }
     val selectedSubtitleIndex = internalSubtitleTracks.indexOfFirst { it.isSelected }
-    val selectedExternalSubtitleTrack = snapshot.subtitleTracks.firstOrNull { it.isExternal && it.isSelected }
+    val selectedExternalSubtitleTrack = effectiveSnapshot.subtitleTracks.firstOrNull { it.isExternal && it.isSelected }
     val selectedExternalSubtitle = selectedExternalSubtitleTrack != null
     logSwitchTrace(
         stage = "mpv-snapshot-mapped",
@@ -346,7 +382,23 @@ private fun PlayerRuntimeController.applyMpvTrackSnapshot(snapshot: MpvTrackSnap
             "mappedInternalSubtitleCount=${internalSubtitleTracks.size}"
     )
 
-    if (internalSubtitleTracks.isNotEmpty() || hasRenderedFirstFrame) {
+    if (internalSubtitleTracks.isNotEmpty()) {
+        hasScannedTextTracksOnce = true
+        if (previouslyEmptyInternalSubs) {
+            Log.d(
+                PlayerRuntimeController.TAG,
+                "MPV_TRACKS: embedded subs ready count=${internalSubtitleTracks.size} " +
+                    "selectedIndex=$selectedSubtitleIndex " +
+                    "details=[${internalSubtitleTracks.joinToString(" | ") { 
+                        "id=${it.trackId} lang=${it.language} codec=${it.codec} sel=${it.isSelected}" 
+                    }}]"
+            )
+        }
+    } else if (hasRenderedFirstFrame &&
+        android.os.SystemClock.elapsedRealtime() > mpvTrackDiscoveryDeadlineElapsedMs
+    ) {
+        // Past the discovery window with first frame and still no embedded subs —
+        // allow AUTO_SUB to fall through to addon tracks.
         hasScannedTextTracksOnce = true
     }
     maybeRestorePendingAudioSelectionAfterSubtitleRefresh(audioTracks)

@@ -779,11 +779,12 @@ class MpvPlayerSurfaceView @JvmOverloads constructor(
         private const val ASPECT_RETRY_DELAY_MS = 120L
         private const val MAX_ASPECT_RETRY_COUNT = 10
         // Embedded subtitle tracks often appear after the Matroska index has
-        // been read. Keep trying for the short startup window instead of
-        // selecting once before the ASS track exists and silently leaving
-        // subtitles off.
+        // been read — and on debrid that can land several seconds after loadfile.
+        // Keep trying well past the early empty window so preferAss can still
+        // land once ASS tracks exist, instead of leaving sid=auto while the UI
+        // still thinks subtitles are Off.
         private const val SUBTITLE_SELECTION_RETRY_DELAY_MS = 500L
-        private const val SUBTITLE_SELECTION_RETRY_COUNT = 8
+        private const val SUBTITLE_SELECTION_RETRY_COUNT = 40
         private const val SUBTITLE_VERTICAL_OFFSET_MIN = -20
         private const val SUBTITLE_VERTICAL_OFFSET_MAX = 50
         /** Normal TV resting place at 0% (~5% above absolute bottom). */

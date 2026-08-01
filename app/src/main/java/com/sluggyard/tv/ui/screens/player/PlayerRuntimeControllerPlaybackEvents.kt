@@ -51,6 +51,13 @@ private const val EXO_PROGRESS_INTERVAL_MS = 500L
 private const val MPV_STARTUP_PROGRESS_INTERVAL_MS = 750L
 /** Progress loop cadence for libmpv after the first frame renders. */
 private const val MPV_STEADY_PROGRESS_INTERVAL_MS = 1_000L
+/**
+ * Extra discovery time after first frame. Debrid/MKV loads often emit `file-loaded`
+ * (and therefore track-list) only after first decode, past the initial window.
+ */
+private const val MPV_TRACK_DISCOVERY_AFTER_FIRST_FRAME_MS = 12_000L
+/** Hard ceiling so we never JNI-scan track-list for an entire film. */
+private const val MPV_TRACK_DISCOVERY_ABSOLUTE_MAX_MS = 45_000L
 /** Tolerance used when detecting playback completion against the duration. */
 private const val ENDED_TOLERANCE_MS = 500L
 /** Resume-from-pause seeks back this far to avoid re-playing a just-heard beat. */
@@ -200,6 +207,13 @@ private fun PlayerRuntimeController.sampleMpvProgress() {
         firstFrameReady = pos > 0L || (playingNow && !cacheBuffering && duration > 0L)
         if (firstFrameReady) {
             hasRenderedFirstFrame = true
+            // Debrid MKV track-list often lands at/after first decode. Keep polling
+            // past the initial window so UI state can catch ASS/softsubs MPV already paints.
+            val extendedDeadline =
+                android.os.SystemClock.elapsedRealtime() + MPV_TRACK_DISCOVERY_AFTER_FIRST_FRAME_MS
+            if (extendedDeadline > mpvTrackDiscoveryDeadlineElapsedMs) {
+                mpvTrackDiscoveryDeadlineElapsedMs = extendedDeadline
+            }
             val clickToFirstFrameMs = launchStartedAtElapsedMs
                 ?.let { (android.os.SystemClock.elapsedRealtime() - it).coerceAtLeast(0L) }
                 ?: -1L
@@ -234,10 +248,10 @@ private fun PlayerRuntimeController.sampleMpvProgress() {
             playbackEnded = ended
         )
     }
-    // Tracks arrive shortly after loadfile. Refresh only in a bounded discovery
-    // window; explicit audio/subtitle actions still request an immediate
-    // snapshot when the user opens a track picker.
-    if (android.os.SystemClock.elapsedRealtime() <= mpvTrackDiscoveryDeadlineElapsedMs) {
+    // Tracks arrive after loadfile / first decode. Keep refreshing until we have
+    // observed embedded tracks (or the absolute ceiling), not only the initial window —
+    // otherwise UI stays on "Off" while libmpv still renders softsubs.
+    if (shouldRefreshMpvTrackDiscovery()) {
         updateMpvAvailableTracks()
     }
     updateActiveSkipInterval(pos)
@@ -247,6 +261,19 @@ private fun PlayerRuntimeController.sampleMpvProgress() {
         saveWatchProgress()
         resetPostPlayStateAfterPlaybackEnded()
     }
+}
+
+private fun PlayerRuntimeController.shouldRefreshMpvTrackDiscovery(): Boolean {
+    val now = android.os.SystemClock.elapsedRealtime()
+    if (now <= mpvTrackDiscoveryDeadlineElapsedMs) return true
+    if (hasScannedTextTracksOnce) return false
+    val startedAt = mpvTrackDiscoveryStartedElapsedMs
+    if (startedAt <= 0L) return false
+    if (now <= startedAt + MPV_TRACK_DISCOVERY_ABSOLUTE_MAX_MS) return true
+    // Absolute ceiling: treat as scanned so AUTO_SUB can fall through to addons.
+    hasScannedTextTracksOnce = true
+    tryAutoSelectPreferredSubtitleFromAvailableTracks()
+    return false
 }
 
 /** Single ExoPlayer progress sample: timeline, torrent rebuffer, periodic buffer log. */
@@ -1287,6 +1314,7 @@ private fun PlayerRuntimeController.handleToggleControls() {
 }
 
 private fun PlayerRuntimeController.showAudioOverlay() {
+    if (isUsingMpvEngine()) updateMpvAvailableTracks()
     _uiState.update {
         it.copy(
             showAudioOverlay = true,
@@ -1301,6 +1329,9 @@ private fun PlayerRuntimeController.showAudioOverlay() {
 }
 
 private fun PlayerRuntimeController.showSubtitleOverlay() {
+    // MPV may have selected an embedded ASS track under the hood after discovery;
+    // refresh so the picker / "Off" chip match what is painted on screen.
+    if (isUsingMpvEngine()) updateMpvAvailableTracks()
     _uiState.update {
         it.copy(
             showSubtitleOverlay = true,

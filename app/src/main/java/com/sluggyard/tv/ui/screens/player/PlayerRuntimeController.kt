@@ -463,6 +463,8 @@ class PlayerRuntimeController(
     internal var mpvTrackRefreshInProgress: Boolean = false
     /** MPV exposes tracks asynchronously; poll briefly during startup, never for the whole film. */
     internal var mpvTrackDiscoveryDeadlineElapsedMs: Long = 0L
+    /** When the current MPV discovery window started (elapsedRealtime). */
+    internal var mpvTrackDiscoveryStartedElapsedMs: Long = 0L
     internal var pendingMpvHardRestartOnNextAttach: Boolean = false
     internal var delayMpvResumeSeekUntilVideoTrack: Boolean = false
     internal var mpvDelayStartAfterAfrSwitch: Boolean = false
