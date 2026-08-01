@@ -88,7 +88,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
-        window.setBackgroundDrawable(null)
+        // Keep an opaque canvas behind Compose so the launcher never shows through as a
+        // "logo on transparent" frame while boot/auth/profile gates settle.
+        window.setBackgroundDrawableResource(R.color.splash_background)
 
         window.decorView.post {
             val capabilities = com.sluggyard.tv.core.player.DisplayCapabilities.detect(this)

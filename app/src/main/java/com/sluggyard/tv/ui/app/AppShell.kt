@@ -714,7 +714,9 @@ private fun AppContent(
     // Who's watching first; logo heartbeat splash only after a profile is chosen.
     var needsStartupProfilePick by remember(sessionBootKey) { mutableStateOf(true) }
     var homeSplashVisible by remember(sessionBootKey) { mutableStateOf(false) }
-    var homeSplashStartedAt by remember { mutableStateOf(0L) }
+    // Timestamp is owned by the dismiss effect when splash becomes visible — never leave it at
+    // 0 while visible (that used to short-circuit the gate and hang forever after profile pick).
+    var homeSplashStartedAt by remember(sessionBootKey) { mutableStateOf(0L) }
     var watchHubPlatforms by remember { mutableStateOf<List<WatchHubPlatform>>(emptyList()) }
     var watchHubLoading by remember { mutableStateOf(false) }
     var watchHubMessage by remember { mutableStateOf<String?>(null) }
@@ -1102,23 +1104,28 @@ private fun AppContent(
         }
     }
 
-    LaunchedEffect(Unit) {
-        homeSplashStartedAt = System.currentTimeMillis()
-    }
     LaunchedEffect(homeReloadNonce) {
         if (homeReloadNonce > 0) {
             homeSplashVisible = true
-            homeSplashStartedAt = System.currentTimeMillis()
         }
     }
-    LaunchedEffect(catalogState, homeSplashStartedAt, homeReloadNonce) {
-        if (homeSplashStartedAt == 0L) return@LaunchedEffect
+    // Single dismiss gate: start the clock when splash is shown, then leave on catalog settle,
+    // empty-home after the min duration, or the hard max — never hang on a zeroed timestamp.
+    LaunchedEffect(homeSplashVisible, homeReloadNonce) {
+        if (!homeSplashVisible) return@LaunchedEffect
+        val startedAt = System.currentTimeMillis()
+        homeSplashStartedAt = startedAt
         while (homeSplashVisible) {
             val rows = catalogState.rows
             val pending = rows.count { it.loadState is CatalogLoadState.Loading }
-            val elapsed = System.currentTimeMillis() - homeSplashStartedAt
-            // Settled = every row finished loading (Content/Empty/Error), not "must have posters".
-            val catalogsReady = rows.isNotEmpty() && pending == 0
+            val elapsed = System.currentTimeMillis() - startedAt
+            // Settled rows, or still-empty after min (no catalogs / hung request builder).
+            val catalogsReady = when {
+                pending > 0 -> false
+                rows.isNotEmpty() -> true
+                elapsed >= HomeSplashMinDurationMs -> true
+                else -> false
+            }
             if (elapsed >= HomeSplashMinDurationMs && catalogsReady) {
                 homeSplashVisible = false
                 break
@@ -1711,7 +1718,7 @@ private fun AppContent(
                             graph.selectProfile(profile.id)
                             if (needsStartupProfilePick) {
                                 needsStartupProfilePick = false
-                                homeSplashStartedAt = 0L
+                                // Dismiss LaunchedEffect starts the timer when visible flips true.
                                 homeSplashVisible = true
                                 openRoot(RootDestination.Home)
                             } else {
@@ -2075,6 +2082,7 @@ private fun AppContent(
                                 id = com.sluggyard.tv.R.drawable.app_logo_wordmark,
                             ),
                             contentDescription = "SlugYard",
+                            contentScale = androidx.compose.ui.layout.ContentScale.Fit,
                             modifier = Modifier
                                 .fillMaxWidth(0.42f)
                                 .padding(horizontal = 24.dp),
