@@ -22,11 +22,15 @@ class TorboxFileSelector @Inject constructor() {
             "select season=$season episode=$episode requestedIndex=${resolve.fileIdx} " +
                 "files=${files.size} playable=${playable.size}",
         )
-        playable.forEach { file ->
+        // Cap candidate dumps — logging 50+ torrent files per resolve janks leanback boxes.
+        playable.take(8).forEach { file ->
             Log.d(
                 TAG,
                 "candidate id=${file.id} size=${file.size ?: -1} name='${file.displayName().take(180)}'",
             )
+        }
+        if (playable.size > 8) {
+            Log.d(TAG, "candidate … +${playable.size - 8} more")
         }
         if (playable.isEmpty()) return null
 
@@ -46,10 +50,13 @@ class TorboxFileSelector @Inject constructor() {
         }
 
         if (episodePatterns.isNotEmpty()) {
-            playable.firstOrNull { file ->
-                file.displayName().matchesDebridEpisodeFile(targetSeason, targetEpisode)
-            }?.let {
-                Log.d(TAG, "selected method=episode-file patterns=$episodePatterns name='${it.displayName().take(180)}'")
+            playable.bestDebridEpisodeMatch(targetSeason, targetEpisode) { it.displayName() }?.let {
+                Log.d(
+                    TAG,
+                    "selected method=episode-file patterns=$episodePatterns " +
+                        "score=${it.displayName().debridEpisodeMatchScore(targetSeason, targetEpisode)} " +
+                        "name='${it.displayName().take(180)}'",
+                )
                 return it
             }
             if (hasExplicitEpisodeTarget) {
@@ -59,7 +66,7 @@ class TorboxFileSelector @Inject constructor() {
         }
 
         if (season != null && episode != null) {
-            playable.firstOrNull { it.displayName().matchesDebridEpisode(season, episode) }?.let {
+            playable.bestDebridEpisodeMatch(season, episode) { it.displayName() }?.let {
                 Log.d(TAG, "selected method=episode-filename season=$season episode=$episode name='${it.displayName().take(180)}'")
                 return it
             }

@@ -100,6 +100,43 @@ class TorboxFileSelectorTest {
         assertEquals(3, selected?.id)
     }
 
+    @Test
+    fun `does not pick title ending in episode digit over absolute pack number`() {
+        // Regression: S01E04 selected "…028 - Hidden Inventory 4" because bare token "4" matched.
+        val selected = selector.selectFile(
+            files = listOf(
+                file(id = 44, name = "Jujutsu Kaisen - 028 - Hidden Inventory 4.mkv", size = 900),
+                file(id = 12, name = "Jujutsu Kaisen - 004 - Curse Womb Must Die.mkv", size = 800),
+                file(id = 1, name = "Jujutsu Kaisen - 001 - Ryomen Sukuna.mkv", size = 700),
+            ),
+            resolve = resolve(fileIdx = null, season = 1, episode = 4),
+            season = 1,
+            episode = 4,
+        )
+
+        assertEquals(12, selected?.id)
+    }
+
+    @Test
+    fun `prefers listing filename over loose episode digit in title`() {
+        val selected = selector.selectFile(
+            files = listOf(
+                file(id = 44, name = "Jujutsu Kaisen - 028 - Hidden Inventory 4.mkv", size = 900),
+                file(id = 12, name = "Jujutsu Kaisen - 004 - Curse Womb Must Die.mkv", size = 800),
+            ),
+            resolve = resolve(
+                fileIdx = null,
+                season = 1,
+                episode = 4,
+                filename = "Jujutsu Kaisen - 004 - Curse Womb Must Die.mkv",
+            ),
+            season = 1,
+            episode = 4,
+        )
+
+        assertEquals(12, selected?.id)
+    }
+
     private fun file(id: Int, name: String, size: Long): TorboxTorrentFileDto = TorboxTorrentFileDto(
         id = id,
         name = name,
@@ -111,7 +148,9 @@ class TorboxFileSelectorTest {
 
     private fun resolve(
         fileIdx: Int?,
-        filename: String? = null
+        filename: String? = null,
+        season: Int = 1,
+        episode: Int = 2,
     ): StreamClientResolve = StreamClientResolve(
         type = "debrid",
         infoHash = "hash",
@@ -124,8 +163,8 @@ class TorboxFileSelectorTest {
         mediaId = "tt1:1:2",
         mediaOnlyId = "tt1",
         title = "show",
-        season = 1,
-        episode = 2,
+        season = season,
+        episode = episode,
         service = "torbox",
         serviceIndex = 0,
         serviceExtension = null,

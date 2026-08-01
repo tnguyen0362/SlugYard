@@ -50,41 +50,42 @@ class DetailsDataSource(
     private val watchStateSnapshot: suspend () -> LibraryWatchState = { LibraryWatchState() },
     private val resolveMetaContentId: suspend (type: String, id: String) -> String = { _, id -> id },
     /**
-     * Player completion writes WatchedItemsPreferences / progress — not LibraryWatchStore.
-     * Details badges + Play targeting must honor that completion state too.
+     * One-shot (season, episode) completion keys for a show. Must not do per-episode network
+     * or Flow collection — that froze Details on long series ("Getting title details…").
      */
-    private val isEpisodeCompleted: suspend (
-        showId: String,
-        episodeId: String,
-        season: Int,
-        episode: Int,
-    ) -> Boolean = { _, _, _, _ -> false },
+    private val completedEpisodeKeys: suspend (showId: String) -> Set<Pair<Int, Int>> = { emptySet() },
 ) {
     suspend fun load(addonId: String, type: String, id: String): DetailsLoadResult {
+        return kotlinx.coroutines.withTimeoutOrNull(DetailsLoadBudgetMs) {
+            loadWithinBudget(addonId, type, id)
+        } ?: DetailsLoadResult.Unavailable(
+            "Title details took too long to load. Check your connection and try again.",
+        )
+    }
+
+    private suspend fun loadWithinBudget(addonId: String, type: String, id: String): DetailsLoadResult {
         val localState = watchStateSnapshot()
         val registry = registrySnapshot()
-        val metaId = resolveMetaContentId(type, id)
+        val metaId = kotlinx.coroutines.withTimeoutOrNull(MetaIdResolveBudgetMs) {
+            resolveMetaContentId(type, id)
+        } ?: id
         val preferred = registry.enabledAddons.firstOrNull { it.manifest?.id == addonId }
-        val fallbacks = registry.enabledAddons.filter { addon ->
+        val cinemeta = registry.enabledAddons.filter { addon ->
             val manifest = addon.manifest ?: return@filter false
             AddonResource.META in manifest.resources &&
-                (manifest.id.contains("cinemeta", ignoreCase = true) ||
-                    manifest.name.contains("cinemeta", ignoreCase = true) ||
-                    addon.manifestUrl.contains("cinemeta", ignoreCase = true))
+                (
+                    manifest.id.contains("cinemeta", ignoreCase = true) ||
+                        manifest.name.contains("cinemeta", ignoreCase = true) ||
+                        addon.manifestUrl.contains("cinemeta", ignoreCase = true)
+                    )
         }
+        // Preferred origin + Cinemeta only. Walking every META addon (PlayFlix, etc.) with a
+        // 60s OkHttp read timeout made Details look permanently stuck.
         val preferredId = preferred?.manifest?.id
         val candidates = buildList {
-            preferred?.let(::add)
-            addAll(fallbacks.filterNot { it.manifest?.id == preferredId })
-            addAll(
-                registry.enabledAddons.filter {
-                    val mid = it.manifest?.id
-                    AddonResource.META in (it.manifest?.resources.orEmpty()) &&
-                        mid != preferredId &&
-                        fallbacks.none { fb -> fb.manifest?.id == mid }
-                },
-            )
-        }
+            preferred?.takeIf { AddonResource.META in (it.manifest?.resources.orEmpty()) }?.let(::add)
+            addAll(cinemeta.filterNot { it.manifest?.id == preferredId })
+        }.distinctBy { it.manifestUrl }
         if (candidates.isEmpty()) {
             return DetailsLoadResult.Unavailable("No metadata source is available")
         }
@@ -97,7 +98,12 @@ class DetailsDataSource(
         for (addon in candidates) {
             val resources = addon.manifest?.resources.orEmpty()
             if (AddonResource.META !in resources) continue
-            val response = gateway.fetchMeta(addon.configuredManifestUrl ?: addon.manifestUrl, type, metaId)
+            val response = kotlinx.coroutines.withTimeoutOrNull(MetaFetchBudgetMs) {
+                gateway.fetchMeta(addon.configuredManifestUrl ?: addon.manifestUrl, type, metaId)
+            } ?: run {
+                lastFailure = "The addon timed out loading title metadata"
+                continue
+            }
             val metadata = when (response) {
                 is AddonTransportResult.Success -> when (val decoded = StremioMetadataDecoder.decode(response.value)) {
                     is AddonTransportResult.Success -> decoded.value
@@ -119,6 +125,9 @@ class DetailsDataSource(
                     continue
                 }
             }
+            val completedKeys = kotlinx.coroutines.withTimeoutOrNull(WatchedLookupBudgetMs) {
+                completedEpisodeKeys(metadata.id)
+            }.orEmpty()
             val seasons = metadata.episodes
                 .filter { it.season != null && it.episode != null }
                 .groupBy { it.season!! }
@@ -126,12 +135,12 @@ class DetailsDataSource(
                 .map { (season, episodes) ->
                     DetailsSeason(
                         number = season,
-                        episodes = episodes.sortedBy { it.episode }.mapIndexed { index, episode ->
+                        episodes = episodes.sortedBy { it.episode }.map { episode ->
                             val seasonNumber = season
                             val episodeNumber = episode.episode!!
                             val episodeId = episode.id
                             val watched = episodeId in localState.watchedIds ||
-                                isEpisodeCompleted(metadata.id, episodeId, seasonNumber, episodeNumber)
+                                (seasonNumber to episodeNumber) in completedKeys
                             DetailsEpisode(
                                 id = episodeId,
                                 number = episodeNumber,
@@ -148,11 +157,15 @@ class DetailsDataSource(
                         fullyWatched = episodes.all { ep ->
                             val episodeNumber = ep.episode!!
                             ep.id in localState.watchedIds ||
-                                isEpisodeCompleted(metadata.id, ep.id, season, episodeNumber)
+                                (season to episodeNumber) in completedKeys
                         },
                     )
                 }
                 .regularSeasonsThenSpecials(DetailsSeason::number)
+            // WatchHub "where to watch" must not gate the Details chrome — bound it tightly.
+            val availability = kotlinx.coroutines.withTimeoutOrNull(WatchHubBudgetMs) {
+                loadWatchHubAvailability(registry, type, metaId)
+            }.orEmpty()
             return DetailsLoadResult.Ready(
                 DetailsState(
                     id = metadata.id,
@@ -172,7 +185,7 @@ class DetailsDataSource(
                     cast = metadata.cast.map { it.unescapeHtmlEntities() },
                     directors = metadata.directors.map { it.unescapeHtmlEntities() },
                     imdbRating = metadata.imdbRating?.takeIf(String::isNotBlank),
-                    availability = loadWatchHubAvailability(registry, type, id),
+                    availability = availability,
                     inLibrary = metadata.id in localState.libraryIds,
                     isSeries = metadata.type == "series",
                     seasons = seasons,
@@ -216,5 +229,13 @@ class DetailsDataSource(
             .map { it.replace(Regex("\\s+"), " ").trim() }
             .distinct()
             .take(8)
+    }
+
+    private companion object {
+        const val DetailsLoadBudgetMs = 12_000L
+        const val MetaIdResolveBudgetMs = 4_000L
+        const val MetaFetchBudgetMs = 8_000L
+        const val WatchHubBudgetMs = 2_500L
+        const val WatchedLookupBudgetMs = 2_000L
     }
 }

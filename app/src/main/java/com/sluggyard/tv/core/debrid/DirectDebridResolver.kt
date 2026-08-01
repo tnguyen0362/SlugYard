@@ -228,7 +228,15 @@ class DirectDebridResolver @Inject constructor(
                 magnetUri = magnet,
                 sources = stream.sources,
                 torrentName = stream.title ?: stream.name,
-                filename = stream.behaviorHints?.filename,
+                // Prefer the listing's concrete episode file name so TorBox/RD pick "004"
+                // instead of guessing from season/episode tokens alone.
+                filename = stream.behaviorHints?.filename?.takeIf { it.isNotBlank() }
+                    ?: stream.title?.takeIf { hint ->
+                        hint.contains('.') || hint.contains(" - ")
+                    }
+                    ?: stream.name?.takeIf { hint ->
+                        hint.contains('.') || hint.contains(" - ")
+                    },
                 mediaType = null,
                 mediaId = null,
                 mediaOnlyId = null,
