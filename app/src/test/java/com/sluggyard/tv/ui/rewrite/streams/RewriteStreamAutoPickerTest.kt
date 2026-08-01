@@ -274,6 +274,7 @@ class RewriteStreamAutoPickerTest {
         )
 
         assertEquals(soft, selectRewriteAutoPlayCandidate(groups(raw, soft), context))
+        assertEquals(4, RewriteStreamScoringEngine.rank(soft, context).softsubFit)
     }
 
     @Test
@@ -419,7 +420,7 @@ class RewriteStreamAutoPickerTest {
             preferredSubtitleLanguage = "en",
         )
         assertEquals(soft, selectRewriteAutoPlayCandidate(groups(spanish, soft), context))
-        assertTrue(RewriteStreamScoringEngine.rank(soft, context).softsubFit >= 2)
+        assertTrue(RewriteStreamScoringEngine.rank(soft, context).softsubFit >= 4)
     }
 
     @Test

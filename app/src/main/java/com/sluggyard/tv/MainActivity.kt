@@ -22,6 +22,7 @@ import com.sluggyard.tv.ui.rewrite.RewriteAppGraph
 import com.sluggyard.tv.ui.rewrite.RewriteAppShell
 import com.sluggyard.tv.ui.rewrite.data.RewriteLibraryWatchRepository
 import com.sluggyard.tv.ui.rewrite.settings.RewriteSettingsFacade
+import com.sluggyard.tv.domain.repository.WatchProgressRepository
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 import javax.inject.Named
@@ -96,6 +97,9 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var traktAuthService: com.sluggyard.tv.data.repository.TraktAuthService
 
+    @Inject
+    lateinit var watchProgressRepository: WatchProgressRepository
+
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
@@ -152,6 +156,7 @@ class MainActivity : ComponentActivity() {
                     auth = auth,
                     sessions = sessions,
                     settingsFacade = settingsFacade,
+                    watchProgressRepository = watchProgressRepository,
                     modifier = Modifier.fillMaxSize(),
                 )
             }

@@ -180,7 +180,7 @@ internal object RewriteStreamScoringEngine {
 
     /**
      * SoftsubFit (higher better):
-     * 4 preferred-lang + ASS/SSA (styled softsubs — preferred over plain SRT for anime)
+     * 4 preferred-lang + ASS/SSA, or known ASS-tier fansub group (SubsPlease, …)
      * 3 preferred-lang match (e.g. Eng Sub / Eng SRT when preferred is en)
      * 2 softsub / multi-subs without an explicit preferred-lang tag
      * 1 none / conflicting language (Spanish ASS / A&C when preferred is en)
@@ -197,9 +197,10 @@ internal object RewriteStreamScoringEngine {
     private fun trackSignals(text: String, context: Context, kind: ContentKind): TrackSignals {
         val preferred = normalizePreferredSubtitle(context.preferredSubtitleLanguage)
         val softsub = isLikelySoftsubRelease(text)
+        val knownAssTierGroup = isKnownAnimeSoftsubGroup(text)
         val multiSubs = MULTI_SUBS_REGEX.containsMatchIn(text)
         val explicitSub = EXPLICIT_SUB_REGEX.containsMatchIn(text) || textHasBracketLanguageTag(text)
-        val assFormat = ASS_SOFTSUB_FORMAT.containsMatchIn(text)
+        val assFormat = ASS_SOFTSUB_FORMAT.containsMatchIn(text) || knownAssTierGroup
         val srtFormat = SRT_SOFTSUB_FORMAT.containsMatchIn(text)
         val hasSoftSignal = softsub || multiSubs || explicitSub || assFormat || srtFormat
         val dualAudio = DUAL_AUDIO_REGEX.containsMatchIn(text)
@@ -213,9 +214,12 @@ internal object RewriteStreamScoringEngine {
             conflictingLang -> 1
             // AnimeTosho-style Eng ASS must beat Eng SRT / plain "English Subs" when both
             // match the preference — SRT is often dialogue-only dumps with no styling.
+            // Known fansub groups (SubsPlease, Erai-raws, …) ship ASS without saying "ASS".
             hasSoftSignal && hasPreferred && assFormat -> 4
             hasSoftSignal && hasPreferred -> 3
             hasSoftSignal && preferred == null && assFormat -> 4
+            // Preferred lang set but unmarked (SubsPlease with preferred=en): still ASS-tier.
+            hasSoftSignal && knownAssTierGroup -> 4
             hasSoftSignal && preferred == null && (multiSubs || softsub || srtFormat) -> 3
             hasSoftSignal -> 2
             else -> 1
@@ -317,13 +321,17 @@ internal object RewriteStreamScoringEngine {
 
     private fun isLikelySoftsubRelease(text: String): Boolean {
         if (SOFTSUB_KEYWORD.containsMatchIn(text)) return true
-        return ANIME_SOFTSUB_GROUPS.any { group ->
+        return isKnownAnimeSoftsubGroup(text)
+    }
+
+    /** Fansub groups that ship styled ASS without putting "ASS" in the release name. */
+    private fun isKnownAnimeSoftsubGroup(text: String): Boolean =
+        ANIME_SOFTSUB_GROUPS.any { group ->
             Regex("""[\[(]${Regex.escape(group)}[\])]""").containsMatchIn(text) ||
                 (group.length >= 5 &&
                     Regex("""(?:^|[\s._-])${Regex.escape(group)}(?:$|[\s._-])""")
                         .containsMatchIn(text))
         }
-    }
 
     private fun isLikelyAvc10BitSoftwareDecode(text: String): Boolean {
         if (Regex("\\bhi10p?\\b").containsMatchIn(text)) return true

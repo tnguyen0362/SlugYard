@@ -30,7 +30,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -125,7 +124,9 @@ fun RewritePlayerSecondaryOverlayV2(
         RewritePlayerSecondaryPanel.EPISODES -> state.episodes.isNotEmpty()
         RewritePlayerSecondaryPanel.HIDDEN -> false
     }
-    LaunchedEffect(state.panel, hasFirstContent, state.sourceLoading, state.episodeLoading) {
+    // Only seed focus when the panel / first content appears — not on every
+    // sourceLoading flip or ranked-list refresh (that stole D-pad scroll).
+    LaunchedEffect(state.panel, hasFirstContent) {
         if (hasFirstContent) firstFocusRequester.requestRewritePlayerFocus()
         else refreshFocusRequester.requestRewritePlayerFocus()
     }
@@ -224,15 +225,19 @@ private fun ColumnScope.SourceContent(
         }
     }
 
-    val candidates by produceState(
-        emptyList<RewriteStreamCandidate>(),
+    // Keep the last ranked list visible while re-ranking. produceState(emptyList, keys…)
+    // resets to [] on every sourceGroups emission (titles/cache), which unmounted the
+    // LazyColumn and killed D-pad Up/Down until focus was forcibly re-seeded.
+    var candidates by remember(state.panel) { mutableStateOf<List<RewriteStreamCandidate>>(emptyList()) }
+    LaunchedEffect(
         state.sourceGroups,
         state.selectedSourceAddon,
         state.failedSourceIds,
         state.title,
         state.contentType,
+        state.digitalReleaseStatus,
     ) {
-        value = withContext(Dispatchers.Default) {
+        val next = withContext(Dispatchers.Default) {
             state.sourceGroups
                 .filter { state.selectedSourceAddon == null || it.addonName == state.selectedSourceAddon }
                 .flatMap { group ->
@@ -249,9 +254,10 @@ private fun ColumnScope.SourceContent(
                         ),
                     )
                 }
-            }
+        }
+        candidates = next
     }
-    var firstItemPlaced by remember(state.panel, candidates.firstOrNull()?.id) { mutableStateOf(false) }
+    var seededInitialFocus by remember(state.panel) { mutableStateOf(false) }
     val listState = rememberLazyListState()
     if (candidates.isNotEmpty()) {
         LazyColumn(
@@ -263,15 +269,16 @@ private fun ColumnScope.SourceContent(
                 .focusGroup(),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            itemsIndexed(candidates, key = { index, candidate -> "$index:${candidate.id}" }) { index, candidate ->
+            items(candidates, key = { it.id }) { candidate ->
+                val isFirst = candidate.id == candidates.firstOrNull()?.id
                 StreamCandidateButton(
                     candidate = candidate,
                     onClick = { actions.onSelectSource(candidate) },
-                    focusRequester = if (index == 0) firstFocusRequester else null,
-                    onPlaced = if (index == 0) {
+                    focusRequester = if (isFirst) firstFocusRequester else null,
+                    onPlaced = if (isFirst) {
                         {
-                            if (!firstItemPlaced) {
-                                firstItemPlaced = true
+                            if (!seededInitialFocus) {
+                                seededInitialFocus = true
                                 runCatching { firstFocusRequester.requestFocus() }
                             }
                         }

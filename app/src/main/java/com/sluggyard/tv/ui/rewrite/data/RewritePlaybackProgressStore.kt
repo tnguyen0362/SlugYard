@@ -35,13 +35,20 @@ data class RewritePlaybackCheckpoint(
     val episode: Int? = null,
     val contentGenres: String? = null,
     val contentLanguage: String? = null,
+    /**
+     * Explicit 0..1 progress for Trakt (and similar) entries that only have a percent.
+     * Not persisted — display-only for Home Continue Watching.
+     */
+    val remoteProgressFraction: Double? = null,
 ) {
     val progressFraction: Double?
-        get() = durationMs.takeIf { it > 0 }?.let { positionMs.toDouble() / it }
+        get() = remoteProgressFraction?.coerceIn(0.0, 1.0)
+            ?: durationMs.takeIf { it > 0 }?.let { positionMs.toDouble() / it }
 
     /** Continue Watching membership: percentage threshold or the absolute ~10s floor. */
     val isResumable: Boolean
-        get() = WatchStatePolicy.isStartedButIncomplete(positionMs, durationMs)
+        get() = remoteProgressFraction?.let { it in 0.02..0.90 }
+            ?: WatchStatePolicy.isStartedButIncomplete(positionMs, durationMs)
 }
 
 /** Keep one Continue Watching tile per series while retaining the newest episode checkpoint. */

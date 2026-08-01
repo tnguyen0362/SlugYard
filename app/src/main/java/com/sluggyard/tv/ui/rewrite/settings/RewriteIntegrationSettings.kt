@@ -30,6 +30,7 @@ import com.sluggyard.tv.core.addonprotocol.ManagedAddon
 import com.sluggyard.tv.core.addonprotocol.SlugYardCommunitySourcePolicy
 import com.sluggyard.tv.core.streamresolution.DebridService
 import com.sluggyard.tv.data.local.TraktAuthState
+import com.sluggyard.tv.data.local.WatchProgressSource
 import com.sluggyard.tv.domain.model.TmdbSettings
 import com.sluggyard.tv.ui.rewrite.debrid.RewriteDebridConnection
 import kotlinx.coroutines.launch
@@ -60,8 +61,32 @@ internal fun IntegrationsSettings(
     val debridConnected = debridConnection.activeService != null ||
         debridConnection.configuredServices.isNotEmpty()
 
+    val watchProgressSource by facade.traktSettings.watchProgressSource.collectAsState(
+        initial = WatchProgressSource.TRAKT,
+    )
     RewriteSettingsGroup("Trakt") {
         RewriteValueRow("Connection", if (traktAuth.isAuthenticated) "Connected${traktAuth.username?.let { " as $it" } ?: ""}" else "Not connected")
+        if (traktAuth.isAuthenticated) {
+            RewriteCycleRow(
+                title = "Continue Watching source",
+                value = watchProgressSourceLabel(watchProgressSource),
+                values = listOf(
+                    watchProgressSourceLabel(WatchProgressSource.TRAKT),
+                    watchProgressSourceLabel(WatchProgressSource.SLUGYARD_SYNC),
+                ),
+            ) { label ->
+                val source = when (label) {
+                    watchProgressSourceLabel(WatchProgressSource.SLUGYARD_SYNC) -> WatchProgressSource.SLUGYARD_SYNC
+                    else -> WatchProgressSource.TRAKT
+                }
+                scope.launch { facade.setWatchProgressSource(source) }
+            }
+            Text(
+                "Trakt scrobbling stays active. This only chooses whether Home Continue Watching uses Trakt or SlugYard Sync.",
+                style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+                color = com.sluggyard.tv.ui.design.SlugYardPalette.OnCanvasMuted,
+            )
+        }
         if (!traktAuth.isAuthenticated) {
             RewriteActionRow("Connect with Trakt", "Scan a QR code with your phone to link this device.") {
                 scope.launch { facade.startTraktDeviceAuth().onSuccess { traktCode = it }.onFailure { traktMessage = it.message } }
@@ -302,4 +327,9 @@ private fun RewriteCredentialDialog(
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
+}
+
+internal fun watchProgressSourceLabel(source: WatchProgressSource): String = when (source) {
+    WatchProgressSource.TRAKT -> "Trakt"
+    WatchProgressSource.SLUGYARD_SYNC -> "SlugYard Sync"
 }

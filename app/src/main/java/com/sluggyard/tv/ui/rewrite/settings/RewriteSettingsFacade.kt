@@ -16,6 +16,7 @@ import com.sluggyard.tv.data.local.TraktAuthDataStore
 import com.sluggyard.tv.data.local.TraktAuthState
 import com.sluggyard.tv.data.local.TraktSettingsDataStore
 import com.sluggyard.tv.data.local.MoreLikeThisSourcePreference
+import com.sluggyard.tv.data.local.WatchProgressSource
 import com.sluggyard.tv.data.repository.TraktAuthService
 import com.sluggyard.tv.data.repository.TraktTokenPollResult
 import com.sluggyard.tv.core.logging.ExperimentalDiagnostics
@@ -53,6 +54,7 @@ interface RewriteSettingsFacade {
     suspend fun disconnectTrakt()
 
     suspend fun setMoreLikeThisSource(source: MoreLikeThisSourcePreference)
+    suspend fun setWatchProgressSource(source: WatchProgressSource)
     suspend fun setTmdbEnabled(enabled: Boolean)
     suspend fun setTmdbEnrichContinueWatching(enabled: Boolean)
     suspend fun setMdblistEnabled(enabled: Boolean)
@@ -146,6 +148,9 @@ class DefaultRewriteSettingsFacade @Inject constructor(
 
     override suspend fun setMoreLikeThisSource(source: MoreLikeThisSourcePreference) =
         trackSetting("trakt.more_like_this_source", source) { traktSettings.setMoreLikeThisSource(source) }
+
+    override suspend fun setWatchProgressSource(source: WatchProgressSource) =
+        trackSetting("trakt.watch_progress_source", source) { traktSettings.setWatchProgressSource(source) }
 
     override suspend fun setTmdbEnabled(enabled: Boolean) {
         trackSetting("tmdb.enabled", enabled) { tmdbStore.setEnabled(enabled) }

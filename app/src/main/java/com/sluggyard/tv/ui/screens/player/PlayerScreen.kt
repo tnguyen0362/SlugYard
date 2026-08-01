@@ -169,7 +169,6 @@ fun PlayerScreen(
     val sourceStreamsFocusRequester = remember { FocusRequester() }
     val skipIntroFocusRequester = remember { FocusRequester() }
     var skipButtonActuallyVisible by remember { mutableStateOf(false) }
-    val nextEpisodeFocusRequester = remember { FocusRequester() }
     var subtitleDelayAutoSyncFocused by remember { mutableStateOf(false) }
     var subtitleTimingConsumeNextConfirmKeyUp by remember { mutableStateOf(false) }
     var reportCodeVisible by remember { mutableStateOf(false) }
@@ -425,13 +424,21 @@ fun PlayerScreen(
         uiState.showSpeedDialog,
         isExternalSecondaryOpen,
         shouldConfirmNextEpisodeOnEnd,
+        uiState.activeSkipInterval,
+        uiState.skipIntervalDismissed,
+        uiState.postPlayMode,
     ) {
         if (shouldConfirmNextEpisodeOnEnd) return@LaunchedEffect
+        val skipVisible = uiState.activeSkipInterval != null && !uiState.skipIntervalDismissed
+        val postPlayVisible = uiState.postPlayMode != null
         if (uiState.showControls && !isExternalSecondaryOpen && !uiState.showEpisodesPanel && !uiState.showSourcesPanel &&
             !uiState.showAudioOverlay && !uiState.showSubtitleOverlay &&
             !uiState.showSubtitleStylePanel && !uiState.showSubtitleDelayOverlay &&
             !uiState.showSubtitleTimingDialog &&
-            !uiState.showSpeedDialog
+            !uiState.showSpeedDialog &&
+            // Skip / Up next keep focus while visible — do not yank to play/pause.
+            !skipVisible &&
+            !postPlayVisible
         ) {
             // Wait for AnimatedVisibility animation to complete before focusing play/pause button
             kotlinx.coroutines.delay(250)
@@ -441,10 +448,8 @@ fun PlayerScreen(
                 // Focus requester may not be ready yet
             }
         } else if (!uiState.showControls && !isExternalSecondaryOpen) {
-            // When controls are hidden, let skip intro button take focus if visible
-            val skipVisible = uiState.activeSkipInterval != null && !uiState.skipIntervalDismissed
-            val nextEpisodeVisible = uiState.postPlayMode is PostPlayMode.AutoPlay
-            if (!skipVisible && !nextEpisodeVisible) {
+            // When controls are hidden, let skip / Up next own focus if visible
+            if (!skipVisible && !postPlayVisible) {
                 try {
                     containerFocusRequester.requestFocus()
                 } catch (e: Exception) {
@@ -584,7 +589,8 @@ fun PlayerScreen(
                         uiState.showMoreDialog ||
                         isExternalSecondaryOpen ||
                         shouldConfirmNextEpisodeOnEnd ||
-                        uiState.postPlayMode is PostPlayMode.StillWatching
+                        // Up next / Still watching own OK and L/R — do not map to play/pause or chrome.
+                        uiState.postPlayMode != null
                 if (panelOrDialogOpen) return@onKeyEvent false
 
                 if (keyEvent.nativeKeyEvent.action == KeyEvent.ACTION_UP) {
@@ -617,13 +623,16 @@ fun PlayerScreen(
                     when (keyEvent.nativeKeyEvent.keyCode) {
                         KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> {
                             when {
-                                // With chrome hidden, OK should skip when the prompt is up —
-                                // not toggle play/pause. With chrome visible, the focused
-                                // button (Skip / Not now / transport) owns OK.
+                                // Chrome hidden + skip up: default OK→Skip (seeded focus / container
+                                // fallback). Focused Not now still owns OK via its own clickable
+                                // before this parent handler runs.
                                 skipPromptActive && !uiState.showControls -> {
                                     viewModel.onEvent(PlayerEvent.OnSkipIntro)
                                     true
                                 }
+                                // Chrome visible: focused Skip / Not now / transport owns OK.
+                                // Do not hard-map to Skip (would fight play/pause).
+                                skipPromptActive -> false
                                 !uiState.showControls -> {
                                     viewModel.onEvent(PlayerEvent.OnPlayPause)
                                     true
@@ -633,14 +642,16 @@ fun PlayerScreen(
                         }
                         KeyEvent.KEYCODE_DPAD_LEFT,
                         KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                            if (!uiState.showControls) {
-                                // TV-first: reveal chrome so Left/Right can move focus among
-                                // on-screen controls. Do not seek on every D-pad press.
-                                viewModel.onEvent(PlayerEvent.OnToggleControls)
-                                true
-                            } else {
-                                // Let focus system handle navigation when controls are visible
-                                false
+                            when {
+                                // Skip row owns horizontal nav (Skip ↔ Not now) while visible.
+                                skipPromptActive -> false
+                                !uiState.showControls -> {
+                                    // TV-first: reveal chrome so Left/Right can move focus among
+                                    // on-screen controls. Do not seek on every D-pad press.
+                                    viewModel.onEvent(PlayerEvent.OnToggleControls)
+                                    true
+                                }
+                                else -> false
                             }
                         }
                         KeyEvent.KEYCODE_DPAD_UP -> {
@@ -820,7 +831,13 @@ fun PlayerScreen(
                     }
                 },
                 onContinueStillWatching = { viewModel.onEvent(PlayerEvent.OnStillWatchingContinue) },
-                onDismissStillWatching = { viewModel.onEvent(PlayerEvent.OnDismissStillWatchingPrompt) },
+                onDismiss = {
+                    when (uiState.postPlayMode) {
+                        is PostPlayMode.StillWatching ->
+                            viewModel.onEvent(PlayerEvent.OnDismissStillWatchingPrompt)
+                        else -> viewModel.onEvent(PlayerEvent.OnDismissNextEpisodeCard)
+                    }
+                },
             ),
         )
 
@@ -894,7 +911,7 @@ fun PlayerScreen(
             )
         }
 
-        // Controls overlay
+        // Controls overlay — hidden while Up next / Still watching owns the end card.
         AnimatedVisibility(
             visible = uiState.showControls && uiState.error == null &&
                 !uiState.showLoadingOverlay && !uiState.showPauseOverlay &&
@@ -907,7 +924,7 @@ fun PlayerScreen(
                 !uiState.showAudioOverlay &&
                 !uiState.showSubtitleOverlay &&
                 !uiState.showSpeedDialog &&
-                uiState.postPlayMode !is PostPlayMode.StillWatching,
+                uiState.postPlayMode == null,
             enter = fadeIn(animationSpec = tween(200)),
             exit = fadeOut(animationSpec = tween(200))
         ) {

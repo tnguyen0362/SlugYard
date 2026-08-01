@@ -315,7 +315,8 @@ data class RewritePlayerSkipActions(
 data class RewritePlayerPostPlayActions(
     val onPlayNext: () -> Unit,
     val onContinueStillWatching: () -> Unit,
-    val onDismissStillWatching: () -> Unit,
+    /** Dismiss Up next / Still watching without starting the next episode. */
+    val onDismiss: () -> Unit,
 )
 
 /** Intent-only contract for the rewrite-owned playback diagnostics sheet. */

@@ -45,6 +45,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -171,20 +172,38 @@ private fun rememberRewriteHomeBringIntoViewSpec(): BringIntoViewSpec {
             override val scrollAnimationSpec: AnimationSpec<Float> = tween(durationMillis = 0)
 
             override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
-                val trailingEdge = offset + size
-                // Button-sized targets: never pin toward the top — Home restores the hero via scrollToItem(0).
-                if (size <= 96f) {
-                    return when {
-                        trailingEdge > containerSize - bottomInsetPx ->
-                            trailingEdge - containerSize + bottomInsetPx
-                        else -> 0f
-                    }
-                }
-                return when {
-                    offset < topInsetPx -> offset - topInsetPx
-                    trailingEdge > containerSize - bottomInsetPx -> trailingEdge - containerSize + bottomInsetPx
-                    else -> 0f
-                }
+                return homeCatalogVerticalScrollDistance(
+                    offset = offset,
+                    size = size,
+                    containerSize = containerSize,
+                    topInsetPx = topInsetPx,
+                    bottomInsetPx = bottomInsetPx,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Netflix/TV horizontal rails: pin the focused card near the leading edge so trailing posters
+ * (and their titles) stay visible. LazyList clamps at the ends of the row.
+ *
+ * Applied only inside [RewritePosterRow]'s LazyRow — must not replace the vertical catalog spec.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun rememberRewriteHomeHorizontalBringIntoViewSpec(): BringIntoViewSpec {
+    val density = LocalDensity.current
+    val leadingInsetPx = with(density) { SlugYardTvMetrics.ScreenHorizontalInset.toPx() }
+    return remember(leadingInsetPx) {
+        object : BringIntoViewSpec {
+            override val scrollAnimationSpec: AnimationSpec<Float> = tween(durationMillis = 0)
+
+            override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
+                return homeCatalogHorizontalScrollDistance(
+                    offset = offset,
+                    leadingInsetPx = leadingInsetPx,
+                )
             }
         }
     }
@@ -205,6 +224,44 @@ private const val HomePosterLandscapeAspect = 16f / 9f
 /** Coil decode cap for landscape backdrops (sharp on TV without decoding at full focus px). */
 private const val MaxLandscapeDecodeWidthPx = 1280
 private const val RowBringIntoViewDebounceMs = 120L
+/** Wait for focus to settle before kicking a 1280px landscape decode (fast D-pad). */
+private const val HomeLandscapeFocusSettleMs = 160L
+/** Neighbor portrait warm-cache window after focus settles (leading..trailing). */
+private const val HomePosterPrefetchBehind = 1
+private const val HomePosterPrefetchAhead = 4
+private const val HomePosterPrefetchSettleMs = 90L
+private const val HomePosterRetryMax = 2
+private const val HomePosterRetryDelayMs = 140L
+
+/** Vertical LazyColumn shelf bring-into-view (nav clearance). */
+internal fun homeCatalogVerticalScrollDistance(
+    offset: Float,
+    size: Float,
+    containerSize: Float,
+    topInsetPx: Float,
+    bottomInsetPx: Float,
+): Float {
+    val trailingEdge = offset + size
+    // Button-sized targets: never pin toward the top — Home restores the hero via scrollToItem(0).
+    if (size <= 96f) {
+        return when {
+            trailingEdge > containerSize - bottomInsetPx ->
+                trailingEdge - containerSize + bottomInsetPx
+            else -> 0f
+        }
+    }
+    return when {
+        offset < topInsetPx -> offset - topInsetPx
+        trailingEdge > containerSize - bottomInsetPx -> trailingEdge - containerSize + bottomInsetPx
+        else -> 0f
+    }
+}
+
+/** Horizontal LazyRow focus bring-into-view — leading-edge pin (not trailing / centered). */
+internal fun homeCatalogHorizontalScrollDistance(
+    offset: Float,
+    leadingInsetPx: Float,
+): Float = offset - leadingInsetPx
 
 internal fun heroDownCatalogRowIndex(rowIds: List<String>): Int {
     val continueWatching = rowIds.indexOf("continue_watching")
@@ -866,6 +923,37 @@ private fun RewritePosterRow(
     val rowScope = rememberCoroutineScope()
     var rowBringIntoViewJob by remember { mutableStateOf<Job?>(null) }
     var lastRowBringIntoViewAtMs by remember { mutableStateOf(0L) }
+    var focusedPosterIndex by remember(row.id) { mutableIntStateOf(-1) }
+    val horizontalBringIntoViewSpec = rememberRewriteHomeHorizontalBringIntoViewSpec()
+    val context = LocalContext.current
+    val density = LocalDensity.current
+    val posterPrefetchDecode = remember(density) {
+        with(density) {
+            Size(176.dp.roundToPx().coerceAtLeast(1), 264.dp.roundToPx().coerceAtLeast(1))
+        }
+    }
+    // Warm a few neighbor portraits after focus settles — cheap vs landscape, fills blanks after fling.
+    LaunchedEffect(row.id, focusedPosterIndex, row.posters, posterPrefetchDecode) {
+        val anchor = focusedPosterIndex
+        if (anchor < 0) return@LaunchedEffect
+        delay(HomePosterPrefetchSettleMs)
+        val loader = context.imageLoader
+        val from = (anchor - HomePosterPrefetchBehind).coerceAtLeast(0)
+        val to = (anchor + HomePosterPrefetchAhead).coerceAtMost(row.posters.lastIndex)
+        for (i in from..to) {
+            if (i == anchor) continue
+            val poster = row.posters[i]
+            val url = preferLargePosterUrl(poster.imageUrl) ?: continue
+            loader.enqueue(
+                ImageRequest.Builder(context)
+                    .data(url)
+                    .size(posterPrefetchDecode)
+                    .memoryCacheKey("poster:${poster.id}:$url")
+                    .diskCacheKey("poster:${poster.id}:$url")
+                    .build(),
+            )
+        }
+    }
     Column {
         Column(
             modifier = Modifier.bringIntoViewRequester(rowBringIntoViewRequester),
@@ -879,54 +967,59 @@ private fun RewritePosterRow(
                 fontWeight = FontWeight.Medium,
                 color = Color(0xFFE5E5E5),
             )
-            LazyRow(
-                state = listState,
-                modifier = Modifier.fillMaxWidth(),
-                contentPadding = PaddingValues(
-                    horizontal = SlugYardTvMetrics.ScreenHorizontalInset,
-                    vertical = SlugYardTvMetrics.ShelfRowVerticalPad,
-                ),
-                horizontalArrangement = Arrangement.spacedBy(SlugYardTvMetrics.RowGap),
-            ) {
-                itemsIndexed(row.posters, key = { _, poster -> "${row.id}:${poster.id}" }) { index, poster ->
-                    RewritePosterCard(
-                        poster = poster,
-                        smoothFocusMovement = smoothFocusMovement,
-                        onClick = { onPosterSelected(poster) },
-                        onLongClick = onPosterLongPress?.let { handler -> { handler(poster) } },
-                        episodeLabel = if (row.id == "continue_watching") {
-                            rewriteEpisodeLabel(poster.season, poster.episode)
-                        } else {
-                            null
-                        },
-                        summary = summaryLookup(poster.id) ?: poster.summary,
-                        // Entry requester stays on index 0 for row-to-row landings; every index still
-                        // gets the same vertical FocusRequester exits (LazyRow index-0 Up/Down bug).
-                        focusRequester = if (index == 0) entryFocusRequester else null,
-                        upFocusRequester = upFocusRequester,
-                        downFocusRequester = downFocusRequester,
-                        onFocusUp = onFocusUp,
-                        onFocusDown = onFocusDown,
-                        onPrepareFocusUp = onPrepareFocusUp,
-                        onPrepareFocusDown = onPrepareFocusDown,
-                        onFocusedChanged = { focused ->
-                            if (focused && focusedRowIdState?.value != row.id) {
-                                focusedRowIdState?.value = row.id
-                                rowBringIntoViewJob?.cancel()
-                                rowBringIntoViewJob = rowScope.launch {
-                                    val now = System.currentTimeMillis()
-                                    val waitMs = RowBringIntoViewDebounceMs - (now - lastRowBringIntoViewAtMs)
-                                    if (waitMs > 0) delay(waitMs)
-                                    lastRowBringIntoViewAtMs = System.currentTimeMillis()
-                                    rowBringIntoViewRequester.bringIntoView()
+            CompositionLocalProvider(LocalBringIntoViewSpec provides horizontalBringIntoViewSpec) {
+                LazyRow(
+                    state = listState,
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(
+                        horizontal = SlugYardTvMetrics.ScreenHorizontalInset,
+                        vertical = SlugYardTvMetrics.ShelfRowVerticalPad,
+                    ),
+                    horizontalArrangement = Arrangement.spacedBy(SlugYardTvMetrics.RowGap),
+                ) {
+                    itemsIndexed(row.posters, key = { _, poster -> "${row.id}:${poster.id}" }) { index, poster ->
+                        RewritePosterCard(
+                            poster = poster,
+                            smoothFocusMovement = smoothFocusMovement,
+                            onClick = { onPosterSelected(poster) },
+                            onLongClick = onPosterLongPress?.let { handler -> { handler(poster) } },
+                            episodeLabel = if (row.id == "continue_watching") {
+                                rewriteEpisodeLabel(poster.season, poster.episode)
+                            } else {
+                                null
+                            },
+                            summary = summaryLookup(poster.id) ?: poster.summary,
+                            // Entry requester stays on index 0 for row-to-row landings; every index still
+                            // gets the same vertical FocusRequester exits (LazyRow index-0 Up/Down bug).
+                            focusRequester = if (index == 0) entryFocusRequester else null,
+                            upFocusRequester = upFocusRequester,
+                            downFocusRequester = downFocusRequester,
+                            onFocusUp = onFocusUp,
+                            onFocusDown = onFocusDown,
+                            onPrepareFocusUp = onPrepareFocusUp,
+                            onPrepareFocusDown = onPrepareFocusDown,
+                            onFocusedChanged = { focused ->
+                                if (focused) {
+                                    focusedPosterIndex = index
+                                    if (focusedRowIdState?.value != row.id) {
+                                        focusedRowIdState?.value = row.id
+                                        rowBringIntoViewJob?.cancel()
+                                        rowBringIntoViewJob = rowScope.launch {
+                                            val now = System.currentTimeMillis()
+                                            val waitMs = RowBringIntoViewDebounceMs - (now - lastRowBringIntoViewAtMs)
+                                            if (waitMs > 0) delay(waitMs)
+                                            lastRowBringIntoViewAtMs = System.currentTimeMillis()
+                                            rowBringIntoViewRequester.bringIntoView()
+                                        }
+                                    }
                                 }
-                            }
-                        },
-                        showTypeBadge = false,
-                        expandOnFocus = expandOnFocus,
-                        cardWidth = 176.dp,
-                        cardHeight = 264.dp,
-                    )
+                            },
+                            showTypeBadge = false,
+                            expandOnFocus = expandOnFocus,
+                            cardWidth = 176.dp,
+                            cardHeight = 264.dp,
+                        )
+                    }
                 }
             }
         }
@@ -998,12 +1091,20 @@ internal fun RewritePosterCard(
     }
     // Width expands only once landscape art is in memory. Expanding first leaves grey gutters
     // beside the centered portrait for a frame — the classic first-focus flicker.
+    // Only decode landscape after focus settles — eager per-composition 1280px loads starved
+    // portrait rails during fast D-pad / fling (bitmapFactoryMaxParallelism is only 3).
     var landscapeReady by remember(poster.id, landscapeUrl) { mutableStateOf(false) }
     var landscapeBitmapReady by remember(poster.id, landscapeUrl) { mutableStateOf(false) }
-    LaunchedEffect(poster.id, landscapeUrl, landscapeDecode) {
-        landscapeReady = false
-        landscapeBitmapReady = false
-        val url = landscapeUrl ?: return@LaunchedEffect
+    LaunchedEffect(focused, poster.id, landscapeUrl, landscapeDecode) {
+        if (!focused) return@LaunchedEffect
+        val url = landscapeUrl
+        if (url == null) {
+            landscapeReady = true
+            landscapeBitmapReady = false
+            return@LaunchedEffect
+        }
+        if (landscapeBitmapReady && landscapeReady) return@LaunchedEffect
+        delay(HomeLandscapeFocusSettleMs)
         val request = ImageRequest.Builder(context)
             .data(url)
             .size(landscapeDecode)
@@ -1197,7 +1298,10 @@ internal fun RewritePosterCard(
             // Portrait is the always-on base layer. Landscape only paints after the prefetch
             // above marks ready, and layout width waits on the same signal.
             if (posterUrl != null) {
-                val posterRequest = remember(poster.id, posterUrl, posterDecode) {
+                // Stable by content id + URL; reloadToken remounts after error so fast
+                // LazyRow reuse / cancelled fetches cannot leave a permanently empty tile.
+                var posterReloadToken by remember(poster.id, posterUrl) { mutableIntStateOf(0) }
+                val posterRequest = remember(poster.id, posterUrl, posterDecode, posterReloadToken) {
                     ImageRequest.Builder(context)
                         .data(posterUrl)
                         .size(posterDecode)
@@ -1219,6 +1323,14 @@ internal fun RewritePosterCard(
                     },
                     contentScale = ContentScale.Crop,
                     alignment = Alignment.Center,
+                    onError = {
+                        val token = posterReloadToken
+                        if (token >= HomePosterRetryMax) return@AsyncImage
+                        scope.launch {
+                            delay(HomePosterRetryDelayMs)
+                            if (posterReloadToken == token) posterReloadToken = token + 1
+                        }
+                    },
                 )
             } else if (!poster.backdropUrl.isNullOrBlank() && !expandOnFocus) {
                 // Search / non-expand tiles with backdrop-only art still need a visible frame.
@@ -1226,21 +1338,31 @@ internal fun RewritePosterCard(
                     preferLargePosterUrl(poster.backdropUrl)
                 }
                 if (fallbackUrl != null) {
+                    var fallbackReloadToken by remember(poster.id, fallbackUrl) { mutableIntStateOf(0) }
+                    val fallbackRequest = remember(poster.id, fallbackUrl, posterDecode, fallbackReloadToken) {
+                        ImageRequest.Builder(context)
+                            .data(fallbackUrl)
+                            .size(posterDecode)
+                            .memoryCacheKey("poster-fallback:${poster.id}:$fallbackUrl")
+                            .build()
+                    }
                     AsyncImage(
-                        model = remember(poster.id, fallbackUrl, posterDecode) {
-                            ImageRequest.Builder(context)
-                                .data(fallbackUrl)
-                                .size(posterDecode)
-                                .memoryCacheKey("poster-fallback:${poster.id}:$fallbackUrl")
-                                .build()
-                        },
+                        model = fallbackRequest,
                         contentDescription = null,
                         modifier = Modifier.size(cardWidth, cardHeight).align(Alignment.Center),
                         contentScale = ContentScale.Crop,
+                        onError = {
+                            val token = fallbackReloadToken
+                            if (token >= HomePosterRetryMax) return@AsyncImage
+                            scope.launch {
+                                delay(HomePosterRetryDelayMs)
+                                if (fallbackReloadToken == token) fallbackReloadToken = token + 1
+                            }
+                        },
                     )
                 }
             }
-            // Landscape layer — request hits Coil cache from the prefetch LaunchedEffect.
+            // Landscape layer — request hits Coil cache from the focus-settled prefetch above.
             if (focused && landscapeUrl != null && landscapeBitmapReady) {
                 val landscapeRequest = remember(poster.id, landscapeUrl, landscapeDecode) {
                     ImageRequest.Builder(context)

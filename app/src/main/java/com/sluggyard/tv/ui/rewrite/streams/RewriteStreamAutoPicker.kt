@@ -44,13 +44,14 @@ internal fun selectRewriteAutoPlayCandidate(
     ranked.take(12).forEachIndexed { index, candidate ->
         val rank = RewriteStreamScoringEngine.rank(candidate, context)
         val label = candidate.title.replace('\n', ' ').take(120)
+        val releaseSnippet = candidate.releaseTextForLog().replace('\n', ' ').take(80)
         Log.i(
             AUTO_PICK_TAG,
             "#$index src=${candidate.sourceLabel} cache=${candidate.cacheState} " +
                 "soft=${rank.softsubFit} dual=${rank.dualFit} seeds=${rank.seeders} " +
                 "dec=${rank.decodeFit} q=${rank.quality} sizeFit=${rank.sizeFit} " +
                 "bytes=${candidate.videoSizeBytes ?: -1} " +
-                "title='$label'",
+                "title='$label' release='$releaseSnippet'",
         )
     }
     val winnerRank = winner?.let { RewriteStreamScoringEngine.rank(it, context) }
@@ -58,11 +59,20 @@ internal fun selectRewriteAutoPlayCandidate(
         AUTO_PICK_TAG,
         "winner src=${winner?.sourceLabel} cache=${winner?.cacheState} " +
             "soft=${winnerRank?.softsubFit} dual=${winnerRank?.dualFit} seeds=${winnerRank?.seeders} " +
-            "title='${winner?.title?.replace('\n', ' ')?.take(160)}'",
+            "title='${winner?.title?.replace('\n', ' ')?.take(160)}' " +
+            "release='${winner?.releaseTextForLog()?.replace('\n', ' ')?.take(80)}'",
     )
 
     return winner
 }
+
+private fun RewriteStreamCandidate.releaseTextForLog(): String =
+    listOf(
+        filename.orEmpty(),
+        title,
+        detailLabel.orEmpty(),
+        streamDescription.orEmpty(),
+    ).joinToString(" ").trim()
 
 private fun RewriteStreamCandidate.isAutoPlayEligibleForLog(): Boolean {
     val hash = infoHash?.trim().orEmpty()

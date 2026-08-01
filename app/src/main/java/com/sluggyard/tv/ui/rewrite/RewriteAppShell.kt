@@ -96,6 +96,11 @@ import com.sluggyard.tv.ui.rewrite.data.RewriteLibraryWatchRepository
 import com.sluggyard.tv.ui.rewrite.data.RewriteLibraryWatchState
 import com.sluggyard.tv.ui.rewrite.data.RewritePlaybackProgressStore
 import com.sluggyard.tv.ui.rewrite.data.groupRewritePlaybackCheckpoints
+import com.sluggyard.tv.ui.rewrite.data.toRewriteContinueWatchingCheckpoint
+import com.sluggyard.tv.ui.rewrite.data.useTraktContinueWatching
+import com.sluggyard.tv.data.local.TraktAuthState
+import com.sluggyard.tv.data.local.WatchProgressSource
+import com.sluggyard.tv.domain.repository.WatchProgressRepository
 import com.sluggyard.tv.core.sync.RewriteProgressSyncBridge
 import com.sluggyard.tv.core.sync.RewriteProviderCredentialSyncBridge
 import com.sluggyard.tv.ui.rewrite.data.RewriteProfileStore
@@ -434,6 +439,7 @@ fun RewriteAppShell(
     auth: SupabaseAuthGateway,
     sessions: SupabaseSessionStore,
     settingsFacade: RewriteSettingsFacade,
+    watchProgressRepository: WatchProgressRepository,
     modifier: Modifier = Modifier,
 ) {
     val navController = rememberNavController()
@@ -454,6 +460,7 @@ fun RewriteAppShell(
                 RewriteAppContent(
                     graph = graph,
                     settingsFacade = settingsFacade,
+                    watchProgressRepository = watchProgressRepository,
                     routeStack = routeStack,
                     onRouteStackChange = { routeStack = it },
                     onSignedOut = { accessGranted = false; forceAuthChoice = false },
@@ -582,6 +589,7 @@ private fun RewritePlaybackExpiredScreen(onBack: () -> Unit) {
 private fun RewriteAppContent(
     graph: RewriteAppGraph,
     settingsFacade: RewriteSettingsFacade,
+    watchProgressRepository: WatchProgressRepository,
     routeStack: List<RewriteRootDestination>,
     onRouteStackChange: (List<RewriteRootDestination>) -> Unit,
     onSignedOut: () -> Unit,
@@ -591,6 +599,19 @@ private fun RewriteAppContent(
 ) {
     val registry by graph.registry.state.collectAsState(initial = com.sluggyard.tv.core.addonprotocol.AddonRegistryState())
     val playbackCheckpoints by graph.playbackProgress.checkpoints.collectAsState(initial = emptyList())
+    val traktAuth by settingsFacade.traktAuth.collectAsState(initial = TraktAuthState())
+    val watchProgressSource by settingsFacade.traktSettings.watchProgressSource.collectAsState(
+        initial = WatchProgressSource.TRAKT,
+    )
+    val useTraktCw = useTraktContinueWatching(watchProgressSource, traktAuth.isAuthenticated)
+    val traktContinueWatching by watchProgressRepository.continueWatching.collectAsState(initial = emptyList())
+    val continueWatchingCheckpoints = remember(useTraktCw, traktContinueWatching, playbackCheckpoints) {
+        if (useTraktCw) {
+            traktContinueWatching.map { it.toRewriteContinueWatchingCheckpoint() }
+        } else {
+            playbackCheckpoints
+        }
+    }
     val libraryWatch by graph.libraryWatch.state.collectAsState(initial = RewriteLibraryWatchState())
     val profiles by graph.profiles.state.collectAsState(initial = com.sluggyard.tv.ui.rewrite.data.RewriteProfileState())
     val homeSettings by graph.homeSettings.settings.collectAsState(initial = com.sluggyard.tv.ui.rewrite.data.RewriteHomeSettings())
@@ -663,10 +684,22 @@ private fun RewriteAppContent(
         )
     }
 
-    fun resumeFor(contentId: String, season: Int? = null, episode: Int? = null): Long =
-        playbackCheckpoints.firstOrNull {
+    fun resumeFor(contentId: String, season: Int? = null, episode: Int? = null): Long {
+        val matchedCw = continueWatchingCheckpoints.firstOrNull {
+            (it.contentId == contentId || it.parentId == contentId) &&
+                it.season == season &&
+                it.episode == episode
+        }
+        if (matchedCw != null) {
+            // Trakt percent-only rows often have positionMs=0; keep 0 so the player resolves
+            // from WatchProgressRepository instead of blending in a SlugYard local checkpoint.
+            return matchedCw.positionMs.takeIf { it > 0L } ?: 0L
+        }
+        if (useTraktCw) return 0L
+        return playbackCheckpoints.firstOrNull {
             it.contentId == contentId && it.season == season && it.episode == episode
         }?.positionMs ?: 0L
+    }
 
     fun openRoot(next: RewriteRootDestination) {
         ExperimentalDiagnostics.event("navigation", "open_root", mapOf("destination" to next.javaClass.simpleName))
@@ -945,8 +978,8 @@ private fun RewriteAppContent(
             browseCatalogState = state
         }
     }
-    val rawHomeState = remember(catalogState, playbackCheckpoints) {
-        catalogState.toScreenState(playbackCheckpoints)
+    val rawHomeState = remember(catalogState, continueWatchingCheckpoints) {
+        catalogState.toScreenState(continueWatchingCheckpoints)
     }
     // Catalog rows can transiently flicker load state as later refinements arrive, which would
     // otherwise flip the computed hero to null for a frame and force-recreate the hero panel
@@ -1145,6 +1178,23 @@ private fun RewriteAppContent(
         if (!streamDiscoveryComplete) return@LaunchedEffect
         delay(8_000)
         cacheWaitExpired = true
+    }
+    // Once at least one addon has settled (Content/Empty/Error), do not wait forever for hung
+    // addons that often return empty — unblock auto-pick after a short grace.
+    LaunchedEffect(streamsDiscoveryKey, streamGroups) {
+        val streams = destination as? RewriteRootDestination.Streams ?: return@LaunchedEffect
+        if (streamDiscoveryComplete) return@LaunchedEffect
+        val hasSettled = streamGroups.any {
+            it.state !is com.sluggyard.tv.ui.rewrite.streams.RewriteStreamGroupState.Loading
+        }
+        val stillLoading = streamGroups.any {
+            it.state is com.sluggyard.tv.ui.rewrite.streams.RewriteStreamGroupState.Loading
+        }
+        if (!hasSettled || !stillLoading) return@LaunchedEffect
+        delay(4_000)
+        if (destination == streams && !streamDiscoveryComplete) {
+            streamDiscoveryComplete = true
+        }
     }
     // Hard ceiling: if an addon never leaves Loading, still unblock the building screen.
     // Must share streamsDiscoveryKey so a rediscovery restart also re-arms the timer.
@@ -1950,11 +2000,22 @@ private fun RewriteAppContent(
                     },
                     onRemove = {
                         scope.launch {
-                            graph.playbackProgress.remove(
-                                contentId = poster.id,
-                                season = poster.season,
-                                episode = poster.episode,
-                            )
+                            if (useTraktCw) {
+                                val removeId = poster.parentId?.takeIf {
+                                    poster.season != null || poster.episode != null
+                                } ?: poster.id
+                                watchProgressRepository.removeProgress(
+                                    contentId = removeId,
+                                    season = poster.season,
+                                    episode = poster.episode,
+                                )
+                            } else {
+                                graph.playbackProgress.remove(
+                                    contentId = poster.id,
+                                    season = poster.season,
+                                    episode = poster.episode,
+                                )
+                            }
                         }
                         continueWatchingMenuPoster = null
                     },
