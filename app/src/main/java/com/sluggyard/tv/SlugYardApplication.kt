@@ -4,6 +4,8 @@ import android.app.Application
 import android.app.ActivityManager
 import android.content.Context
 import android.os.Build
+import com.sluggyard.tv.BuildConfig
+import com.sluggyard.tv.data.local.CrashReportingPreferences
 import coil3.ImageLoader
 import coil3.SingletonImageLoader
 import coil3.disk.DiskCache
@@ -36,25 +38,89 @@ class SlugYardApplication : Application(), SingletonImageLoader.Factory {
     }
 
     /**
-     * Crash/ANR reporting. The Sentry SDK, gradle plugin, and proguard-mapping upload were fully
-     * retained through the rewrite (see build.gradle.kts) but nothing ever called
-     * SentryAndroid.init() -- `io.sentry.auto-init` is explicitly disabled in the manifest, so
-     * without this call crash reporting was silently a no-op the whole time. Scrubs request/user
-     * PII before send, matching the safe-context guarantee described in strings.xml's Sentry copy.
+     * Crash/ANR reporting to our Sentry project (DSN from build config).
+     * Opt-out via About → Crash reporting (default on).
+     *
+     * Deliberately light: no screenshots, view hierarchy, session replay, or
+     * full logcat. Bounded breadcrumbs only — logging everything would tax TV
+     * I/O and risk leaking tokens in URLs.
      */
     private fun initSentry() {
         val dsn = BuildConfig.SENTRY_DSN.takeIf { it.isNotBlank() } ?: return
+        val crashReportingEnabled = getSharedPreferences(
+            CrashReportingPreferences.PREFS_NAME,
+            MODE_PRIVATE,
+        ).getBoolean(
+            CrashReportingPreferences.KEY_ENABLED,
+            CrashReportingPreferences.DEFAULT_ENABLED,
+        )
         SentryAndroid.init(this) { options ->
             options.dsn = dsn
+            options.isEnabled = crashReportingEnabled
             options.environment = BuildConfig.SENTRY_ENVIRONMENT
             options.release = "${BuildConfig.APPLICATION_ID}@${BuildConfig.VERSION_NAME}+${BuildConfig.VERSION_CODE}"
             options.isAttachScreenshot = false
             options.isAttachViewHierarchy = false
+            options.sessionReplay.sessionSampleRate = 0.0
+            options.sessionReplay.onErrorSampleRate = 0.0
+            options.tracesSampleRate = 0.0
+            options.profilesSampleRate = 0.0
+            // Enough trail for "what screen / last network call", not a log dump.
+            options.maxBreadcrumbs = 40
+            options.isEnableUserInteractionBreadcrumbs = false
+            options.isEnableSystemEventBreadcrumbs = false
+            options.isEnableActivityLifecycleBreadcrumbs = true
+            options.isEnableAppLifecycleBreadcrumbs = true
+            options.isEnableNetworkEventBreadcrumbs = true
+            options.beforeBreadcrumb = io.sentry.SentryOptions.BeforeBreadcrumbCallback { breadcrumb, _ ->
+                // Drop noisy debug/info console crumbs; keep navigation + http + error.
+                val type = breadcrumb.type?.lowercase().orEmpty()
+                val category = breadcrumb.category?.lowercase().orEmpty()
+                when {
+                    type == "debug" || category == "console" || category == "log" -> null
+                    type == "http" || category == "http" || category.contains("network") -> {
+                        scrubSentryHttpBreadcrumb(breadcrumb)
+                        breadcrumb
+                    }
+                    else -> breadcrumb
+                }
+            }
             options.beforeSend = io.sentry.SentryOptions.BeforeSendCallback { event, _ ->
                 event.request = null
                 event.setUser(null)
                 event
             }
+        }
+    }
+
+    /** Strip query/fragment so signed debrid/addon URLs never land in Sentry breadcrumbs. */
+    private fun scrubSentryHttpBreadcrumb(breadcrumb: io.sentry.Breadcrumb) {
+        val keys = listOf("url", "request_url", "http.url")
+        for (key in keys) {
+            val raw = breadcrumb.getData(key) as? String ?: continue
+            breadcrumb.setData(key, scrubUrlForCrashReports(raw))
+        }
+        breadcrumb.message?.takeIf { it.contains("http", ignoreCase = true) }?.let { msg ->
+            breadcrumb.message = scrubUrlForCrashReports(msg)
+        }
+    }
+
+    private fun scrubUrlForCrashReports(value: String): String {
+        val trimmed = value.trim()
+        if (trimmed.isEmpty()) return trimmed
+        return runCatching {
+            val uri = java.net.URI(trimmed)
+            if (uri.scheme.isNullOrBlank() || uri.host.isNullOrBlank()) {
+                trimmed.substringBefore('?').substringBefore('#')
+            } else {
+                buildString {
+                    append(uri.scheme).append("://").append(uri.host)
+                    if (uri.port > 0) append(':').append(uri.port)
+                    append(uri.path.orEmpty())
+                }
+            }
+        }.getOrElse {
+            trimmed.substringBefore('?').substringBefore('#')
         }
     }
 

@@ -8,9 +8,11 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -106,7 +108,9 @@ internal fun AudioSettings(facade: SettingsFacade, player: PlayerSettings, scope
 }
 
 @Composable
-internal fun AboutSettings() {
+internal fun AboutSettings(facade: SettingsFacade) {
+    val scope = rememberCoroutineScope()
+    val crashReporting by facade.crashReportingEnabled.collectAsState(initial = true)
     var openDoc by remember { mutableStateOf<AboutDoc?>(null) }
     SettingsGroup("About SlugYard") {
         ValueRow("Application", "SlugYard TV")
@@ -135,6 +139,13 @@ internal fun AboutSettings() {
             actionLabel = "View",
             onClick = { openDoc = AboutDoc.Credits },
         )
+    }
+    SettingsGroup("Diagnostics") {
+        ToggleRow(
+            title = "Crash reporting",
+            description = "Send crash and ANR reports to SlugYard (stack trace, device, safe breadcrumbs). On by default. No screenshots, passwords, or full logs.",
+            checked = crashReporting,
+        ) { enabled -> scope.launch { facade.setCrashReportingEnabled(enabled) } }
     }
     openDoc?.let { doc ->
         AlertDialog(
@@ -196,6 +207,8 @@ private val ABOUT_PRIVACY = """
 Debrid API keys stay on this device and are not uploaded with SlugYard sync.
 
 Optional sign-in can sync profiles, watch progress, and non-secret preferences via Supabase. Trakt tokens may sync if you link Trakt. Guest mode needs no account.
+
+Optional crash reporting (on by default; toggle in About) sends crash/ANR stack traces, device metadata, and safe breadcrumbs to SlugYard's Sentry project. It does not send screenshots, passwords, tokens, request bodies, or full device logs.
 
 Third-party services (debrid, addons, TMDB, Trakt, etc.) have their own policies.
 

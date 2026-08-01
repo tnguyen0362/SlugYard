@@ -743,6 +743,109 @@ class StreamAutoPickerTest {
         assertNull(selectAutoPlayCandidate(groups(magnet)))
     }
 
+    @Test
+    fun preferLastPlayedCachedHashWinsEvenOverHigherQualityDirect() {
+        val last = candidate("last", cacheState = StreamCacheState.CACHED, infoHash = "abc123")
+            .copy(title = "1080p WEB")
+        val better = candidate("better", directUrl = "https://stream.test/4k")
+            .copy(title = "2160p HDR10")
+        val prefer = com.sluggyard.tv.data.local.CachedStreamLink(
+            url = "",
+            streamName = "1080p WEB",
+            headers = emptyMap(),
+            cachedAtMs = System.currentTimeMillis(),
+            infoHash = "ABC123",
+        )
+
+        assertEquals(
+            last,
+            selectAutoPlayCandidate(
+                groups(better, last),
+                preferLastPlayed = prefer,
+            ),
+        )
+    }
+
+    @Test
+    fun preferLastPlayedMissFallsThroughToNormalRanking() {
+        val a = candidate("a", cacheState = StreamCacheState.CACHED, infoHash = "aaa")
+            .copy(title = "720p WEB")
+        val b = candidate("b", cacheState = StreamCacheState.CACHED, infoHash = "bbb")
+            .copy(title = "1080p WEB")
+        val prefer = com.sluggyard.tv.data.local.CachedStreamLink(
+            url = "",
+            streamName = "gone",
+            headers = emptyMap(),
+            cachedAtMs = System.currentTimeMillis(),
+            infoHash = "zzzz",
+        )
+
+        assertEquals(
+            b,
+            selectAutoPlayCandidate(
+                groups(a, b),
+                preferLastPlayed = prefer,
+            ),
+        )
+    }
+
+    @Test
+    fun matchesLastPlayedByInfoHashAndFilename() {
+        val c = candidate("c", cacheState = StreamCacheState.CACHED, infoHash = "hash1")
+            .copy(filename = "Movie.1080p.mkv", fileIndex = 2)
+        assertTrue(
+            c.matchesLastPlayed(
+                com.sluggyard.tv.data.local.CachedStreamLink(
+                    url = "",
+                    streamName = "Movie",
+                    headers = emptyMap(),
+                    cachedAtMs = 1L,
+                    infoHash = "HASH1",
+                    fileIdx = 2,
+                ),
+            ),
+        )
+        assertTrue(
+            candidate("file-only", cacheState = StreamCacheState.CACHED)
+                .copy(filename = "Movie.1080p.mkv")
+                .matchesLastPlayed(
+                    com.sluggyard.tv.data.local.CachedStreamLink(
+                        url = "",
+                        streamName = "other",
+                        headers = emptyMap(),
+                        cachedAtMs = 1L,
+                        filename = "Movie.1080p.mkv",
+                    ),
+                ),
+        )
+        // Same torrent, wrong file index must not fall through to shared filename.
+        assertFalse(
+            c.matchesLastPlayed(
+                com.sluggyard.tv.data.local.CachedStreamLink(
+                    url = "",
+                    streamName = "other",
+                    headers = emptyMap(),
+                    cachedAtMs = 1L,
+                    infoHash = "HASH1",
+                    fileIdx = 9,
+                    filename = "Movie.1080p.mkv",
+                ),
+            ),
+        )
+        // Generic stream titles must not count as identity.
+        assertFalse(
+            c.copy(title = "1080p WEB-DL")
+                .matchesLastPlayed(
+                    com.sluggyard.tv.data.local.CachedStreamLink(
+                        url = "",
+                        streamName = "1080p WEB-DL",
+                        headers = emptyMap(),
+                        cachedAtMs = 1L,
+                    ),
+                ),
+        )
+    }
+
     private fun groups(vararg candidates: StreamCandidate) = listOf(
         StreamGroup("source", "Source", StreamGroupState.Content(candidates.toList())),
     )

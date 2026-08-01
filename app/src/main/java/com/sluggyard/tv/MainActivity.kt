@@ -77,6 +77,9 @@ class MainActivity : ComponentActivity() {
     lateinit var tmdbService: com.sluggyard.tv.core.tmdb.TmdbService
 
     @Inject
+    lateinit var streamLinkCacheDataStore: com.sluggyard.tv.data.local.StreamLinkCacheDataStore
+
+    @Inject
     lateinit var tmdbApi: com.sluggyard.tv.data.remote.api.TmdbApi
 
     @Inject
@@ -130,6 +133,7 @@ class MainActivity : ComponentActivity() {
                     relatedDataSource = relatedDataSource,
                     tmdbHomeDataSource = tmdbHomeDataSource,
                     tmdbService = tmdbService,
+                    streamLinkCache = streamLinkCacheDataStore,
                     digitalReleaseLookup = com.sluggyard.tv.ui.app.streams.DigitalReleaseLookup(
                         tmdbApi = tmdbApi,
                     ),

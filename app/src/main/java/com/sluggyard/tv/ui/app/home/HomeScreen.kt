@@ -224,8 +224,8 @@ private const val HomePosterLandscapeAspect = 16f / 9f
 /** Coil decode cap for card landscapes — match preferCardBackdropUrl (w780), not hero w1280. */
 private const val MaxLandscapeDecodeWidthPx = 780
 private const val RowBringIntoViewDebounceMs = 120L
-/** Wait for focus to settle before kicking a landscape decode (fast D-pad). */
-private const val HomeLandscapeFocusSettleMs = 120L
+/** Wait for focus to settle before kicking a cold landscape decode (fast D-pad). */
+private const val HomeLandscapeFocusSettleMs = 48L
 /** Neighbor portrait warm-cache window after focus settles (leading..trailing). */
 private const val HomePosterPrefetchBehind = 1
 /** Keep ahead prefetch short so landscape decode keeps Coil slots on weak TVs. */
@@ -984,18 +984,12 @@ private fun PosterRow(
     // Warm focused ±1 card backdrops first so expand hits memory instead of a cold w780 decode.
     LaunchedEffect(row.id, focusedPosterIndex, row.posters, landscapePrefetchDecode, expandOnFocus) {
         if (!expandOnFocus) return@LaunchedEffect
-        val anchor = focusedPosterIndex
-        if (anchor < 0) return@LaunchedEffect
-        delay(HomeBackdropPrefetchSettleMs)
         val loader = context.imageLoader
-        val from = (anchor - 1).coerceAtLeast(0)
-        val to = (anchor + 1).coerceAtMost(row.posters.lastIndex)
-        for (i in from..to) {
-            val poster = row.posters[i]
+        fun enqueueBackdrop(poster: HomePoster) {
             val posterUrl = preferLargePosterUrl(poster.imageUrl)
             val url = preferCardBackdropUrl(poster.backdropUrl)
                 ?.takeIf { it.isNotBlank() && it != posterUrl }
-                ?: continue
+                ?: return
             loader.enqueue(
                 ImageRequest.Builder(context)
                     .data(url)
@@ -1005,6 +999,15 @@ private fun PosterRow(
                     .build(),
             )
         }
+        // First paint: warm the leading tiles before any focus settles (cuts first-focus delay).
+        if (focusedPosterIndex < 0) {
+            row.posters.take(3).forEach(::enqueueBackdrop)
+            return@LaunchedEffect
+        }
+        delay(HomeBackdropPrefetchSettleMs)
+        val from = (focusedPosterIndex - 1).coerceAtLeast(0)
+        val to = (focusedPosterIndex + 1).coerceAtMost(row.posters.lastIndex)
+        for (i in from..to) enqueueBackdrop(row.posters[i])
     }
     // Warm a few neighbor portraits after focus settles — cheaper than landscape; fills blanks.
     LaunchedEffect(row.id, focusedPosterIndex, row.posters, posterPrefetchDecode) {
@@ -1174,9 +1177,7 @@ internal fun PosterCard(
     LaunchedEffect(focused, poster.id, landscapeUrl, expandOnFocus) {
         if (!focused || !expandOnFocus || landscapeUrl == null) {
             loadLandscape = false
-            // Drop paint gate on blur so the next focus keeps portrait until AsyncImage
-            // onSuccess again — remounting landscape from cache still costs a blank frame
-            // if we widen/tear down portrait prematurely.
+            // Drop paint gate on blur so the next focus keeps portrait until landscape paints.
             landscapePainted = false
             return@LaunchedEffect
         }
@@ -1184,9 +1185,13 @@ internal fun PosterCard(
         val memoryHit = runCatching {
             context.imageLoader.memoryCache?.get(coil3.memory.MemoryCache.Key(cacheKey)) != null
         }.getOrDefault(false)
-        if (!memoryHit) {
-            delay(HomeLandscapeFocusSettleMs)
+        if (memoryHit) {
+            // Skip settle delay only — still wait for AsyncImage onSuccess so we never
+            // widen to an empty 16:9 frame while the landscape composable remounts.
+            loadLandscape = true
+            return@LaunchedEffect
         }
+        delay(HomeLandscapeFocusSettleMs)
         loadLandscape = true
     }
     val showLandscape = focused && expandOnFocus && landscapeUrl != null && landscapePainted
@@ -1455,6 +1460,18 @@ internal fun PosterCard(
                         .padding(horizontal = 12.dp, vertical = 10.dp),
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        // Landscape backdrops almost never bake in the title — match Settings
+                        // group titles (titleLarge + SemiBold) so focused 16:9 cards read clearly.
+                        if (showLandscape) {
+                            Text(
+                                poster.title,
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                color = SlugYardPalette.OnCanvas,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                         episodeLabel?.let { label ->
                             Text(
                                 label,
@@ -1469,7 +1486,7 @@ internal fun PosterCard(
                                 text,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = SlugYardPalette.OnCanvas,
-                                maxLines = 2,
+                                maxLines = if (showLandscape) 1 else 2,
                                 overflow = TextOverflow.Ellipsis,
                             )
                         }

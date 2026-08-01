@@ -2,6 +2,7 @@ package com.sluggyard.tv.ui.app.streams
 
 import android.util.Log
 import com.sluggyard.tv.core.streamresolution.StreamCacheState
+import com.sluggyard.tv.data.local.CachedStreamLink
 
 private const val AUTO_PICK_TAG = "SlugYardAutoPick"
 
@@ -16,12 +17,28 @@ internal fun selectAutoPlayCandidate(
         contentType = "",
     ),
     excludedCandidateIds: Set<String> = emptySet(),
+    preferLastPlayed: CachedStreamLink? = null,
 ): StreamCandidate? {
     val candidates = groups
         .flatMap { group -> (group.state as? StreamGroupState.Content)?.streams.orEmpty() }
         .filter { it.isWellFormed() }
         .filterNot { it.id in excludedCandidateIds }
         .distinctBy { it.dedupeKey() }
+
+    preferLastPlayed?.let { cached ->
+        val match = candidates.firstOrNull { it.matchesLastPlayed(cached) && it.isAutoPlayEligibleForLog() }
+        if (match != null) {
+            Log.i(
+                AUTO_PICK_TAG,
+                "preferLastPlayed hit src=${match.sourceLabel} hash=${cached.infoHash} file=${cached.filename}",
+            )
+            return match
+        }
+        Log.i(
+            AUTO_PICK_TAG,
+            "preferLastPlayed miss hash=${cached.infoHash} file=${cached.filename} among=${candidates.size}",
+        )
+    }
 
     val ranked = StreamScoringEngine.rankedCandidates(candidates, context)
     val winner = StreamScoringEngine.choose(candidates, context)
@@ -41,7 +58,8 @@ internal fun selectAutoPlayCandidate(
             "candidates=${candidates.size} eligibleRanked=${ranked.count { it.isAutoPlayEligibleForLog() }} " +
             "groups=[$groupSummary]",
     )
-    ranked.take(12).forEachIndexed { index, candidate ->
+    // Cap log spam — dumping dozens of lines per discovery tick froze leanback boxes.
+    ranked.take(6).forEachIndexed { index, candidate ->
         val rank = StreamScoringEngine.rank(candidate, context)
         val label = candidate.title.replace('\n', ' ').take(120)
         val releaseSnippet = candidate.releaseTextForLog().replace('\n', ' ').take(80)
@@ -64,6 +82,36 @@ internal fun selectAutoPlayCandidate(
     )
 
     return winner
+}
+
+/** True when this listing is the same release we played last (hash / file / URL). */
+internal fun StreamCandidate.matchesLastPlayed(cached: CachedStreamLink): Boolean {
+    val cachedHash = cached.infoHash?.trim()?.lowercase().orEmpty()
+    val thisHash = infoHash?.trim()?.lowercase().orEmpty()
+    if (cachedHash.isNotBlank()) {
+        // Hash identity wins; a conflicting fileIdx is a miss — never fall through to
+        // shared filenames / generic stream titles (multi-file torrents collide easily).
+        if (thisHash != cachedHash) return false
+        val cachedIdx = cached.fileIdx
+        val thisIdx = fileIndex
+        return cachedIdx == null || thisIdx == null || cachedIdx == thisIdx
+    }
+    val cachedVideoHash = cached.videoHash?.trim()?.lowercase().orEmpty()
+    val thisVideoHash = videoHash?.trim()?.lowercase().orEmpty()
+    if (cachedVideoHash.isNotBlank()) {
+        return thisVideoHash == cachedVideoHash
+    }
+    val cachedFile = cached.filename?.trim()?.lowercase().orEmpty()
+    val thisFile = filename?.trim()?.lowercase().orEmpty()
+    if (cachedFile.isNotBlank()) {
+        return thisFile == cachedFile
+    }
+    val cachedUrl = cached.url.trim()
+    val thisUrl = directUrl?.trim().orEmpty()
+    if (cachedUrl.isNotBlank() && thisUrl.isNotBlank()) {
+        return cachedUrl == thisUrl
+    }
+    return false
 }
 
 private fun StreamCandidate.releaseTextForLog(): String =

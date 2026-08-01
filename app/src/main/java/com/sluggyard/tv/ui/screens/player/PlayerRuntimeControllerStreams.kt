@@ -533,7 +533,8 @@ private fun PlayerRuntimeController.persistSelectedStreamForReuse(
     url: String,
     headers: Map<String, String>
 ) {
-    if (!streamReuseLastLinkEnabled) return
+    // Always remember the last stream fingerprint so Continue Watching / Play can prefer
+    // it. Direct URL reuse age still respects streamReuseLastLink* when reading.
     val key = streamCacheKey ?: return
     val streamName = (stream.name?.takeIf { it.isNotBlank() } ?: stream.addonName)
         ?.takeIf { it.isNotBlank() } ?: title
@@ -554,7 +555,6 @@ private fun PlayerRuntimeController.persistSelectedStreamForReuse(
 }
 
 private fun PlayerRuntimeController.persistTorrentStreamForReuse(stream: Stream) {
-    if (!streamReuseLastLinkEnabled) return
     val key = streamCacheKey ?: return
     val infoHash = stream.getEffectiveInfoHash() ?: return
     val streamName = (stream.name?.takeIf { it.isNotBlank() } ?: stream.addonName)

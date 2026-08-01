@@ -142,6 +142,7 @@ import com.sluggyard.tv.ui.app.home.withContinueWatchingPosters
 import com.sluggyard.tv.ui.app.home.CatalogRequest
 import com.sluggyard.tv.ui.app.streams.selectAutoPlayCandidate
 import com.sluggyard.tv.ui.app.streams.hasPendingCacheChecks
+import com.sluggyard.tv.ui.app.streams.matchesLastPlayed
 import com.sluggyard.tv.ui.app.streams.DigitalReleaseLookup
 import com.sluggyard.tv.ui.app.streams.DigitalReleasePolicy
 import com.sluggyard.tv.ui.app.streams.StreamScoringEngine
@@ -194,6 +195,7 @@ class AppGraph(
     relatedDataSource: RelatedDataSource? = null,
     tmdbHomeDataSource: TmdbHomeDataSource? = null,
     val tmdbService: com.sluggyard.tv.core.tmdb.TmdbService? = null,
+    val streamLinkCache: com.sluggyard.tv.data.local.StreamLinkCacheDataStore? = null,
     val resolveMetaContentId: suspend (type: String, id: String) -> String = { _, id -> id },
     val digitalReleaseLookup: DigitalReleaseLookup? = null,
     val profiles: ProfileStore = ProfileStore(dataStore),
@@ -1507,6 +1509,61 @@ private fun AppContent(
             streamMessage = "This title is not digitally released yet. Open Sources if you still want to browse listings."
             return@LaunchedEffect
         }
+        val contentKey = "${streams.type.lowercase()}|${streams.id}"
+        val cacheHours = playerSettings.streamReuseLastLinkCacheHours.coerceIn(1, 168)
+        val lastPlayed = runCatching {
+            graph.streamLinkCache?.getValid(
+                contentKey = contentKey,
+                maxAgeMs = cacheHours * 60L * 60L * 1000L,
+            )
+        }.getOrNull()
+        // Continue Watching / re-Play: prefer the exact last source when it is still listed
+        // and playable. If we remember a last source but it is gone (or uncached), open Sources
+        // instead of silently auto-picking a different release — but never give up while
+        // discovery/cache probes can still surface that same listing.
+        if (lastPlayed != null) {
+            val listed = groupsForPick
+                .flatMap { (it.state as? com.sluggyard.tv.ui.app.streams.StreamGroupState.Content)?.streams.orEmpty() }
+                .filter { it.id !in autoPickRejectedIds }
+            val lastMatch = listed.firstOrNull { it.matchesLastPlayed(lastPlayed) }
+            if (lastMatch != null) {
+                val playable =
+                    lastMatch.cacheState == com.sluggyard.tv.core.streamresolution.StreamCacheState.CACHED ||
+                        (!lastMatch.directUrl.isNullOrBlank() && lastMatch.infoHash.isNullOrBlank()) ||
+                        (
+                            !lastMatch.infoHash.isNullOrBlank() &&
+                                lastMatch.cacheState == com.sluggyard.tv.core.streamresolution.StreamCacheState.NOT_APPLICABLE
+                            )
+                if (playable) {
+                    resolveStreamCandidate(lastMatch, streams)
+                    return@LaunchedEffect
+                }
+                // displayStreamGroups remaps CHECKING→UNKNOWN after the cache grace timer.
+                // Always consult the live streamGroups probes so a late CACHED hit still wins.
+                val liveMatchState = streamGroups
+                    .flatMap { (it.state as? com.sluggyard.tv.ui.app.streams.StreamGroupState.Content)?.streams.orEmpty() }
+                    .firstOrNull { it.id == lastMatch.id }
+                    ?.cacheState
+                if (liveMatchState == com.sluggyard.tv.core.streamresolution.StreamCacheState.CHECKING ||
+                    hasPendingCacheChecks(streamGroups)
+                ) {
+                    return@LaunchedEffect
+                }
+                autoPickFinishedFor = streams.id
+                streamMessage = "Your last source is not available right now. Open Sources to pick another."
+                replaceCurrent(streams.copy(autoPick = false))
+                return@LaunchedEffect
+            }
+            if (streamGroups.any { it.state is com.sluggyard.tv.ui.app.streams.StreamGroupState.Loading } ||
+                hasPendingCacheChecks(streamGroups)
+            ) {
+                return@LaunchedEffect
+            }
+            autoPickFinishedFor = streams.id
+            streamMessage = "Your last source is not available right now. Open Sources to pick another."
+            replaceCurrent(streams.copy(autoPick = false))
+            return@LaunchedEffect
+        }
         val candidate = selectAutoPlayCandidate(
             groups = groupsForPick,
             context = com.sluggyard.tv.ui.app.streams.StreamScoringEngine.Context(
@@ -1518,6 +1575,7 @@ private fun AppContent(
                 digitalReleaseStatus = digitalReleaseStatus,
             ),
             excludedCandidateIds = autoPickRejectedIds,
+            preferLastPlayed = null,
         )
         if (candidate == null) {
             if (!streamDiscoveryComplete) return@LaunchedEffect

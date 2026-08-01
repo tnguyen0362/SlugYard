@@ -5,6 +5,7 @@ import com.sluggyard.tv.core.sync.auth.SupabaseAuthGateway
 import com.sluggyard.tv.core.sync.auth.SupabaseSessionStore
 import com.sluggyard.tv.data.local.AddonPreferences
 import com.sluggyard.tv.data.local.AudioOutputChannels
+import com.sluggyard.tv.data.local.CrashReportingPreferences
 import com.sluggyard.tv.data.local.DebridSettingsDataStore
 import com.sluggyard.tv.data.local.FrameRateMatchingMode
 import com.sluggyard.tv.data.local.LayoutPreferenceDataStore
@@ -46,6 +47,7 @@ interface SettingsFacade {
     val openSubtitlesApiKey: Flow<String>
     val openSubtitlesAutoDownload: Flow<Boolean>
     val streamBadgeSettings: Flow<com.sluggyard.tv.core.streams.StreamBadgeSettings>
+    val crashReportingEnabled: Flow<Boolean>
 
     val auth: SupabaseAuthGateway
     val sessions: SupabaseSessionStore
@@ -86,6 +88,8 @@ interface SettingsFacade {
     suspend fun setOpenSubtitlesApiKey(apiKey: String)
     suspend fun setOpenSubtitlesAutoDownload(enabled: Boolean)
 
+    suspend fun setCrashReportingEnabled(enabled: Boolean)
+
     suspend fun ensureDefaultStreamBadgePack(): com.sluggyard.tv.core.streams.StreamBadgeImportResult?
     suspend fun refreshStreamBadgePack(): com.sluggyard.tv.core.streams.StreamBadgeImportResult
     suspend fun clearStreamBadgePacks()
@@ -106,6 +110,7 @@ class DefaultSettingsFacade @Inject constructor(
     private val playerStore: PlayerSettingsDataStore,
     private val streamBadgeStore: com.sluggyard.tv.data.local.StreamBadgeSettingsDataStore,
     private val streamBadgeImporter: com.sluggyard.tv.core.streams.StreamBadgeImporter,
+    private val crashReportingPreferences: CrashReportingPreferences,
 ) : SettingsFacade {
     override val categories: List<SettingsCategory> = SettingsPolicy.categories
     override val traktAuth: Flow<TraktAuthState> = traktAuthDataStore.state
@@ -118,6 +123,7 @@ class DefaultSettingsFacade @Inject constructor(
     override val openSubtitlesAutoDownload: Flow<Boolean> = playerStore.openSubtitlesAutoDownload
     override val streamBadgeSettings: Flow<com.sluggyard.tv.core.streams.StreamBadgeSettings> =
         streamBadgeStore.settings
+    override val crashReportingEnabled: Flow<Boolean> = crashReportingPreferences.enabled
 
     private suspend fun <T> trackSetting(
         name: String,
@@ -252,6 +258,9 @@ class DefaultSettingsFacade @Inject constructor(
 
     override suspend fun setOpenSubtitlesAutoDownload(enabled: Boolean) =
         trackSetting("opensubtitles.auto_download", enabled) { playerStore.setOpenSubtitlesAutoDownload(enabled) }
+
+    override suspend fun setCrashReportingEnabled(enabled: Boolean) =
+        trackSetting("crash_reporting.enabled", enabled) { crashReportingPreferences.setEnabled(enabled) }
 
     override suspend fun ensureDefaultStreamBadgePack() =
         trackSetting("stream_badges.ensure_default") { streamBadgeImporter.ensureDefaultPackInstalled() }

@@ -72,7 +72,7 @@ fun SettingsScreen(
             SettingsCategory.Display -> DisplaySettings(facade, player, scope)
             SettingsCategory.Subtitles -> SubtitleSettings(facade, player, scope)
             SettingsCategory.Audio -> AudioSettings(facade, player, scope)
-            SettingsCategory.About -> AboutSettings()
+            SettingsCategory.About -> AboutSettings(facade)
         }
     }
 
