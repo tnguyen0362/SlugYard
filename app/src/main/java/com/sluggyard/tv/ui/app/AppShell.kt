@@ -117,6 +117,7 @@ import com.sluggyard.tv.ui.app.data.CloudSyncNotices
 import com.sluggyard.tv.ui.app.data.remapNonIntegerProfileIds
 import com.sluggyard.tv.ui.app.data.copyLegacyDefaultProfileScopedPreferences
 import com.sluggyard.tv.ui.app.data.copyRemappedProfileScopedPreferences
+import com.sluggyard.tv.ui.app.data.recoverOrphanedDebridCredentials
 import com.sluggyard.tv.ui.app.data.LibraryEntry
 import com.sluggyard.tv.domain.model.DebridSettings
 import com.sluggyard.tv.ui.app.details.DetailsDataSource
@@ -369,24 +370,33 @@ class AppGraph(
         // migrating service-suffixed rewrite_debrid_v2_{profile}_{service} keys.
         dataStore.edit { preferences ->
             val migrationMarker = stringPreferencesKey("app_profile_migration_v4")
-            if (preferences[migrationMarker] == "complete") return@edit
             val profileKey = stringPreferencesKey("app_profiles_v1")
-            val current = preferences[profileKey]?.let(ProfileCodec::decode) ?: ProfileState()
-            val (remapped, remaps) = remapNonIntegerProfileIds(current)
-            if (remaps.isNotEmpty()) {
-                preferences[profileKey] = ProfileCodec.encode(remapped)
-                preferences.copyRemappedProfileScopedPreferences(remaps)
-            } else {
-                // Preserve the earlier default→1 blob copy for installs that already use "1".
-                preferences.copyLegacyDefaultProfileScopedPreferences()
+            if (preferences[migrationMarker] != "complete") {
+                val current = preferences[profileKey]?.let(ProfileCodec::decode) ?: ProfileState()
+                val (remapped, remaps) = remapNonIntegerProfileIds(current)
+                if (remaps.isNotEmpty()) {
+                    preferences[profileKey] = ProfileCodec.encode(remapped)
+                    preferences.copyRemappedProfileScopedPreferences(remaps)
+                } else {
+                    // Preserve the earlier default→1 blob copy for installs that already use "1".
+                    preferences.copyLegacyDefaultProfileScopedPreferences()
+                }
+                preferences[migrationMarker] = "complete"
             }
-            preferences[migrationMarker] = "complete"
+            preferences.copyLegacyDefaultProfileScopedPreferences()
         }
         profiles.migrateIfDefault(
             profiles = profileManager.profiles.value.map { PriorProfileSnapshot(it.id.toString(), it.name) },
             activeProfileId = profileManager.activeProfileId.value.toString(),
             rememberLastProfile = profileManager.rememberLastProfileEnabled.value,
         )
+        // Re-home orphaned TorBox/RD blobs onto the settled active profile. A prefs file
+        // rename (playflix_rewrite→playflix_app) or profile-id remap left keys behind under
+        // the old id so Connect looked empty after every update.
+        val activeId = profiles.state.first().activeProfileId
+        dataStore.edit { preferences ->
+            preferences.recoverOrphanedDebridCredentials(activeId)
+        }
         dataIntegrity.scan()
     }
 

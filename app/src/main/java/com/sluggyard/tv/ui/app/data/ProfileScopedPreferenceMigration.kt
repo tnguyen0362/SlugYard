@@ -72,3 +72,39 @@ private val ExactProfilePrefixes = listOf(
 private val ServiceSuffixedPrefixes = listOf(
     "app_debrid_v2_",
 )
+
+/**
+ * If the active profile has no encrypted debrid blob for a service but another profile id
+ * still holds one (orphaned by id remaps / store renames), copy it onto the active profile.
+ * Never overwrites an existing active blob.
+ */
+internal fun MutablePreferences.recoverOrphanedDebridCredentials(activeProfileId: String) {
+    if (activeProfileId.isBlank()) return
+    val prefix = "app_debrid_v2_"
+    val activeStem = "$prefix$activeProfileId"
+    val orphansByService = linkedMapOf<String, Preferences.Key<*>>()
+    asMap().keys.forEach { key ->
+        val name = key.name
+        if (!name.startsWith(prefix)) return@forEach
+        if (name == activeStem || name.startsWith("${activeStem}_")) return@forEach
+        val rest = name.removePrefix(prefix)
+        val sep = rest.indexOf('_')
+        if (sep <= 0 || sep >= rest.lastIndex) return@forEach
+        val service = rest.substring(sep + 1).lowercase()
+        if (service.isBlank()) return@forEach
+        orphansByService.putIfAbsent(service, key)
+    }
+    orphansByService.forEach { (service, fromKey) ->
+        val toKey = stringPreferencesKey("${activeStem}_$service")
+        val value = this[fromKey] as? String ?: return@forEach
+        if (value.isBlank()) return@forEach
+        if (this[toKey] == null) this[toKey] = value
+    }
+    val activePickKey = stringPreferencesKey("app_debrid_active_v1_$activeProfileId")
+    if (this[activePickKey] == null) {
+        orphansByService.keys.firstOrNull()?.let { service ->
+            // Stored as DebridService.name (TORBOX / REAL_DEBRID / …).
+            this[activePickKey] = service.uppercase()
+        }
+    }
+}

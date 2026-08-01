@@ -26,10 +26,12 @@ import com.sluggyard.tv.core.sync.remote.SupabaseCredentialVaultGateway
 import com.sluggyard.tv.core.sync.remote.SupabaseDataGateway
 import com.sluggyard.tv.core.sync.remote.SupabaseHttpTransport
 import com.sluggyard.tv.data.local.DebridSettingsDataStore
+import com.sluggyard.tv.ui.app.data.APP_DATA_STORE_NAME
 import com.sluggyard.tv.ui.app.data.DataStorePlaybackProgressSyncBridge
 import com.sluggyard.tv.ui.app.data.LibraryWatchStore
 import com.sluggyard.tv.ui.app.data.ProfileStore
 import com.sluggyard.tv.ui.app.data.LibraryWatchRepository
+import com.sluggyard.tv.ui.app.data.migrateLegacyAppDataStoreFiles
 import com.sluggyard.tv.ui.app.debrid.DataStoreProviderCredentialSyncBridge
 import dagger.Module
 import dagger.Provides
@@ -149,10 +151,15 @@ object SyncModule {
     @Named("app")
     fun provideAppDataStore(
         @ApplicationContext context: Context,
-    ): DataStore<Preferences> = PreferenceDataStoreFactory.create(
-        scope = CoroutineScope(Dispatchers.IO),
-        produceFile = { context.preferencesDataStoreFile("playflix_app") },
-    )
+    ): DataStore<Preferences> {
+        // Must run before DataStore opens the file — otherwise TorBox keys stay orphaned
+        // in playflix_rewrite after the playflix_app rename.
+        migrateLegacyAppDataStoreFiles(context)
+        return PreferenceDataStoreFactory.create(
+            scope = CoroutineScope(Dispatchers.IO),
+            produceFile = { context.preferencesDataStoreFile(APP_DATA_STORE_NAME) },
+        )
+    }
 
     @Provides
     @Singleton

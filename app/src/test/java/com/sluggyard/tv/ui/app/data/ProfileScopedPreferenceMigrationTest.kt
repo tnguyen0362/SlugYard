@@ -53,4 +53,31 @@ class ProfileScopedPreferenceMigrationTest {
         assertEquals("enc-v1:rd", prefs[stringPreferencesKey("app_debrid_v2_1_real_debrid")])
         assertNull(prefs[stringPreferencesKey("app_debrid_v2_1")])
     }
+
+    @Test
+    fun recoversOrphanedTorboxCredentialOntoActiveProfile() {
+        val orphan = stringPreferencesKey("app_debrid_v2_default_torbox")
+        val active = stringPreferencesKey("app_debrid_v2_1_torbox")
+        val prefs = mutablePreferencesOf(orphan to "enc-v1:torbox-blob")
+
+        prefs.recoverOrphanedDebridCredentials("1")
+
+        assertEquals("enc-v1:torbox-blob", prefs[active])
+        assertEquals("TORBOX", prefs[stringPreferencesKey("app_debrid_active_v1_1")])
+        assertEquals("enc-v1:torbox-blob", prefs[orphan])
+    }
+
+    @Test
+    fun recoverDoesNotOverwriteActiveCredential() {
+        val orphan = stringPreferencesKey("app_debrid_v2_9_torbox")
+        val active = stringPreferencesKey("app_debrid_v2_1_torbox")
+        val prefs = mutablePreferencesOf(
+            orphan to "enc-v1:old",
+            active to "enc-v1:keep",
+        )
+
+        prefs.recoverOrphanedDebridCredentials("1")
+
+        assertEquals("enc-v1:keep", prefs[active])
+    }
 }
