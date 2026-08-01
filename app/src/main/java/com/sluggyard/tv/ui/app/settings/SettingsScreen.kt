@@ -39,6 +39,8 @@ fun SettingsScreen(
     addons: List<ManagedAddon>,
     onInstallCommunityAddons: suspend () -> Unit,
     onUninstallCommunityAddons: suspend () -> Unit,
+    onInstallAddon: suspend (manifestUrl: String) -> Unit,
+    onUninstallAddon: suspend (manifestUrl: String) -> Unit,
     onOpenProfiles: () -> Unit,
     contentFocusRequester: FocusRequester? = null,
     headerFocusRequester: FocusRequester? = null,
@@ -58,6 +60,11 @@ fun SettingsScreen(
             SettingsCategory.Account -> AccountSettings(facade, onSignedOut, onOpenAuth)
             SettingsCategory.Profiles -> ProfilesSettings(profileState, onOpenProfiles)
             SettingsCategory.Layout -> LayoutSettings(homeSettings, profileState, onHideUnreleasedChanged, onRememberProfileChanged)
+            SettingsCategory.Addons -> AddonsSettings(
+                addons = addons,
+                onInstallAddon = onInstallAddon,
+                onUninstallAddon = onUninstallAddon,
+            )
             SettingsCategory.ContentDiscovery -> ContentDiscoverySettings(
                 addons = addons,
                 debridConnected = debridConnection.activeService != null ||

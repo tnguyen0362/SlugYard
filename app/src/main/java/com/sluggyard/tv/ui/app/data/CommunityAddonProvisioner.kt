@@ -10,6 +10,7 @@ import com.sluggyard.tv.core.aggregation.AddonFanoutResult
 import com.sluggyard.tv.core.aggregation.AddonFanoutTask
 import com.sluggyard.tv.core.aggregation.boundedAddonFanout
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.net.URI
@@ -39,6 +40,7 @@ class CommunityAddonProvisioner(
         debridConfigured: Boolean = configured != null,
     ): CommunityProvisioningReport {
         return provisionMutex.withLock {
+            registry.ensurePlayFlixNotDefaultInstalled()
             provisionLocked(configured, debridConfigured)
         }
     }
@@ -49,6 +51,81 @@ class CommunityAddonProvisioner(
             registry.clearCurated()
             CommunityProvisioningReport(installedCount = 0, unavailableCount = 0)
         }
+    }
+
+    /**
+     * Installs a single allowlisted community manifest (e.g. PlayFlix from Community addons).
+     * Optional PlayFlix is preserved across later provision passes.
+     */
+    suspend fun installAllowlisted(
+        registryUrl: String,
+        configuredRequestUrl: String? = null,
+    ): ManagedAddon {
+        return provisionMutex.withLock {
+            val normalized = registryUrl.trim()
+            require(normalized in (SlugYardCommunitySourcePolicy.bootstrapManifestUrls.toSet())) {
+                "Addon URL is not in the curated allowlist"
+            }
+            if (SlugYardCommunitySourcePolicy.isOptionalCommunityManifest(normalized)) {
+                registry.ensurePlayFlixNotDefaultInstalled()
+            }
+            val requestUrl = configuredRequestUrl?.takeIf { it.isNotBlank() } ?: normalized
+            when (val response = gateway.fetchManifest(requestUrl)) {
+                is AddonTransportResult.Success -> when (
+                    val validation = AddonManifestPolicy.validate(requestUrl, response.value)
+                ) {
+                    is com.sluggyard.tv.core.addonprotocol.ManifestValidation.Accepted -> {
+                        val addon = ManagedAddon(
+                            manifestUrl = normalized,
+                            configuredManifestUrl = requestUrl.takeUnless { it == normalized },
+                            manifest = displayAwareManifest(normalized, validation.manifest),
+                        )
+                        registry.dispatch(
+                            com.sluggyard.tv.core.addonprotocol.AddonRegistryAction.Add(addon),
+                        )
+                        registry.bindConfiguredManifestUrl(
+                            manifestUrl = normalized,
+                            configuredManifestUrl = addon.configuredManifestUrl,
+                        )
+                        addon
+                    }
+                    is com.sluggyard.tv.core.addonprotocol.ManifestValidation.Rejected ->
+                        error(validation.reason)
+                }
+                is AddonTransportResult.HttpFailure ->
+                    error("Could not load addon (HTTP ${response.statusCode})")
+                is AddonTransportResult.NetworkFailure ->
+                    error("Could not load addon (network failure)")
+                is AddonTransportResult.MalformedResponse ->
+                    error("Could not load addon (malformed manifest)")
+            }
+        }
+    }
+
+    suspend fun uninstallByManifestUrl(manifestUrl: String) {
+        provisionMutex.withLock {
+            val current = registry.state.first()
+            val match = current.addons.firstOrNull {
+                it.manifestUrl.equals(manifestUrl.trim(), ignoreCase = true) ||
+                    (
+                        SlugYardCommunitySourcePolicy.isPlayFlixManifest(it.manifestUrl) &&
+                            SlugYardCommunitySourcePolicy.isPlayFlixManifest(manifestUrl)
+                        )
+            } ?: return@withLock
+            registry.dispatch(
+                com.sluggyard.tv.core.addonprotocol.AddonRegistryAction.Remove(match.manifest.id),
+            )
+            registry.bindConfiguredManifestUrl(match.manifestUrl, null)
+        }
+    }
+
+    private fun displayAwareManifest(
+        registryUrl: String,
+        manifest: com.sluggyard.tv.core.addonprotocol.AddonManifestContract,
+    ) = if (SlugYardCommunitySourcePolicy.isPlayFlixManifest(registryUrl)) {
+        manifest.copy(name = SlugYardCommunitySourcePolicy.PLAYFLIX_DISPLAY_NAME)
+    } else {
+        manifest
     }
 
     private suspend fun provisionLocked(

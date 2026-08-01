@@ -36,4 +36,16 @@ class ImageUrlsTest {
             preferTvBackdropUrl("https://image.tmdb.org/t/p/w300/back.jpg"),
         )
     }
+
+    @Test
+    fun preferCardBackdropUrl_uses780Not1280() {
+        assertEquals(
+            "https://image.tmdb.org/t/p/w780/back.jpg",
+            preferCardBackdropUrl("https://image.tmdb.org/t/p/w300/back.jpg"),
+        )
+        assertEquals(
+            "https://image.tmdb.org/t/p/w780/back.jpg",
+            preferCardBackdropUrl("https://image.tmdb.org/t/p/w1280/back.jpg"),
+        )
+    }
 }

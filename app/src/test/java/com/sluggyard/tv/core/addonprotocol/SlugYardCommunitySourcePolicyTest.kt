@@ -38,12 +38,29 @@ class SlugYardCommunitySourcePolicyTest {
         assertFalse(urls.any { it.contains("comet", ignoreCase = true) })
         assertFalse(urls.any { it.contains("meteor", ignoreCase = true) })
         assertFalse(urls.any { SlugYardCommunitySourcePolicy.isAioStreamsManifest(it) })
+        assertFalse(urls.any(SlugYardCommunitySourcePolicy::isOptionalCommunityManifest))
     }
 
     @Test
-    fun `with debrid provisions full bootstrap allowlist`() {
+    fun `with debrid provisions bootstrap allowlist except optional PlayFlix`() {
         val urls = SlugYardCommunitySourcePolicy.provisionManifestUrls(debridConfigured = true)
-        assertEquals(SlugYardCommunitySourcePolicy.bootstrapManifestUrls, urls)
+        assertEquals(
+            SlugYardCommunitySourcePolicy.bootstrapManifestUrls.filterNot(
+                SlugYardCommunitySourcePolicy::isOptionalCommunityManifest,
+            ),
+            urls,
+        )
+        assertFalse(urls.any(SlugYardCommunitySourcePolicy::isPlayFlixManifest))
+        assertTrue(SlugYardCommunitySourcePolicy.PLAYFLIX_MANIFEST_URL in SlugYardCommunitySourcePolicy.bootstrapManifestUrls)
+    }
+
+    @Test
+    fun `playflix display name overrides mediafusion branding`() {
+        val addon = ManagedAddon(
+            manifestUrl = SlugYardCommunitySourcePolicy.PLAYFLIX_MANIFEST_URL,
+            manifest = AddonManifestContract(id = "mediafusion", name = "MediaFusion"),
+        )
+        assertEquals(SlugYardCommunitySourcePolicy.PLAYFLIX_DISPLAY_NAME, (SlugYardCommunitySourcePolicy.addonDisplayName(addon)))
     }
 
     @Test

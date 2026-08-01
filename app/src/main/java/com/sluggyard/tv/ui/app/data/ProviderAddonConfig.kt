@@ -17,8 +17,9 @@ internal const val CometManifestUrl = "$CometManifestHost/manifest.json"
 internal const val MeteorManifestHost = "https://meteorfortheweebs.midnightignite.me"
 internal const val MeteorManifestUrl = "$MeteorManifestHost/manifest.json"
 internal const val MediaFusionManifestHost = "https://mediafusionfortheweebs.midnightignite.me"
-/** Keyless catalog bootstrap — never embeds a debrid token. */
-internal const val MediaFusionBootstrapManifestUrl = "$MediaFusionManifestHost/manifest.json"
+/** Keyless catalog bootstrap — never embeds a debrid token. PlayFlix UI name; URL unchanged. */
+internal const val MediaFusionBootstrapManifestUrl =
+    com.sluggyard.tv.core.addonprotocol.SlugYardCommunitySourcePolicy.PLAYFLIX_MANIFEST_URL
 
 data class ConfiguredAddonUrls(
     val torrentioManifestUrl: String,

@@ -313,6 +313,36 @@ class AppGraph(
         _communityProvisioningReport.value = communityProvisioner.uninstall()
     }
 
+    suspend fun installAllowlistedAddon(manifestUrl: String) {
+        val normalized = manifestUrl.trim().let { raw ->
+            when {
+                raw.endsWith("/manifest.json", ignoreCase = true) -> raw
+                raw.contains("://") -> raw.trimEnd('/') + "/manifest.json"
+                else -> raw
+            }
+        }
+        val configured = if (
+            SlugYardCommunitySourcePolicy.isPlayFlixManifest(normalized) &&
+            debridRuntime.configuredService() != null
+        ) {
+            debridRuntime.configuredAddonUrls()?.mediaFusionManifestUrl
+        } else {
+            null
+        }
+        communityProvisioner.installAllowlisted(
+            registryUrl = when {
+                SlugYardCommunitySourcePolicy.isPlayFlixManifest(normalized) ->
+                    SlugYardCommunitySourcePolicy.PLAYFLIX_MANIFEST_URL
+                else -> normalized
+            },
+            configuredRequestUrl = configured,
+        )
+    }
+
+    suspend fun uninstallAllowlistedAddon(manifestUrl: String) {
+        communityProvisioner.uninstallByManifestUrl(manifestUrl)
+    }
+
     suspend fun synchronizeProfiles() {
         // Remap legacy "default"/UUID Rewrite profile ids onto integer ids required by
         // Supabase profile_id columns, and copy scoped DataStore blobs so Home prefs,
@@ -1725,6 +1755,12 @@ private fun AppContent(
                     onUninstallCommunityAddons = {
                         settingsFacade.setCommunityAddonEnabled(false)
                         graph.uninstallCommunitySources()
+                    },
+                    onInstallAddon = { manifestUrl ->
+                        graph.installAllowlistedAddon(manifestUrl)
+                    },
+                    onUninstallAddon = { manifestUrl ->
+                        graph.uninstallAllowlistedAddon(manifestUrl)
                     },
                     onOpenProfiles = {
                         profilesReturnDestination = RootDestination.Settings

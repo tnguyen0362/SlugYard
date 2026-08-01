@@ -1,6 +1,8 @@
 package com.sluggyard.tv
 
 import android.app.Application
+import android.app.ActivityManager
+import android.content.Context
 import android.os.Build
 import coil3.ImageLoader
 import coil3.SingletonImageLoader
@@ -114,9 +116,16 @@ class SlugYardApplication : Application(), SingletonImageLoader.Factory {
                     .build()
             }
             .diskCache {
+                val am = getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+                // Low-RAM TV boxes share flash with media cache; keep artwork disk smaller there.
+                val diskBytes = if (am?.isLowRamDevice == true) {
+                    96L * 1024 * 1024
+                } else {
+                    160L * 1024 * 1024
+                }
                 DiskCache.Builder()
                     .directory(cacheDir.resolve("image_cache").toOkioPath())
-                    .maxSizeBytes(200L * 1024 * 1024)
+                    .maxSizeBytes(diskBytes)
                     .build()
             }
             .crossfade(false)

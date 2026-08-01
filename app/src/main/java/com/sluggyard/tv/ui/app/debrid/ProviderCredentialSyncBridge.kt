@@ -10,7 +10,6 @@ import com.sluggyard.tv.core.sync.ProviderCredentialSyncBridge
 import com.sluggyard.tv.core.sync.SyncMutationRecorder
 import com.sluggyard.tv.core.sync.adapter.ProviderCredentialSyncAdapter
 import com.sluggyard.tv.core.sync.auth.SyncResult
-import com.sluggyard.tv.core.sync.model.ProviderCredentialCiphertextCodec
 import com.sluggyard.tv.core.sync.model.ProviderCredentialRecord
 import com.sluggyard.tv.core.sync.remote.SyncMutation
 import com.sluggyard.tv.data.local.DebridSettingsDataStore
@@ -44,15 +43,15 @@ class DataStoreProviderCredentialSyncBridge(
 
     override suspend fun apply(records: List<ProviderCredentialRecord>) {
         records.forEach { record ->
-            val profileId = record.profileId?.toString() ?: return@forEach
+            val targetProfileId = record.profileId ?: return@forEach
             val service = serviceForProviderId(record.providerId) ?: return@forEach
             val plaintext = runCatching { adapter.toPlaintext(record) }.getOrNull()
                 ?.trim()
                 ?.takeIf { it.isNotEmpty() }
                 ?: return@forEach
-            saveCredential(profileId, service, plaintext)
-            // Keep the legacy settings store warm so non-rewrite resolvers / UI stay in sync.
-            debridSettings.setProviderApiKey(record.providerId, plaintext)
+            saveCredential(targetProfileId.toString(), service, plaintext)
+            // Dual-write legacy store for the *same* profile as the rewrite key — never active.
+            dualWriteLegacyApiKey(targetProfileId, record.providerId, plaintext)
         }
     }
 
@@ -67,8 +66,11 @@ class DataStoreProviderCredentialSyncBridge(
         val providerId = service.providerId() ?: return
         val normalized = apiKey.trim()
         if (normalized.isBlank()) return
-        debridSettings.setProviderApiKey(providerId, normalized)
-        val profileInt = profileId.toIntOrNull()
+        val profileInt = legacyDualWriteProfileId(profileId)
+        // Skip legacy dual-write when profileId is not an Int — never fall back to active.
+        if (profileInt != null) {
+            dualWriteLegacyApiKey(profileInt, providerId, normalized)
+        }
         val record = adapter.fromPlaintext(
             profileId = profileInt,
             providerId = providerId,
@@ -79,6 +81,10 @@ class DataStoreProviderCredentialSyncBridge(
             is SyncResult.Success -> Unit
             else -> Unit // Guest / offline — rewrite store already has the key locally.
         }
+    }
+
+    private suspend fun dualWriteLegacyApiKey(profileId: Int, providerId: String, plaintext: String) {
+        debridSettings.setProviderApiKey(providerId, plaintext, profileId = profileId)
     }
 
     private suspend fun localPlainCredentials(): List<Triple<Int, DebridService, String>> {
@@ -128,3 +134,12 @@ private fun serviceForProviderId(providerId: String): DebridService? = when (pro
     DebridProviders.REAL_DEBRID_ID -> DebridService.REAL_DEBRID
     else -> null
 }
+
+/**
+ * Resolves the Int profile id for a legacy [DebridSettingsDataStore] dual-write.
+ *
+ * Returns null when the target cannot be mapped — callers must **not** fall back to the
+ * active profile (that was the cross-profile leak).
+ */
+internal fun legacyDualWriteProfileId(targetProfileId: String?): Int? =
+    targetProfileId?.toIntOrNull()

@@ -34,15 +34,16 @@ class CommunityAddonProvisionerTest {
             debridConfigured = true,
         )
 
-        assertEquals(SlugYardCommunitySourcePolicy.bootstrapManifestUrls.size, gateway.requestedUrls.size)
+        assertEquals(SlugYardCommunitySourcePolicy.provisionManifestUrls(true).size, gateway.requestedUrls.size)
         assertTrue(gateway.requestedUrls.none { it.contains("example.test") })
         assertTrue(gateway.requestedUrls.contains("https://torrentio.strem.fun/debridoptions=nodownloadlinks%7Ctorbox=key/manifest.json"))
         assertTrue(gateway.requestedUrls.contains("https://meteorfortheweebs.midnightignite.me/configured/manifest.json"))
+        assertTrue(gateway.requestedUrls.none { SlugYardCommunitySourcePolicy.isPlayFlixManifest(it) })
         if (SlugYardCommunitySourcePolicy.aioStreamsRegistryUrl != null) {
             assertTrue(gateway.requestedUrls.any { it.contains("/uuid/enc/manifest.json") })
         }
-        assertEquals(SlugYardCommunitySourcePolicy.bootstrapManifestUrls.size, registry.curated.single().size)
-        assertEquals(SlugYardCommunitySourcePolicy.bootstrapManifestUrls.size, report.installedCount)
+        assertEquals(SlugYardCommunitySourcePolicy.provisionManifestUrls(true).size, registry.curated.single().size)
+        assertEquals(SlugYardCommunitySourcePolicy.provisionManifestUrls(true).size, report.installedCount)
         assertEquals(0, report.unavailableCount)
     }
 
@@ -99,8 +100,8 @@ class CommunityAddonProvisionerTest {
             debridConfigured = true,
         )
 
-        assertEquals(SlugYardCommunitySourcePolicy.bootstrapManifestUrls.size - 1, registry.curated.single().size)
-        assertEquals(SlugYardCommunitySourcePolicy.bootstrapManifestUrls.size - 1, report.installedCount)
+        assertEquals(SlugYardCommunitySourcePolicy.provisionManifestUrls(true).size - 1, registry.curated.single().size)
+        assertEquals(SlugYardCommunitySourcePolicy.provisionManifestUrls(true).size - 1, report.installedCount)
         assertEquals(1, report.unavailableCount)
         assertTrue(report.unavailableReasons.any { "HTTP 503" in it })
     }
@@ -145,6 +146,7 @@ class CommunityAddonProvisionerTest {
         val curated = mutableListOf<List<ManagedAddon>>()
         var cleared = false
         var lastRetainUrls: Set<String> = emptySet()
+        var playFlixDefaultOffEnsured = false
 
         override suspend fun dispatch(action: AddonRegistryAction) = Unit
         override suspend fun ensureCurated(
@@ -159,5 +161,14 @@ class CommunityAddonProvisionerTest {
             cleared = true
             curated.clear()
         }
+
+        override suspend fun ensurePlayFlixNotDefaultInstalled() {
+            playFlixDefaultOffEnsured = true
+        }
+
+        override suspend fun bindConfiguredManifestUrl(
+            manifestUrl: String,
+            configuredManifestUrl: String?,
+        ) = Unit
     }
 }

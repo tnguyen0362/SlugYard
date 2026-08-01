@@ -1,5 +1,7 @@
 package com.sluggyard.tv.ui.app.home
 
+import android.app.ActivityManager
+import android.content.Context
 import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -221,17 +223,24 @@ private val HomeShelfTrailingGap = SlugYardTvMetrics.ShelfTrailingGap
 
 /** Focused Home tiles expand to a real ~16:9 layout width (pushes neighbors — no overlap). */
 private const val HomePosterLandscapeAspect = 16f / 9f
-/** Coil decode cap for landscape backdrops (sharp on TV without decoding at full focus px). */
-private const val MaxLandscapeDecodeWidthPx = 1280
+/** Coil decode cap for card landscapes — match preferCardBackdropUrl (w780), not hero w1280. */
+private const val MaxLandscapeDecodeWidthPx = 780
 private const val RowBringIntoViewDebounceMs = 120L
-/** Wait for focus to settle before kicking a 1280px landscape decode (fast D-pad). */
-private const val HomeLandscapeFocusSettleMs = 160L
+/** Wait for focus to settle before kicking a landscape decode (fast D-pad). */
+private const val HomeLandscapeFocusSettleMs = 120L
 /** Neighbor portrait warm-cache window after focus settles (leading..trailing). */
 private const val HomePosterPrefetchBehind = 1
-private const val HomePosterPrefetchAhead = 4
+/** Keep ahead prefetch short so landscape decode keeps Coil slots on weak TVs. */
+private const val HomePosterPrefetchAhead = 2
 private const val HomePosterPrefetchSettleMs = 90L
+private const val HomeBackdropPrefetchSettleMs = 40L
 private const val HomePosterRetryMax = 2
 private const val HomePosterRetryDelayMs = 140L
+
+private fun isLowRamTv(context: Context): Boolean {
+    val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+    return am?.isLowRamDevice == true
+}
 
 /** Vertical LazyColumn shelf bring-into-view (nav clearance). */
 internal fun homeCatalogVerticalScrollDistance(
@@ -312,6 +321,12 @@ fun HomeScreen(
     heroIndexState: MutableState<Int> = remember { mutableStateOf(0) },
     lastHeroKeyState: MutableState<String?> = remember { mutableStateOf(null) },
 ) {
+    val context = LocalContext.current
+    // OEM "low RAM" TV boxes still choke on simultaneous rail + landscape decode; keep expand
+    // on capable devices (Onn 4K Pro etc.) and auto-disable only where Android flags it.
+    val effectiveExpandOnFocus = remember(expandOnFocus, context) {
+        expandOnFocus && !isLowRamTv(context)
+    }
     val rowFocusRequesters = remember(state.rows.map { it.id }) {
         List(state.rows.size) { FocusRequester() }
     }
@@ -518,7 +533,7 @@ fun HomeScreen(
                     listState = rowScrollStates.getOrPut(row.id) { LazyListState() },
                     smoothFocusMovement = smoothFocusMovement,
                     // Continue Watching: portrait-only tiles (no landscape focus morph).
-                    expandOnFocus = expandOnFocus && row.id != "continue_watching",
+                    expandOnFocus = effectiveExpandOnFocus && row.id != "continue_watching",
                     onPosterSelected = if (row.id == "continue_watching" && onContinueWatchingSelected != null) {
                         onContinueWatchingSelected
                     } else {
@@ -932,7 +947,42 @@ private fun PosterRow(
             Size(176.dp.roundToPx().coerceAtLeast(1), 264.dp.roundToPx().coerceAtLeast(1))
         }
     }
-    // Warm a few neighbor portraits after focus settles — cheap vs landscape, fills blanks after fling.
+    val landscapePrefetchDecode = remember(density) {
+        with(density) {
+            Size(
+                (264.dp * HomePosterLandscapeAspect).roundToPx()
+                    .coerceAtMost(MaxLandscapeDecodeWidthPx)
+                    .coerceAtLeast(1),
+                264.dp.roundToPx().coerceAtLeast(1),
+            )
+        }
+    }
+    // Warm focused ±1 card backdrops first so expand hits memory instead of a cold w780 decode.
+    LaunchedEffect(row.id, focusedPosterIndex, row.posters, landscapePrefetchDecode, expandOnFocus) {
+        if (!expandOnFocus) return@LaunchedEffect
+        val anchor = focusedPosterIndex
+        if (anchor < 0) return@LaunchedEffect
+        delay(HomeBackdropPrefetchSettleMs)
+        val loader = context.imageLoader
+        val from = (anchor - 1).coerceAtLeast(0)
+        val to = (anchor + 1).coerceAtMost(row.posters.lastIndex)
+        for (i in from..to) {
+            val poster = row.posters[i]
+            val posterUrl = preferLargePosterUrl(poster.imageUrl)
+            val url = preferCardBackdropUrl(poster.backdropUrl)
+                ?.takeIf { it.isNotBlank() && it != posterUrl }
+                ?: continue
+            loader.enqueue(
+                ImageRequest.Builder(context)
+                    .data(url)
+                    .size(landscapePrefetchDecode)
+                    .memoryCacheKey("card-backdrop:${poster.id}:$url")
+                    .diskCacheKey("card-backdrop:${poster.id}:$url")
+                    .build(),
+            )
+        }
+    }
+    // Warm a few neighbor portraits after focus settles — cheaper than landscape; fills blanks.
     LaunchedEffect(row.id, focusedPosterIndex, row.posters, posterPrefetchDecode) {
         val anchor = focusedPosterIndex
         if (anchor < 0) return@LaunchedEffect

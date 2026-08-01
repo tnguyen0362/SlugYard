@@ -13,6 +13,7 @@ class SettingsPolicyTest {
                 SettingsCategory.Account,
                 SettingsCategory.Profiles,
                 SettingsCategory.Layout,
+                SettingsCategory.Addons,
                 SettingsCategory.ContentDiscovery,
                 SettingsCategory.Integrations,
                 SettingsCategory.Display,

@@ -295,8 +295,10 @@ android {
         abi {
             isEnable = !buildingAppBundle
             reset()
-            include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
-            isUniversalApk = true
+            // TV / sideload: ARM only. Emulator x86 is not a release target and doubled APK mass.
+            include("armeabi-v7a", "arm64-v8a")
+            // Universal packs every ABI into one ~200MB file; install the matching split instead.
+            isUniversalApk = false
         }
     }
 
@@ -332,7 +334,8 @@ android {
 
     packaging {
         jniLibs {
-            useLegacyPackaging = true
+            // Compressed .so in the APK (minSdk 24+ extracts at install). Cuts download size hard.
+            useLegacyPackaging = false
             // Keep one consistent native set across dependencies.
             pickFirsts += listOf(
                 "lib/*/libc++_shared.so",
@@ -499,12 +502,8 @@ dependencies {
     ))
     implementation(libs.media3.ui)
 
-    // Local decoder AARs (AV1, IAMF, MPEG-H)
-    implementation(files(
-        "libs/lib-decoder-av1-release.aar",
-        "libs/lib-decoder-iamf-release.aar",
-        "libs/lib-decoder-mpegh-release.aar"
-    ))
+    // Local decoder AARs — keep AV1 (common) + FFmpeg audio; drop niche IAMF/MPEG-H (~4MB/ABI).
+    implementation(files("libs/lib-decoder-av1-release.aar"))
     if (useLocalFfmpegDecoder) {
         implementation(project(":ffmpeg-decoder-downmix"))
     } else {

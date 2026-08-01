@@ -22,6 +22,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
 private val addonRegistryKey = stringPreferencesKey("app_addon_registry_v1")
+private val playFlixDefaultOffKey = stringPreferencesKey("playflix_not_default_installed_v1")
 
 interface AddonRegistry {
     val state: Flow<AddonRegistryState>
@@ -32,6 +33,8 @@ interface AddonRegistry {
      * [retainManifestUrls] is the allowlisted set that should remain after this pass.
      * Manifests outside that set are dropped (e.g. torrent sources when debrid is off).
      * Manifests inside the set that fail to fetch this run are kept if already installed.
+     * Optional community addons (PlayFlix) are preserved when already installed and never
+     * auto-added by this pass.
      */
     suspend fun ensureCurated(
         addons: List<ManagedAddon>,
@@ -39,6 +42,13 @@ interface AddonRegistry {
     )
     /** Removes all allowlisted community manifests (Install restores them via provisioning). */
     suspend fun clearCurated()
+    /**
+     * One-time strip of PlayFlix if an older build auto-provisioned it. After this marker is set,
+     * only an explicit Community install keeps PlayFlix.
+     */
+    suspend fun ensurePlayFlixNotDefaultInstalled()
+    /** Runtime-only configured manifest URL (may embed provider tokens). */
+    suspend fun bindConfiguredManifestUrl(manifestUrl: String, configuredManifestUrl: String?)
 }
 
 /**
@@ -79,29 +89,48 @@ class AddonRegistryStore(
         retainManifestUrls: Set<String>,
     ) {
         val retain = retainManifestUrls.intersect(SlugYardCommunitySourcePolicy.bootstrapManifestUrls.toSet())
+            .filterNot(SlugYardCommunitySourcePolicy::isOptionalCommunityManifest)
+            .toSet()
         val refreshedConfigured = addons
             .filter { it.manifestUrl in retain }
             .mapNotNull { addon -> addon.configuredManifestUrl?.let { addon.manifestUrl to it } }
             .toMap()
         // Keep prior configured URLs for retained manifests that failed to refresh this pass.
+        // Also keep PlayFlix configured URL when the optional addon stays installed.
+        val preservedOptionalConfigured = runtimeConfiguredUrls.value
+            .filterKeys(SlugYardCommunitySourcePolicy::isOptionalCommunityManifest)
         runtimeConfiguredUrls.value = runtimeConfiguredUrls.value
             .filterKeys { it in retain }
             .plus(refreshedConfigured)
+            .plus(preservedOptionalConfigured)
         dataStore.edit { preferences ->
             val current = preferences[addonRegistryKey]
                 ?.let(AddonRegistryCodec::decode)
                 ?.let(::sanitizeCuratedRegistry)
                 ?: AddonRegistryState()
-            val curated = addons.filter { addon -> addon.manifestUrl in retain }
+            val optionalInstalled = current.addons.filter {
+                SlugYardCommunitySourcePolicy.isOptionalCommunityManifest(it.manifestUrl)
+            }
+            val curated = addons.filter { addon ->
+                addon.manifestUrl in retain &&
+                    !SlugYardCommunitySourcePolicy.isOptionalCommunityManifest(addon.manifestUrl)
+            }
             val byUrl = curated.associateBy(ManagedAddon::manifestUrl)
             val updated = current.addons.mapNotNull { existing ->
-                byUrl[existing.manifestUrl]?.copy(enabled = existing.enabled)
-                    ?: existing.takeIf { it.manifestUrl in retain }
+                when {
+                    SlugYardCommunitySourcePolicy.isOptionalCommunityManifest(existing.manifestUrl) -> null
+                    byUrl[existing.manifestUrl] != null ->
+                        byUrl.getValue(existing.manifestUrl).copy(enabled = existing.enabled)
+                    existing.manifestUrl in retain -> existing
+                    else -> null
+                }
             }
             val additions = curated.filter { candidate ->
-                current.addons.none { it.manifestUrl == candidate.manifestUrl }
+                updated.none { it.manifestUrl == candidate.manifestUrl }
             }
-            val next = sanitizeCuratedRegistry(AddonRegistryState(updated + additions))
+            val next = sanitizeCuratedRegistry(
+                AddonRegistryState(updated + additions + optionalInstalled),
+            )
             if (next != current) {
                 preferences[addonRegistryKey] = AddonRegistryCodec.encode(next)
             }
@@ -112,6 +141,45 @@ class AddonRegistryStore(
         runtimeConfiguredUrls.value = emptyMap()
         dataStore.edit { preferences ->
             preferences.remove(addonRegistryKey)
+        }
+    }
+
+    override suspend fun ensurePlayFlixNotDefaultInstalled() {
+        // Only strip + clear configured URLs on the one-time migration. Running this on every
+        // provision() must not wipe a user-installed PlayFlix debrid-configured manifest URL.
+        var ranMigration = false
+        dataStore.edit { preferences ->
+            if (preferences[playFlixDefaultOffKey] == "1") return@edit
+            ranMigration = true
+            val current = preferences[addonRegistryKey]
+                ?.let(AddonRegistryCodec::decode)
+                ?.let(::sanitizeCuratedRegistry)
+                ?: AddonRegistryState()
+            val stripped = current.addons.filterNot {
+                SlugYardCommunitySourcePolicy.isPlayFlixManifest(it.manifestUrl)
+            }
+            if (stripped.size != current.addons.size) {
+                preferences[addonRegistryKey] = AddonRegistryCodec.encode(
+                    sanitizeCuratedRegistry(AddonRegistryState(stripped)),
+                )
+            }
+            preferences[playFlixDefaultOffKey] = "1"
+        }
+        if (ranMigration) {
+            runtimeConfiguredUrls.value = runtimeConfiguredUrls.value
+                .filterKeys { !SlugYardCommunitySourcePolicy.isPlayFlixManifest(it) }
+        }
+    }
+
+    override suspend fun bindConfiguredManifestUrl(
+        manifestUrl: String,
+        configuredManifestUrl: String?,
+    ) {
+        val key = manifestUrl.trim()
+        runtimeConfiguredUrls.value = if (configuredManifestUrl.isNullOrBlank()) {
+            runtimeConfiguredUrls.value - key
+        } else {
+            runtimeConfiguredUrls.value + (key to configuredManifestUrl.trim())
         }
     }
 }

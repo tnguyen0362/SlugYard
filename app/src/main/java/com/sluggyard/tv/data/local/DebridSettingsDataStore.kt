@@ -132,10 +132,16 @@ class DebridSettingsDataStore @Inject constructor(
         store().edit { it[preferredResolverProviderIdKey] = normalized }
     }
 
-    suspend fun setProviderApiKey(providerId: String, apiKey: String) {
+    /**
+     * @param profileId Target profile's legacy debrid_settings store. When null, writes the
+     *   **active** profile (UI connect path). Callers applying a sync/mutation for another
+     *   profile **must** pass that profile's id — never rely on active during cross-profile apply.
+     */
+    suspend fun setProviderApiKey(providerId: String, apiKey: String, profileId: Int? = null) {
         val provider = DebridProviders.byId(providerId) ?: return
         val normalized = apiKey.trim()
-        store().edit { prefs ->
+        val targetProfileId = profileId ?: profileManager.activeProfileId.value
+        store(targetProfileId).edit { prefs ->
             providerKey(provider.id)?.let { key ->
                 prefs[key] = if (normalized.isBlank()) {
                     ""

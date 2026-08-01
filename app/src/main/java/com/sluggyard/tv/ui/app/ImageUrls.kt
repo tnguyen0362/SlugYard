@@ -24,13 +24,12 @@ fun preferTvBackdropUrl(url: String?): String? {
     return tmdbSize(url, posterWidth = 1280, backdropWidth = 1280)
 }
 
-/** Landscape art for focused catalog cards — sharp enough for high-density TV panels.
- *  TMDB uses the same `/t/p/wXXX/` token for posters and backdrops, so the width bound must
- *  match the landscape intent: a w780 backdrop must not be downgraded to w500. */
+/** Landscape art for focused catalog cards — w780 matches TMDB catalog storage and
+ *  avoids upgrading every focus to a w1280 decode that starved Coil's 3-slot queue. */
 fun preferCardBackdropUrl(url: String?): String? {
     if (url.isNullOrBlank()) return url
     if (isTraktMediaHost(url)) return upgradeTraktImageSize(url)
-    return tmdbSize(url, posterWidth = 1280, backdropWidth = 1280)
+    return tmdbSize(url, posterWidth = 780, backdropWidth = 780)
 }
 
 private fun isTraktMediaHost(url: String): Boolean =

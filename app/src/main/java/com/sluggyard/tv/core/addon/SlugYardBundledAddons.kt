@@ -21,8 +21,9 @@ object SlugYardBundledAddons {
         "https://mediafusionfortheweebs.midnightignite.me",
     )
 
+    /** @see SlugYardCommunitySourcePolicy.PLAYFLIX_MANIFEST_URL */
     const val SLUGYARD_COMMUNITY_ADDON_MANIFEST =
-        "https://mediafusionfortheweebs.midnightignite.me/manifest.json"
+        SlugYardCommunitySourcePolicy.PLAYFLIX_MANIFEST_URL
 
     fun getDefaultAddons(debridSettings: DebridSettings? = null): List<String> =
         INFRASTRUCTURE_ADDONS.toMutableList().apply {
@@ -31,9 +32,13 @@ object SlugYardBundledAddons {
             }
         }
 
+    /** Default content sources for debrid — excludes optional PlayFlix (manual Community install). */
     fun buildConfiguredContentSourceUrls(debridSettings: DebridSettings): List<String> =
         SlugYardCommunitySourcePolicy.bootstrapManifestUrls
-            .filter { manifestUrl -> CONTENT_SOURCE_BASE_URLS.any(manifestUrl::startsWith) }
+            .filter { manifestUrl ->
+                CONTENT_SOURCE_BASE_URLS.any(manifestUrl::startsWith) &&
+                    !SlugYardCommunitySourcePolicy.isOptionalCommunityManifest(manifestUrl)
+            }
 
     fun isDefaultAddon(url: String): Boolean =
         INFRASTRUCTURE_ADDONS.any { base -> normalize(url).startsWith(base.lowercase()) }
