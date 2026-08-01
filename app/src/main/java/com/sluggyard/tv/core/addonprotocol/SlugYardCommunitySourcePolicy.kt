@@ -19,6 +19,8 @@ object SlugYardCommunitySourcePolicy {
         "https://mediafusionfortheweebs.midnightignite.me/manifest.json",
         // Comet cache-first scraper; debrid key injected into configuredManifestUrl on connect.
         "https://comet.elfhosted.com/manifest.json",
+        // Meteor cache-first scraper (MidnightIgnite); debrid key injected on connect.
+        "https://meteorfortheweebs.midnightignite.me/manifest.json",
     )
 
     val watchHubManifestUrl: String =
@@ -41,7 +43,10 @@ object SlugYardCommunitySourcePolicy {
 
     fun isContentSourceManifest(url: String): Boolean {
         val normalized = url.lowercase()
-        return "torrentio" in normalized || "mediafusion" in normalized || "comet" in normalized
+        return "torrentio" in normalized ||
+            "mediafusion" in normalized ||
+            "comet" in normalized ||
+            "meteor" in normalized
     }
 
     fun isConfiguredEnabledStreamAddon(addon: ManagedAddon): Boolean =

@@ -92,7 +92,18 @@ internal object RewriteStreamScoringEngine {
         // multi-file season packs (Judas/Anime Time Dual+Multi-Subs) so episode file-select
         // can pick SxxExx out of the pack. Resolve failure still rejects and tries the next.
         val sizedPool = instantPool.filter { it.isSaneAutoPlaySize(context) }
-        return sizedPool.maxWithOrNull(rankComparator(context))
+        // With a subtitle preference, skip anime releases that advertise the wrong language
+        // (A&C Spanish Multi-Sub, Spanish ASS). If nothing language-safe remains, return null
+        // so Play opens Sources instead of auto-starting junk.
+        val preferred = normalizePreferredSubtitle(context.preferredSubtitleLanguage)
+        val playPool = if (preferred != null && classify(context) == ContentKind.ANIME) {
+            sizedPool.filter { candidate ->
+                !hasConflictingSubtitleLanguage(candidate.releaseText().lowercase(), preferred)
+            }
+        } else {
+            sizedPool
+        }
+        return playPool.maxWithOrNull(rankComparator(context))
     }
 
     fun rankedCandidates(
@@ -157,14 +168,18 @@ internal object RewriteStreamScoringEngine {
 
     /**
      * SoftsubFit (higher better):
-     * 3 preferred-lang match / multi-subs
-     * 2 softsub/sub tag without preferred-lang match (or any softsub when no preference)
-     * 1 none / conflicting language softsub (e.g. Spanish ASS when preferred is en)
+     * 3 preferred-lang match (e.g. Eng Sub when preferred is en)
+     * 2 softsub / multi-subs without an explicit preferred-lang tag
+     * 1 none / conflicting language (Spanish ASS / A&C when preferred is en)
      * 0 RAW / hardsub
      *
      * DualFit (anime only; always 0 for K/J drama):
      * 1 has Dual-Audio / Multi-Audio
      * 0 otherwise
+     *
+     * Multi-Subs alone is NOT max score when a preference is set — A&C "Multi-Sub" packs
+     * are often Latam/España-only and must not beat real Eng Dual packs or fall through
+     * as auto-play winners.
      */
     private fun trackSignals(text: String, context: Context, kind: ContentKind): TrackSignals {
         val preferred = normalizePreferredSubtitle(context.preferredSubtitleLanguage)
@@ -181,8 +196,8 @@ internal object RewriteStreamScoringEngine {
         val softsubFit = when {
             raw || (hardsub && !hasSoftSignal) -> 0
             conflictingLang -> 1
-            hasSoftSignal && (hasPreferred || multiSubs) -> 3
-            hasSoftSignal && softsub && preferred == null -> 3
+            hasSoftSignal && hasPreferred -> 3
+            hasSoftSignal && preferred == null && (multiSubs || softsub) -> 3
             hasSoftSignal -> 2
             else -> 1
         }
@@ -461,11 +476,15 @@ internal object RewriteStreamScoringEngine {
             isLikelySoftsubRelease(text)
     }
 
-    /** Other explicit subtitle languages present while preferred is missing (and not multi-subs). */
+    /**
+     * True when the release advertises a non-preferred subtitle language, or is a known
+     * Spanish-leaning fansub pack (A&C / AandC) while preferred is not Spanish.
+     * Multi-Subs does NOT clear the conflict — A&C Multi-Sub is Latam/España, not Eng.
+     */
     private fun hasConflictingSubtitleLanguage(text: String, preferred: String): Boolean {
-        if (MULTI_SUBS_REGEX.containsMatchIn(text)) return false
         if (textMentionsLanguage(text, preferred)) return false
         val preferredBase = preferred.substringBefore('-').substringBefore('_').lowercase()
+        if (preferredBase != "es" && looksLikeSpanishFansubPack(text)) return true
         return SUBTITLE_CONFLICT_LANGUAGE_BASES.any { base ->
             base != preferredBase &&
                 // Japanese is usually the dual-audio source track, not a subtitle conflict.
@@ -473,6 +492,11 @@ internal object RewriteStreamScoringEngine {
                 textMentionsConflictLanguage(text, base)
         }
     }
+
+    /** A&C / AandC packs ship Spanish audio+ASS despite "Multi-Sub" labels. */
+    private fun looksLikeSpanishFansubPack(text: String): Boolean =
+        SPANISH_FANSUB_GROUP.containsMatchIn(text) ||
+            Regex("\\bespecial\\b").containsMatchIn(text)
 
     /**
      * Conflict detection uses unambiguous language names / codes only — short aliases like
@@ -579,6 +603,9 @@ internal object RewriteStreamScoringEngine {
     private val SOFTSUB_KEYWORD = Regex("\\b(softsub|soft.?subs?|ass|ssa)\\b")
     private val SEASON_PACK_MARKER = Regex(
         "\\b(season\\s*\\d+|complete|batch|s\\d{1,2}\\s*\\+\\s*specials|ep(?:isodes?)?\\s*\\d+\\s*[-~]\\s*\\d+)\\b",
+    )
+    private val SPANISH_FANSUB_GROUP = Regex(
+        """[\[(]\s*a\s*&\s*c\s*[\])]|[\[(]\s*aandc\s*[\])]|\baandc\b""",
     )
     private val SUBTITLE_CONFLICT_LANGUAGE_BASES = listOf(
         "en", "es", "pt", "fr", "de", "it", "ru", "ar", "hi", "ko", "zh", "ja",

@@ -285,6 +285,27 @@ class RewriteStreamAutoPickerTest {
     }
 
     @Test
+    fun animeRefusesSpanishAcMultiSubWhenPreferredEnglish() {
+        // Onn repro: only cached Eng-looking hit was A&C Multi-Sub — actually Spanish Latam
+        // audio+ASS. Auto-play must open Sources instead of starting it.
+        val ac = candidate("ac", cacheState = StreamCacheState.CACHED, infoHash = "ac-hash")
+            .copy(
+                title = "MediaFusion | Midnight 1080p",
+                filename = "[A&C] Akame ga Kill! [BDRip 1080p] [Multi-Audio] [Multi-Sub] S01",
+                videoSizeBytes = 3_771_518_293L,
+                seeders = 45,
+            )
+        val context = RewriteStreamScoringEngine.Context(
+            title = "Akame ga Kill!",
+            contentType = "series",
+            genres = listOf("Animation", "Action"),
+            preferredSubtitleLanguage = "en",
+        )
+        assertEquals(1, RewriteStreamScoringEngine.rank(ac, context).softsubFit)
+        assertNull(selectRewriteAutoPlayCandidate(groups(ac), context))
+    }
+
+    @Test
     fun animeRejectsOpaqueHugeSingleEpisodeLabel() {
         val opaque = candidate("opaque", cacheState = StreamCacheState.CACHED, infoHash = "opaque-hash")
             .copy(

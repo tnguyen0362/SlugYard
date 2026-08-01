@@ -14,6 +14,7 @@ class SlugYardCommunitySourcePolicyTest {
         assertTrue(urls.any { it.contains("torrentio", ignoreCase = true) })
         assertTrue(urls.any { it.contains("mediafusion", ignoreCase = true) })
         assertTrue(urls.any { it.contains("comet", ignoreCase = true) })
+        assertTrue(urls.any { it.contains("meteor", ignoreCase = true) })
     }
 
     @Test
@@ -35,6 +36,7 @@ class SlugYardCommunitySourcePolicyTest {
         assertFalse(urls.any { it.contains("torrentio", ignoreCase = true) })
         assertFalse(urls.any { it.contains("mediafusion", ignoreCase = true) })
         assertFalse(urls.any { it.contains("comet", ignoreCase = true) })
+        assertFalse(urls.any { it.contains("meteor", ignoreCase = true) })
     }
 
     @Test

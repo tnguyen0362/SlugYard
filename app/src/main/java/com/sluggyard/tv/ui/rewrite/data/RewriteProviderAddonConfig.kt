@@ -14,6 +14,8 @@ import java.util.Base64
 internal const val TorrentioManifestUrl = "https://torrentio.strem.fun/manifest.json"
 internal const val CometManifestHost = "https://comet.elfhosted.com"
 internal const val CometManifestUrl = "$CometManifestHost/manifest.json"
+internal const val MeteorManifestHost = "https://meteorfortheweebs.midnightignite.me"
+internal const val MeteorManifestUrl = "$MeteorManifestHost/manifest.json"
 internal const val MediaFusionManifestHost = "https://mediafusionfortheweebs.midnightignite.me"
 /** Keyless catalog bootstrap — never embeds a debrid token. */
 internal const val MediaFusionBootstrapManifestUrl = "$MediaFusionManifestHost/manifest.json"
@@ -22,6 +24,7 @@ data class RewriteConfiguredAddonUrls(
     val torrentioManifestUrl: String,
     val mediaFusionManifestUrl: String?,
     val cometManifestUrl: String? = null,
+    val meteorManifestUrl: String? = null,
 )
 
 internal fun torrentioProviderKey(service: DebridService): String = when (service) {
@@ -86,6 +89,67 @@ internal fun buildCometManifestUrl(service: DebridService, apiKey: String): Stri
         config.toString().toByteArray(StandardCharsets.UTF_8),
     )
     return "$CometManifestHost/$encoded/manifest.json"
+}
+
+/**
+ * Meteor cache-only manifest with the active debrid key injected.
+ * Mirrors the user's MidnightIgnite Meteor configure settings (cachedOnly, no P2P,
+ * preferred multi, SeaDex sort slot kept even when enableSeaDex is false).
+ */
+internal fun buildMeteorManifestUrl(service: DebridService, apiKey: String): String {
+    val normalized = apiKey.trim()
+    require(normalized.isNotBlank()) { "A Debrid API key is required to configure Meteor" }
+    val config = buildJsonObject {
+        put("cachedOnly", true)
+        put("skipReleaseFilter", true)
+        put("removeTrash", false)
+        put("removeSamples", false)
+        put("allowAdult", true)
+        put("exclude3D", false)
+        put("enableSeaDex", false)
+        put("showYourMedia", false)
+        put("yourMediaLegacyMode", false)
+        put("minSeeders", 0)
+        put("maxResults", 0)
+        put("maxPerResolution", 0)
+        putJsonArray("resolutions") {}
+        putJsonArray("preferredLangs") { add("multi") }
+        putJsonArray("languages") {}
+        putJsonArray("excludedLangs") {}
+        putJsonArray("resultFormat") {
+            add("title")
+            add("quality")
+            add("size")
+            add("audio")
+            add("sublang")
+            add("audiolang")
+        }
+        put("languageFormat", "codes")
+        putJsonArray("sortOrder") {
+            add("cached")
+            add("seadex")
+            add("seeders")
+            add("-resolution")
+            add("quality")
+            add("language")
+            add("size")
+            add("pack")
+        }
+        put("allowP2P", false)
+        putJsonArray("excludedSources") {}
+        putJsonArray("debridServices") {
+            add(
+                buildJsonObject {
+                    put("service", cometProviderKey(service))
+                    put("apiKey", normalized)
+                },
+            )
+        }
+    }
+    val encoded = Base64.getEncoder().encodeToString(
+        config.toString().toByteArray(StandardCharsets.UTF_8),
+    )
+    return "$MeteorManifestHost/$encoded/manifest.json"
 }
 
 /**

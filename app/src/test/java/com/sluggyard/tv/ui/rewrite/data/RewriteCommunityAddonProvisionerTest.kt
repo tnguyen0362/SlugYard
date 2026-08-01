@@ -26,6 +26,7 @@ class RewriteCommunityAddonProvisionerTest {
                 torrentioManifestUrl = "https://torrentio.strem.fun/debridoptions=nodownloadlinks%7Ctorbox=key/manifest.json",
                 mediaFusionManifestUrl = "https://mediafusion.example/configured/manifest.json",
                 cometManifestUrl = "https://comet.elfhosted.com/configured/manifest.json",
+                meteorManifestUrl = "https://meteorfortheweebs.midnightignite.me/configured/manifest.json",
             ),
             debridConfigured = true,
         )
@@ -33,6 +34,7 @@ class RewriteCommunityAddonProvisionerTest {
         assertEquals(SlugYardCommunitySourcePolicy.bootstrapManifestUrls.size, gateway.requestedUrls.size)
         assertTrue(gateway.requestedUrls.none { it.contains("example.test") })
         assertTrue(gateway.requestedUrls.contains("https://torrentio.strem.fun/debridoptions=nodownloadlinks%7Ctorbox=key/manifest.json"))
+        assertTrue(gateway.requestedUrls.contains("https://meteorfortheweebs.midnightignite.me/configured/manifest.json"))
         assertEquals(SlugYardCommunitySourcePolicy.bootstrapManifestUrls.size, registry.curated.single().size)
         assertEquals(SlugYardCommunitySourcePolicy.bootstrapManifestUrls.size, report.installedCount)
         assertEquals(0, report.unavailableCount)
@@ -83,6 +85,7 @@ class RewriteCommunityAddonProvisionerTest {
                 torrentioManifestUrl = "https://torrentio.strem.fun/debridoptions=nodownloadlinks%7Ctorbox=key/manifest.json",
                 mediaFusionManifestUrl = "https://mediafusion.example/configured/manifest.json",
                 cometManifestUrl = "https://comet.elfhosted.com/configured/manifest.json",
+                meteorManifestUrl = "https://meteorfortheweebs.midnightignite.me/configured/manifest.json",
             ),
             debridConfigured = true,
         )

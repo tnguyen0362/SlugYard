@@ -64,6 +64,7 @@ class RewriteCommunityAddonProvisioner(
                 registryUrl.contains("torrentio", ignoreCase = true) -> configured?.torrentioManifestUrl
                 registryUrl.contains("mediafusion", ignoreCase = true) -> configured?.mediaFusionManifestUrl
                 registryUrl.contains("comet", ignoreCase = true) -> configured?.cometManifestUrl
+                registryUrl.contains("meteor", ignoreCase = true) -> configured?.meteorManifestUrl
                 else -> null
             } ?: registryUrl
             ManifestRequest(registryUrl, requestUrl)

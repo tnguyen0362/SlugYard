@@ -78,5 +78,6 @@ class RewriteProviderAddonConfigurator(
                 null
             },
             cometManifestUrl = buildCometManifestUrl(service, apiKey),
+            meteorManifestUrl = buildMeteorManifestUrl(service, apiKey),
         )
 }
