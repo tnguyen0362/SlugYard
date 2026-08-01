@@ -97,6 +97,7 @@ import com.sluggyard.tv.ui.rewrite.data.RewriteLibraryWatchState
 import com.sluggyard.tv.ui.rewrite.data.RewritePlaybackProgressStore
 import com.sluggyard.tv.ui.rewrite.data.groupRewritePlaybackCheckpoints
 import com.sluggyard.tv.core.sync.RewriteProgressSyncBridge
+import com.sluggyard.tv.core.sync.RewriteProviderCredentialSyncBridge
 import com.sluggyard.tv.ui.rewrite.data.RewriteProfileStore
 import com.sluggyard.tv.ui.rewrite.data.RewriteHomeSettingsStore
 import com.sluggyard.tv.ui.rewrite.data.RewriteGuestSessionStore
@@ -107,6 +108,8 @@ import com.sluggyard.tv.ui.rewrite.data.RewriteProfileCodec
 import com.sluggyard.tv.ui.rewrite.data.RewriteProfileState
 import com.sluggyard.tv.ui.rewrite.data.RewriteCloudSyncNotices
 import com.sluggyard.tv.ui.rewrite.data.remapNonIntegerProfileIds
+import com.sluggyard.tv.ui.rewrite.data.copyLegacyDefaultProfileScopedPreferences
+import com.sluggyard.tv.ui.rewrite.data.copyRemappedProfileScopedPreferences
 import com.sluggyard.tv.ui.rewrite.data.RewriteLibraryEntry
 import com.sluggyard.tv.domain.model.DebridSettings
 import com.sluggyard.tv.ui.rewrite.details.RewriteDetailsDataSource
@@ -172,9 +175,11 @@ class RewriteAppGraph(
     private val profileManager: ProfileManager,
     private val rewriteDataStore: DataStore<Preferences>,
     progressSyncBridge: RewriteProgressSyncBridge,
+    val providerCredentialSyncBridge: RewriteProviderCredentialSyncBridge,
     libraryWatchRepository: RewriteLibraryWatchRepository,
     relatedDataSource: RewriteRelatedDataSource? = null,
     tmdbHomeDataSource: RewriteTmdbHomeDataSource? = null,
+    resolveMetaContentId: suspend (type: String, id: String) -> String = { _, id -> id },
 ) {
     private val playbackSources = java.util.concurrent.ConcurrentHashMap<String, ResolvedPlaybackSource>()
 
@@ -231,6 +236,7 @@ class RewriteAppGraph(
         registrySnapshot = { registry.state.firstValue() },
         gateway = gateway,
         watchStateSnapshot = { libraryWatch.state.firstValue() },
+        resolveMetaContentId = resolveMetaContentId,
     )
     val streamsDataSource = RewriteStreamsDataSource(
         registrySnapshot = { registry.state.firstValue() },
@@ -283,43 +289,20 @@ class RewriteAppGraph(
         // Remap legacy "default"/UUID Rewrite profile ids onto integer ids required by
         // Supabase profile_id columns, and copy scoped DataStore blobs so Home prefs,
         // progress, library, and credentials stay visible after the id change.
+        // v4 re-runs the credential family copy for installs that completed v3 without
+        // migrating service-suffixed rewrite_debrid_v2_{profile}_{service} keys.
         rewriteDataStore.edit { preferences ->
-            val migrationMarker = stringPreferencesKey("rewrite_profile_migration_v3")
+            val migrationMarker = stringPreferencesKey("rewrite_profile_migration_v4")
             if (preferences[migrationMarker] == "complete") return@edit
             val profileKey = stringPreferencesKey("rewrite_profiles_v1")
             val current = preferences[profileKey]?.let(RewriteProfileCodec::decode) ?: RewriteProfileState()
             val (remapped, remaps) = remapNonIntegerProfileIds(current)
             if (remaps.isNotEmpty()) {
                 preferences[profileKey] = RewriteProfileCodec.encode(remapped)
-                val prefixes = listOf(
-                    "rewrite_home_settings_v2_",
-                    "rewrite_library_watch_v2_",
-                    "rewrite_playback_progress_v2_",
-                    "rewrite_debrid_active_v1_",
-                    "rewrite_debrid_v2_",
-                )
-                remaps.forEach { (fromId, toId) ->
-                    prefixes.forEach { prefix ->
-                        val from = stringPreferencesKey("$prefix$fromId")
-                        val to = stringPreferencesKey("$prefix$toId")
-                        val value = preferences[from]
-                        if (value != null && preferences[to] == null) preferences[to] = value
-                    }
-                }
+                preferences.copyRemappedProfileScopedPreferences(remaps)
             } else {
                 // Preserve the earlier default→1 blob copy for installs that already use "1".
-                listOf(
-                    "rewrite_home_settings_v2_",
-                    "rewrite_library_watch_v2_",
-                    "rewrite_playback_progress_v2_",
-                    "rewrite_debrid_active_v1_",
-                    "rewrite_debrid_v2_",
-                ).forEach { prefix ->
-                    val from = stringPreferencesKey("${prefix}default")
-                    val to = stringPreferencesKey("${prefix}1")
-                    val value = preferences[from]
-                    if (value != null && preferences[to] == null) preferences[to] = value
-                }
+                preferences.copyLegacyDefaultProfileScopedPreferences()
             }
             preferences[migrationMarker] = "complete"
         }
@@ -636,7 +619,10 @@ private fun RewriteAppContent(
     var watchHubLoading by remember { mutableStateOf(false) }
     var watchHubMessage by remember { mutableStateOf<String?>(null) }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
-    val hasActiveDebrid = debridSettings.enabled && debridConnection.activeService != null
+    // A saved debrid credential is enough — do not also require the legacy enabled flag.
+    // WatchHub is only for Play when no provider key is connected.
+    val hasActiveDebrid = debridConnection.activeService != null ||
+        debridConnection.configuredServices.isNotEmpty()
     val context = LocalContext.current
 
     LaunchedEffect(Unit) {
@@ -838,8 +824,16 @@ private fun RewriteAppContent(
         if (profileId != profiles.activeProfileId) graph.selectProfile(profileId)
     }
 
-    LaunchedEffect(graph, profiles.activeProfileId, debridSettings.enabled, debridSettings.communityAddonEnabled, debridConnection.activeService, registry.addons.size) {
-        val hasActiveDebrid = debridSettings.enabled && debridConnection.activeService != null
+    LaunchedEffect(
+        graph,
+        profiles.activeProfileId,
+        debridSettings.communityAddonEnabled,
+        debridConnection.activeService,
+        debridConnection.configuredServices,
+        registry.addons.size,
+    ) {
+        val hasActiveDebrid = debridConnection.activeService != null ||
+            debridConnection.configuredServices.isNotEmpty()
         val packInstalled = SlugYardCommunitySourcePolicy.isCommunityPackInstalled(registry.addons)
         when {
             debridSettings.communityAddonEnabled -> {
@@ -1079,15 +1073,15 @@ private fun RewriteAppContent(
     // mutates the addon list while Play is already finding streams; restarting this effect
     // resets streamDiscoveryComplete=false after the 20s ceiling has already fired once,
     // which left the UI stuck on "Finding a playable stream…" forever.
-    val streamsDiscoveryKey = remember(destination, debridSettings.enabled, debridConnection.activeService) {
+    val streamsDiscoveryKey = remember(destination, debridConnection.activeService, debridConnection.configuredServices) {
         val streams = destination as? RewriteRootDestination.Streams
         listOf(
             streams?.type,
             streams?.id,
             streams?.season,
             streams?.episode,
-            debridSettings.enabled,
             debridConnection.activeService,
+            debridConnection.configuredServices,
         )
     }
     LaunchedEffect(streamsDiscoveryKey) {
@@ -1104,7 +1098,7 @@ private fun RewriteAppContent(
         graph.streamsDataSource.streamGroups(
             streams.type,
             streams.id,
-            configuredDebrid = debridConnection.activeService.takeIf { debridSettings.enabled },
+            configuredDebrid = debridConnection.activeService,
         ).collect { groups ->
             streamGroups = groups
             // Mark discovery done as soon as every addon left Loading — do not wait for TorBox
@@ -1162,7 +1156,7 @@ private fun RewriteAppContent(
                             episode = streams.episode,
                             forceDebridForTorrent = streams.autoPick && !candidate.infoHash.isNullOrBlank(),
                         ),
-                        configuredService = debridConnection.activeService.takeIf { debridSettings.enabled },
+                        configuredService = debridConnection.activeService,
                     )
                 }) {
                     is ManualResolutionResult.Ready -> {
@@ -1475,10 +1469,22 @@ private fun RewriteAppContent(
                     onConnect = { service, apiKey ->
                         graph.debridRuntime.connect(service, apiKey)
                         settingsFacade.setDebridEnabled(true)
+                        graph.providerCredentialSyncBridge.recordLocalConnect(
+                            profileId = profiles.activeProfileId,
+                            service = service,
+                            apiKey = apiKey,
+                        )
                         graph.provisionCommunitySources(true)
                     },
                     onSelect = { service -> graph.debridRuntime.select(service) },
-                    onDisconnect = { service -> graph.debridRuntime.disconnect(service) },
+                    onDisconnect = { service ->
+                        graph.debridRuntime.disconnect(service)
+                        val stillConnected = graph.debridRuntime.configuredService() != null
+                        if (!stillConnected) {
+                            settingsFacade.setDebridEnabled(false)
+                        }
+                        graph.provisionCommunitySources(stillConnected)
+                    },
                     onOpenSettings = { openRoot(RewriteRootDestination.Settings) },
                     loadTorboxCloudFiles = { graph.debridRuntime.listTorboxCloudFiles() },
                     modifier = Modifier.fillMaxSize(),
@@ -1547,26 +1553,34 @@ private fun RewriteAppContent(
                     onConnect = { service, apiKey ->
                         graph.debridRuntime.connect(service, apiKey)
                         settingsFacade.setDebridEnabled(true)
+                        graph.providerCredentialSyncBridge.recordLocalConnect(
+                            profileId = profiles.activeProfileId,
+                            service = service,
+                            apiKey = apiKey,
+                        )
                         graph.provisionCommunitySources(true)
                     },
                     onDisconnect = { service ->
                         graph.debridRuntime.disconnect(service)
-                        val enabled = settingsFacade.debridSettings.first().enabled
                         val stillConnected = graph.debridRuntime.configuredService() != null
-                        graph.provisionCommunitySources(enabled && stillConnected)
+                        if (!stillConnected) {
+                            settingsFacade.setDebridEnabled(false)
+                        }
+                        graph.provisionCommunitySources(stillConnected)
                     },
-                    onDebridEnabledChanged = { enabled ->
-                        graph.provisionCommunitySources(enabled && debridConnection.activeService != null)
+                    onDebridEnabledChanged = { _ ->
+                        val stillConnected = debridConnection.activeService != null ||
+                            debridConnection.configuredServices.isNotEmpty()
+                        graph.provisionCommunitySources(stillConnected)
                     },
                     onSelect = { service ->
                         graph.debridRuntime.select(service)
-                        graph.provisionCommunitySources(settingsFacade.debridSettings.first().enabled)
+                        graph.provisionCommunitySources(true)
                     },
                     rewriteAddons = registry.addons,
                     onInstallCommunityAddons = {
                         settingsFacade.setCommunityAddonEnabled(true)
-                        val hasDebrid = settingsFacade.debridSettings.first().enabled &&
-                            graph.debridRuntime.configuredService() != null
+                        val hasDebrid = graph.debridRuntime.configuredService() != null
                         graph.provisionCommunitySources(hasDebrid)
                     },
                     onUninstallCommunityAddons = {

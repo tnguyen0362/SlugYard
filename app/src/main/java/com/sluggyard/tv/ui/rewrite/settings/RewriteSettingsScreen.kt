@@ -63,7 +63,8 @@ fun RewriteSettingsScreen(
                 onTmdbEnabled = { scope.launch { facade.setTmdbEnabled(it) } },
                 onTmdbEnrichContinueWatching = { scope.launch { facade.setTmdbEnrichContinueWatching(it) } },
                 rewriteAddons = rewriteAddons,
-                debridConnected = debridConnection.activeService != null,
+                debridConnected = debridConnection.activeService != null ||
+                    debridConnection.configuredServices.isNotEmpty(),
                 onInstallCommunityAddons = onInstallCommunityAddons,
                 onUninstallCommunityAddons = onUninstallCommunityAddons,
             )

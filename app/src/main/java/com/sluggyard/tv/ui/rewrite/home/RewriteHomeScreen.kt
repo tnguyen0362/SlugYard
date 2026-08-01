@@ -79,7 +79,9 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import coil3.compose.AsyncImage
+import coil3.imageLoader
 import coil3.request.ImageRequest
+import coil3.request.SuccessResult
 import coil3.size.Size
 import com.sluggyard.tv.ui.design.SlugYardPalette
 import com.sluggyard.tv.ui.design.SlugYardTvMetrics
@@ -93,9 +95,11 @@ import com.sluggyard.tv.ui.rewrite.rewriteVerticalFocusExits
 import com.sluggyard.tv.ui.util.DpadVerticalNeighbors
 import com.sluggyard.tv.ui.util.LocalDpadVerticalNeighbors
 import com.sluggyard.tv.ui.util.dpadRepeatThrottle
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class RewriteHomePoster(
     val id: String,
@@ -966,9 +970,60 @@ internal fun RewritePosterCard(
     } else {
         cardWidth
     }
-    // Focus changes are synchronous. A delayed width morph exposes the portrait bitmap in a
-    // larger frame and reads as a blurry zoom before landscape art arrives.
-    val layoutWidth = if (focused && expandOnFocus) focusedWidth else cardWidth
+    val context = LocalContext.current
+    val density = LocalDensity.current
+    val posterDecode = remember(cardWidth, cardHeight, density) {
+        with(density) {
+            Size(cardWidth.roundToPx().coerceAtLeast(1), cardHeight.roundToPx().coerceAtLeast(1))
+        }
+    }
+    val landscapeDecode = remember(focusedWidth, cardHeight, density) {
+        with(density) {
+            Size(
+                focusedWidth.roundToPx().coerceAtMost(MaxLandscapeDecodeWidthPx).coerceAtLeast(1),
+                cardHeight.roundToPx().coerceAtLeast(1),
+            )
+        }
+    }
+    // Prefer true poster art for the unfocused tile — never substitute backdrop here.
+    val posterUrl = remember(poster.id, poster.imageUrl) {
+        preferLargePosterUrl(poster.imageUrl)
+    }
+    val landscapeUrl = remember(poster.id, poster.backdropUrl, expandOnFocus) {
+        if (!expandOnFocus) null
+        else poster.backdropUrl
+            ?.takeIf { it.isNotBlank() }
+            ?.let { preferCardBackdropUrl(it) }
+            ?.takeIf { it != posterUrl }
+    }
+    // Width expands only once landscape art is in memory. Expanding first leaves grey gutters
+    // beside the centered portrait for a frame — the classic first-focus flicker.
+    var landscapeReady by remember(poster.id, landscapeUrl) { mutableStateOf(false) }
+    var landscapeBitmapReady by remember(poster.id, landscapeUrl) { mutableStateOf(false) }
+    LaunchedEffect(poster.id, landscapeUrl, landscapeDecode) {
+        landscapeReady = false
+        landscapeBitmapReady = false
+        val url = landscapeUrl ?: return@LaunchedEffect
+        val request = ImageRequest.Builder(context)
+            .data(url)
+            .size(landscapeDecode)
+            .memoryCacheKey("card-backdrop:${poster.id}:$url")
+            .diskCacheKey("card-backdrop:${poster.id}:$url")
+            .build()
+        val result = withContext(Dispatchers.IO) { context.imageLoader.execute(request) }
+        landscapeBitmapReady = result is SuccessResult
+        // Expand on success or failure — failure still avoids gutters by filling with portrait.
+        landscapeReady = true
+    }
+    val layoutWidth = if (
+        focused &&
+        expandOnFocus &&
+        (landscapeUrl == null || landscapeReady)
+    ) {
+        focusedWidth
+    } else {
+        cardWidth
+    }
     LaunchedEffect(focused) {
         onFocusedChanged?.invoke(focused)
     }
@@ -1139,34 +1194,8 @@ internal fun RewritePosterCard(
                 maxLines = 4,
                 overflow = TextOverflow.Ellipsis,
             )
-            // Portrait is the always-on base layer. Landscape only loads after focus so fast
-            // flings don't starve Coil of poster decodes (empty portrait frames).
-            val context = LocalContext.current
-            val density = LocalDensity.current
-            val posterDecode = remember(cardWidth, cardHeight, density) {
-                with(density) {
-                    Size(cardWidth.roundToPx().coerceAtLeast(1), cardHeight.roundToPx().coerceAtLeast(1))
-                }
-            }
-            val landscapeDecode = remember(focusedWidth, cardHeight, density) {
-                with(density) {
-                    Size(
-                        focusedWidth.roundToPx().coerceAtMost(MaxLandscapeDecodeWidthPx).coerceAtLeast(1),
-                        cardHeight.roundToPx().coerceAtLeast(1),
-                    )
-                }
-            }
-            // Prefer true poster art for the unfocused tile — never substitute backdrop here.
-            val posterUrl = remember(poster.id, poster.imageUrl) {
-                preferLargePosterUrl(poster.imageUrl)
-            }
-            val landscapeUrl = remember(poster.id, poster.backdropUrl, expandOnFocus) {
-                if (!expandOnFocus) null
-                else poster.backdropUrl
-                    ?.takeIf { it.isNotBlank() }
-                    ?.let { preferCardBackdropUrl(it) }
-                    ?.takeIf { it != posterUrl }
-            }
+            // Portrait is the always-on base layer. Landscape only paints after the prefetch
+            // above marks ready, and layout width waits on the same signal.
             if (posterUrl != null) {
                 val posterRequest = remember(poster.id, posterUrl, posterDecode) {
                     ImageRequest.Builder(context)
@@ -1176,13 +1205,18 @@ internal fun RewritePosterCard(
                         .diskCacheKey("poster:${poster.id}:$posterUrl")
                         .build()
                 }
+                val fillExpandedPortrait = focused && expandOnFocus &&
+                    (landscapeUrl == null || (landscapeReady && !landscapeBitmapReady))
                 AsyncImage(
                     model = posterRequest,
                     contentDescription = null,
-                    // Keep the portrait bitmap at its native card bounds while the container
-                    // expands. Stretching this layer to the landscape frame is the brief blurry
-                    // zoom users see before the backdrop request finishes.
-                    modifier = Modifier.size(cardWidth, cardHeight).align(Alignment.Center),
+                    // Keep the portrait bitmap at its native card bounds while waiting for
+                    // landscape. Once expanded without a backdrop bitmap, crop-fill the wide frame.
+                    modifier = if (fillExpandedPortrait) {
+                        Modifier.fillMaxSize()
+                    } else {
+                        Modifier.size(cardWidth, cardHeight).align(Alignment.Center)
+                    },
                     contentScale = ContentScale.Crop,
                     alignment = Alignment.Center,
                 )
@@ -1206,9 +1240,8 @@ internal fun RewritePosterCard(
                     )
                 }
             }
-            // Request landscape art as soon as focus changes. The layout width and image layer
-            // switch immediately; Coil still loads the remote bitmap asynchronously.
-            if (focused && landscapeUrl != null) {
+            // Landscape layer — request hits Coil cache from the prefetch LaunchedEffect.
+            if (focused && landscapeUrl != null && landscapeBitmapReady) {
                 val landscapeRequest = remember(poster.id, landscapeUrl, landscapeDecode) {
                     ImageRequest.Builder(context)
                         .data(landscapeUrl)

@@ -405,7 +405,7 @@ private fun SearchPosterRow(
                 smoothFocusMovement = false,
                 onClick = { onPosterSelected(poster) },
                 showTypeBadge = true,
-                expandOnFocus = true,
+                expandOnFocus = false,
                 cardWidth = SearchPosterWidth,
                 cardHeight = SearchPosterHeight,
                 focusRequester = if (index == 0) firstFocusRequester else null,

@@ -57,7 +57,8 @@ internal fun IntegrationsSettings(
     var communityMessage by remember { mutableStateOf<String?>(null) }
     val packInstalled = SlugYardCommunitySourcePolicy.isCommunityPackInstalled(rewriteAddons)
     val watchHubInstalled = SlugYardCommunitySourcePolicy.isWatchHubInstalled(rewriteAddons)
-    val debridConnected = debridConnection.activeService != null
+    val debridConnected = debridConnection.activeService != null ||
+        debridConnection.configuredServices.isNotEmpty()
 
     RewriteSettingsGroup("Trakt") {
         RewriteValueRow("Connection", if (traktAuth.isAuthenticated) "Connected${traktAuth.username?.let { " as $it" } ?: ""}" else "Not connected")

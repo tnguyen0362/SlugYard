@@ -15,6 +15,7 @@ import com.sluggyard.tv.core.sync.SyncSchemaValidator
 import com.sluggyard.tv.core.sync.DefaultSupabaseSchemaProbe
 import com.sluggyard.tv.core.sync.RewriteProgressSyncBridge
 import com.sluggyard.tv.core.sync.RewriteLibraryWatchSyncBridge
+import com.sluggyard.tv.core.sync.RewriteProviderCredentialSyncBridge
 import com.sluggyard.tv.core.sync.auth.DataStoreSupabaseSessionStore
 import com.sluggyard.tv.core.sync.auth.DefaultSupabaseAuthGateway
 import com.sluggyard.tv.core.sync.auth.SupabaseAuthGateway
@@ -24,10 +25,12 @@ import com.sluggyard.tv.core.sync.remote.DefaultSupabaseCredentialVaultGateway
 import com.sluggyard.tv.core.sync.remote.SupabaseCredentialVaultGateway
 import com.sluggyard.tv.core.sync.remote.SupabaseDataGateway
 import com.sluggyard.tv.core.sync.remote.SupabaseHttpTransport
+import com.sluggyard.tv.data.local.DebridSettingsDataStore
 import com.sluggyard.tv.ui.rewrite.data.DataStoreRewritePlaybackProgressSyncBridge
 import com.sluggyard.tv.ui.rewrite.data.RewriteLibraryWatchStore
 import com.sluggyard.tv.ui.rewrite.data.RewriteProfileStore
 import com.sluggyard.tv.ui.rewrite.data.RewriteLibraryWatchRepository
+import com.sluggyard.tv.ui.rewrite.debrid.DataStoreRewriteProviderCredentialSyncBridge
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -106,18 +109,32 @@ object SyncModule {
 
     @Provides
     @Singleton
+    fun provideRewriteProviderCredentialSyncBridge(
+        @Named("rewrite") dataStore: DataStore<Preferences>,
+        mutationRecorder: SyncMutationRecorder,
+        debridSettings: DebridSettingsDataStore,
+    ): RewriteProviderCredentialSyncBridge = DataStoreRewriteProviderCredentialSyncBridge(
+        dataStore = dataStore,
+        mutationRecorder = mutationRecorder,
+        debridSettings = debridSettings,
+    )
+
+    @Provides
+    @Singleton
     fun provideSyncCoordinator(
         sessions: SupabaseSessionStore,
         remote: SupabaseDataGateway,
         local: LocalSyncStore,
         rewriteProgress: RewriteProgressSyncBridge,
         rewriteLibraryWatch: RewriteLibraryWatchSyncBridge,
+        rewriteProviderCredentials: RewriteProviderCredentialSyncBridge,
     ): SyncCoordinator = SyncCoordinator(
         sessions,
         remote,
         local,
         rewriteProgress = rewriteProgress,
         rewriteLibraryWatch = rewriteLibraryWatch,
+        rewriteProviderCredentials = rewriteProviderCredentials,
     )
 
     @Provides

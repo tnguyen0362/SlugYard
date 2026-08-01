@@ -16,6 +16,7 @@ import com.sluggyard.tv.ui.design.SlugYardTvTheme
 import com.sluggyard.tv.core.sync.auth.SupabaseAuthGateway
 import com.sluggyard.tv.core.sync.auth.SupabaseSessionStore
 import com.sluggyard.tv.core.sync.RewriteProgressSyncBridge
+import com.sluggyard.tv.core.sync.RewriteProviderCredentialSyncBridge
 import com.sluggyard.tv.core.profile.ProfileManager
 import com.sluggyard.tv.ui.rewrite.RewriteAppGraph
 import com.sluggyard.tv.ui.rewrite.RewriteAppShell
@@ -75,6 +76,9 @@ class MainActivity : ComponentActivity() {
     lateinit var rewriteProgressSyncBridge: RewriteProgressSyncBridge
 
     @Inject
+    lateinit var rewriteProviderCredentialSyncBridge: RewriteProviderCredentialSyncBridge
+
+    @Inject
     lateinit var rewriteLibraryWatchRepository: RewriteLibraryWatchRepository
 
     @Inject
@@ -117,6 +121,7 @@ class MainActivity : ComponentActivity() {
                 val tmdbHomeDataSource = com.sluggyard.tv.ui.rewrite.home.RewriteTmdbHomeDataSource(
                     tmdbApi = tmdbApi,
                     tmdbSettings = { settingsFacade.tmdbSettings.first() },
+                    // Details resolves tmdb:→IMDb and falls back to Cinemeta by manifest URL.
                     metadataAddonId = { null },
                 )
                 RewriteAppGraph(
@@ -124,9 +129,17 @@ class MainActivity : ComponentActivity() {
                     profileManager = profileManager,
                     rewriteDataStore = rewriteDataStore,
                     progressSyncBridge = rewriteProgressSyncBridge,
+                    providerCredentialSyncBridge = rewriteProviderCredentialSyncBridge,
                     libraryWatchRepository = rewriteLibraryWatchRepository,
                     relatedDataSource = relatedDataSource,
                     tmdbHomeDataSource = tmdbHomeDataSource,
+                    resolveMetaContentId = { type, id ->
+                        com.sluggyard.tv.ui.rewrite.details.resolveRewriteMetaContentId(
+                            type = type,
+                            id = id,
+                            tmdbToImdb = { tmdbId, mediaType -> tmdbService.tmdbToImdb(tmdbId, mediaType) },
+                        )
+                    },
                 )
             }
             SlugYardTvTheme {

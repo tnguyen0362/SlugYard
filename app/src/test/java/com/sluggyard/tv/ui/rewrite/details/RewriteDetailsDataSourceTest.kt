@@ -52,6 +52,52 @@ class RewriteDetailsDataSourceTest {
         assertTrue(source.load("missing", "movie", "id") is RewriteDetailsLoadResult.Unavailable)
     }
 
+    @Test
+    fun `tmdb ids are resolved to imdb before meta fetch`() = runTest {
+        var requestedId: String? = null
+        val source = RewriteDetailsDataSource(
+            registrySnapshot = { AddonRegistryState(listOf(addon("community.stremio.cinemeta"))) },
+            gateway = object : StremioAddonGateway {
+                override suspend fun fetchManifest(manifestUrl: String) = error("unused")
+                override suspend fun fetchCatalog(manifestUrl: String, type: String, catalogId: String, extras: Map<String, String>) = error("unused")
+                override suspend fun fetchMeta(manifestUrl: String, type: String, id: String): AddonTransportResult<JsonObject> {
+                    requestedId = id
+                    return AddonTransportResult.Success(
+                        Json.parseToJsonElement("""{"meta":{"id":"tt0111161","type":"movie","name":"Shawshank"}}""").jsonObject,
+                    )
+                }
+                override suspend fun fetchStreams(manifestUrl: String, type: String, id: String) = error("unused")
+                override suspend fun fetchSubtitles(manifestUrl: String, type: String, id: String) = error("unused")
+            },
+            resolveMetaContentId = { _, id ->
+                resolveRewriteMetaContentId(type = "movie", id = id) { _, _ -> "tt0111161" }
+            },
+        )
+
+        val result = source.load("community.stremio.cinemeta", "movie", "tmdb:278") as RewriteDetailsLoadResult.Ready
+
+        assertEquals("tt0111161", requestedId)
+        assertEquals("Shawshank", result.state.title)
+    }
+
+    @Test
+    fun `unresolved tmdb ids fail with a clear message`() = runTest {
+        val source = RewriteDetailsDataSource(
+            registrySnapshot = { AddonRegistryState(listOf(addon("cinemeta"))) },
+            gateway = object : StremioAddonGateway {
+                override suspend fun fetchManifest(manifestUrl: String) = error("unused")
+                override suspend fun fetchCatalog(manifestUrl: String, type: String, catalogId: String, extras: Map<String, String>) = error("unused")
+                override suspend fun fetchMeta(manifestUrl: String, type: String, id: String) = error("should not fetch")
+                override suspend fun fetchStreams(manifestUrl: String, type: String, id: String) = error("unused")
+                override suspend fun fetchSubtitles(manifestUrl: String, type: String, id: String) = error("unused")
+            },
+            resolveMetaContentId = { _, id -> id },
+        )
+
+        val result = source.load("cinemeta", "movie", "tmdb:278") as RewriteDetailsLoadResult.Unavailable
+        assertTrue(result.message.contains("resolve", ignoreCase = true))
+    }
+
     private fun addon(id: String) = ManagedAddon(
         manifestUrl = "https://$id.test/manifest.json",
         manifest = AddonManifestContract(id = id, name = id, resources = setOf(AddonResource.META)),

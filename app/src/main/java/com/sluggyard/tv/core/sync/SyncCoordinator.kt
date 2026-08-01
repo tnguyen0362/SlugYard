@@ -107,6 +107,26 @@ interface RewriteLibraryWatchSyncBridge {
     suspend fun apply(snapshot: RewriteLibraryWatchSyncSnapshot)
 }
 
+/**
+ * Promotes guest/local rewrite debrid keys into the account vault on sign-in, and applies
+ * remote provider credentials back into the rewrite credential store.
+ */
+interface RewriteProviderCredentialSyncBridge {
+    suspend fun snapshot(): List<ProviderCredentialRecord>
+
+    suspend fun apply(records: List<ProviderCredentialRecord>)
+
+    /** Push every local rewrite debrid key into the outbox after login. */
+    suspend fun flushPending()
+
+    /** Dual-write + outbox after Cloud Manager / Integrations Connect. */
+    suspend fun recordLocalConnect(
+        profileId: String,
+        service: com.sluggyard.tv.core.streamresolution.DebridService,
+        apiKey: String,
+    )
+}
+
 interface RetryAwareLocalSyncStore {
     suspend fun recordAttempt(mutationId: String, attempt: Int, nextAttemptAtEpochMs: Long)
 }
@@ -124,6 +144,7 @@ class SyncCoordinator(
     private val maxAttempts: Int = 3,
     private val rewriteProgress: RewriteProgressSyncBridge? = null,
     private val rewriteLibraryWatch: RewriteLibraryWatchSyncBridge? = null,
+    private val rewriteProviderCredentials: RewriteProviderCredentialSyncBridge? = null,
 ) {
     private val synchronizeMutex = Mutex()
 
@@ -136,6 +157,7 @@ class SyncCoordinator(
             ?: return SyncResult.Success(SyncSummary(0, 0, local.pending().size))
         (local as? AccountBoundLocalSyncStore)?.bindOwner(session.userId)
         rewriteProgress?.flushPending()
+        rewriteProviderCredentials?.flushPending()
 
         val remoteSnapshot = when (val result = remote.pull(session.userId)) {
             is SyncResult.Success -> result.value
@@ -144,6 +166,7 @@ class SyncCoordinator(
         }
         val rewriteLocalProgress = rewriteProgress?.snapshot().orEmpty()
         val rewriteLocalLibraryWatch = rewriteLibraryWatch?.snapshot()
+        val rewriteLocalCredentials = rewriteProviderCredentials?.snapshot().orEmpty()
         val localSnapshot = local.snapshot().let { snapshot ->
             snapshot.copy(
                 progress = rewriteProgress?.let {
@@ -158,6 +181,12 @@ class SyncCoordinator(
                         rewriteLocalLibraryWatch?.watchedItems.orEmpty(),
                     )
                 } ?: snapshot.watchedItems,
+                providerCredentials = rewriteProviderCredentials?.let {
+                    SupabaseMergePolicy.mergeProviderCredentials(
+                        snapshot.providerCredentials,
+                        rewriteLocalCredentials,
+                    )
+                } ?: snapshot.providerCredentials,
             )
         }
         val pendingBeforeMerge = local.pending()
@@ -172,6 +201,7 @@ class SyncCoordinator(
                 watchedItems = merged.watchedItems,
             ),
         )
+        rewriteProviderCredentials?.apply(merged.providerCredentials)
 
         var pushed = 0
         var firstFailure: SyncResult<Unit>? = null

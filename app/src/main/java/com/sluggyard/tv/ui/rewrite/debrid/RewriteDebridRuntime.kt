@@ -55,7 +55,10 @@ class RewriteDebridRuntime(
         PremiumizeCacheChecker(credentials, premiumize),
     )
 
-    suspend fun configuredService(): DebridService? = credentials.stateValue().activeService
+    suspend fun configuredService(): DebridService? {
+        val state = credentials.stateValue()
+        return state.activeService ?: state.configuredServices.firstOrNull()
+    }
 
     suspend fun connect(service: DebridService, apiKey: String) {
         val key = apiKey.trim()
@@ -74,7 +77,8 @@ class RewriteDebridRuntime(
     suspend fun disconnect(service: DebridService) = credentials.removeForActiveProfile(service)
 
     suspend fun configuredAddonUrls(): RewriteConfiguredAddonUrls? {
-        val service = credentials.stateValue().activeService ?: return null
+        val state = credentials.stateValue()
+        val service = state.activeService ?: state.configuredServices.firstOrNull() ?: return null
         val key = credentials.keyForActiveProfile(service).takeIf(String::isNotBlank) ?: return null
         return addonConfigurator.configure(service, key)
     }

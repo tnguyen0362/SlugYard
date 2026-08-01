@@ -17,15 +17,43 @@ sealed interface RewriteDetailsLoadResult {
     data class Unavailable(val message: String) : RewriteDetailsLoadResult
 }
 
+/**
+ * Stremio meta addons (Cinemeta, etc.) expect IMDb `tt…` ids. TMDB Home rails navigate with
+ * `tmdb:{numeric}` — resolve those before the meta fan-out or every candidate fails with
+ * "could not load title metadata".
+ */
+internal suspend fun resolveRewriteMetaContentId(
+    type: String,
+    id: String,
+    tmdbToImdb: suspend (tmdbId: Int, mediaType: String) -> String?,
+): String {
+    if (!id.startsWith("tmdb:", ignoreCase = true)) return id
+    val numeric = id.removePrefix("tmdb:")
+        .removePrefix("TMDB:")
+        .substringBefore(':')
+        .toIntOrNull()
+        ?: return id
+    val mediaType = when (type.trim().lowercase()) {
+        "series", "tv", "show", "shows", "tvshow", "tvshows" -> "tv"
+        else -> "movie"
+    }
+    return tmdbToImdb(numeric, mediaType)
+        ?.trim()
+        ?.takeIf { it.startsWith("tt", ignoreCase = true) }
+        ?: id
+}
+
 /** Loads Details metadata from the origin addon, falling back to a meta catalog (Cinemeta). */
 class RewriteDetailsDataSource(
     private val registrySnapshot: suspend () -> AddonRegistryState,
     private val gateway: StremioAddonGateway,
     private val watchStateSnapshot: suspend () -> RewriteLibraryWatchState = { RewriteLibraryWatchState() },
+    private val resolveMetaContentId: suspend (type: String, id: String) -> String = { _, id -> id },
 ) {
     suspend fun load(addonId: String, type: String, id: String): RewriteDetailsLoadResult {
         val localState = watchStateSnapshot()
         val registry = registrySnapshot()
+        val metaId = resolveMetaContentId(type, id)
         val preferred = registry.enabledAddons.firstOrNull { it.manifest?.id == addonId }
         val fallbacks = registry.enabledAddons.filter { addon ->
             val manifest = addon.manifest ?: return@filter false
@@ -50,11 +78,16 @@ class RewriteDetailsDataSource(
         if (candidates.isEmpty()) {
             return RewriteDetailsLoadResult.Unavailable("No metadata source is available")
         }
+        if (metaId.startsWith("tmdb:", ignoreCase = true)) {
+            return RewriteDetailsLoadResult.Unavailable(
+                "Could not resolve this title to a playable ID. Try again or open it from a catalog shelf.",
+            )
+        }
         var lastFailure = "The addon could not load title metadata"
         for (addon in candidates) {
             val resources = addon.manifest?.resources.orEmpty()
             if (AddonResource.META !in resources) continue
-            val response = gateway.fetchMeta(addon.configuredManifestUrl ?: addon.manifestUrl, type, id)
+            val response = gateway.fetchMeta(addon.configuredManifestUrl ?: addon.manifestUrl, type, metaId)
             val metadata = when (response) {
                 is AddonTransportResult.Success -> when (val decoded = StremioMetadataDecoder.decode(response.value)) {
                     is AddonTransportResult.Success -> decoded.value
@@ -62,6 +95,14 @@ class RewriteDetailsDataSource(
                         lastFailure = "The addon returned invalid title metadata"
                         continue
                     }
+                }
+                is AddonTransportResult.HttpFailure -> {
+                    lastFailure = "The addon could not load title metadata (HTTP ${response.statusCode})"
+                    continue
+                }
+                is AddonTransportResult.NetworkFailure -> {
+                    lastFailure = "The addon could not load title metadata (network)"
+                    continue
                 }
                 else -> {
                     lastFailure = "The addon could not load title metadata"

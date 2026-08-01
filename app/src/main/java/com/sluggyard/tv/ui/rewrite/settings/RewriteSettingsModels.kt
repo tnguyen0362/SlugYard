@@ -65,7 +65,6 @@ object RewriteSettingsPolicy {
         RewriteSettingsCategory.Display,
         RewriteSettingsCategory.Subtitles,
         RewriteSettingsCategory.Audio,
-        RewriteSettingsCategory.Advanced,
         RewriteSettingsCategory.About,
     )
 

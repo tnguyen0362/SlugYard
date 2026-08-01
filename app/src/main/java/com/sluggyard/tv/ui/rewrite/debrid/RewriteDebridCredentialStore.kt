@@ -33,9 +33,12 @@ class RewriteDebridCredentialStore(
         RewriteDebridCredentialState(
             activeProfileId = profileId,
             configuredServices = configuredServices,
+            // Prefer the saved active pick; if it was cleared while credentials remain (e.g. after
+            // disconnecting the previously-active provider), fall back so Play stays on scrapers.
             activeService = preferences[activeServiceKey(profileId)]?.let { saved ->
                 DebridService.entries.firstOrNull { it.name == saved }
-            }?.takeIf(configuredServices::contains),
+            }?.takeIf(configuredServices::contains)
+                ?: configuredServices.firstOrNull(),
         )
     }
 
@@ -70,6 +73,14 @@ class RewriteDebridCredentialStore(
             preferences.remove(credentialKey(profileId, service))
             if (preferences[activeServiceKey(profileId)] == service.name) {
                 preferences.remove(activeServiceKey(profileId))
+                val replacement = DebridService.entries.firstOrNull { other ->
+                    other != service &&
+                        preferences[credentialKey(profileId, other)].orEmpty()
+                            .startsWith(ENCRYPTED_CREDENTIAL_PREFIX)
+                }
+                if (replacement != null) {
+                    preferences[activeServiceKey(profileId)] = replacement.name
+                }
             }
         }
     }
