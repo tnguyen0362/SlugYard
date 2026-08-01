@@ -45,6 +45,9 @@ data class PlaybackLaunchRequest(
     val rememberedAudioLanguage: String?,
     val rememberedAudioName: String?,
     val launchStartedAtMs: Long?,
+    /** Series/catalog id when [contentId] is an episode-shaped playback id (tt…:S:E). */
+    val parentId: String? = null,
+    val parentType: String? = null,
 ) {
     val torrentTrackers: List<String>
         get() {
@@ -105,6 +108,8 @@ data class PlaybackLaunchRequest(
                 rememberedAudioLanguage = decode("rememberedAudioLanguage"),
                 rememberedAudioName = decode("rememberedAudioName"),
                 launchStartedAtMs = savedStateHandle.get<String>("launchStartedAtMs")?.toLongOrNull(),
+                parentId = nonEmpty("parentId"),
+                parentType = nonEmpty("parentType"),
             )
         }
     }

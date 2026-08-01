@@ -12,6 +12,10 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withTimeoutOrNull
+
+/** Cap how long IntroDB waits on AniSkip enrichment once opening segments are already known. */
+private const val ANISKIP_ENRICH_TIMEOUT_MS = 2_500L
 
 data class SkipInterval(
     val startTime: Double, // seconds
@@ -40,24 +44,31 @@ class SkipIntroRepository @Inject constructor(
         val cacheKey = "$imdbId:$season:$episode"
         intervalCache[cacheKey]?.let { return@coroutineScope it }
 
+        // Fetch IntroDB and ARM/AniSkip in parallel. Prefer returning IntroDB promptly so
+        // Skip Intro can surface while the viewer is still inside the opening window —
+        // waiting on ARM+AniSkip was delaying the prompt by many seconds.
         val introDbDeferred = async {
             if (introDbConfigured) fetchIntroDb(imdbId, season, episode) else emptyList()
         }
-        val entriesDeferred = async { resolveArmEntries(imdbId) }
-        val entries = entriesDeferred.await()
-        val seasonEntry = entries.firstOrNull { it.season == season }
-            ?: entries.getOrNull(season - 1)
-            ?: entries.firstOrNull()
-        val malId = seasonEntry?.myanimelist?.toString()
-            ?: entries.firstOrNull()?.myanimelist?.toString()
         val aniSkipDeferred = async {
+            val entries = resolveArmEntries(imdbId)
+            val seasonEntry = entries.firstOrNull { it.season == season }
+                ?: entries.getOrNull(season - 1)
+                ?: entries.firstOrNull()
+            val malId = seasonEntry?.myanimelist?.toString()
+                ?: entries.firstOrNull()?.myanimelist?.toString()
             if (malId != null) fetchAniSkip(malId, episode) else emptyList()
         }
 
-        return@coroutineScope mergeByPriority(
-            introDbDeferred.await(),
+        val introDb = introDbDeferred.await()
+        val aniSkip = if (introDb.any { segmentCategory(it.type) == "opening" }) {
+            withTimeoutOrNull(ANISKIP_ENRICH_TIMEOUT_MS) { aniSkipDeferred.await() }.orEmpty()
+        } else {
             aniSkipDeferred.await()
-        ).also { result -> if (result.isNotEmpty()) intervalCache[cacheKey] = result }
+        }
+
+        return@coroutineScope mergeByPriority(introDb, aniSkip)
+            .also { result -> if (result.isNotEmpty()) intervalCache[cacheKey] = result }
     }
 
     suspend fun getSkipIntervalsForMal(malId: String, episode: Int): List<SkipInterval> = coroutineScope {

@@ -588,19 +588,16 @@ fun PlayerScreen(
                 if (panelOrDialogOpen) return@onKeyEvent false
 
                 if (keyEvent.nativeKeyEvent.action == KeyEvent.ACTION_UP) {
-                    when (keyEvent.nativeKeyEvent.keyCode) {
-                        KeyEvent.KEYCODE_DPAD_LEFT,
-                        KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                            if (!uiState.showControls) {
-                                viewModel.onEvent(PlayerEvent.OnCommitPreviewSeek)
-                                return@onKeyEvent true
-                            }
-                        }
-                    }
+                    // Left/Right no longer auto-seek; do not commit a preview seek on key-up.
                     return@onKeyEvent false
                 }
 
                 if (keyEvent.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
+                    val skipPromptActive = uiState.activeSkipInterval != null &&
+                        !uiState.skipIntervalDismissed &&
+                        !uiState.showPauseOverlay &&
+                        !uiState.showLoadingOverlay &&
+                        uiState.postPlayMode == null
                     if (uiState.showPauseOverlay) {
                         when (keyEvent.nativeKeyEvent.keyCode) {
                             KeyEvent.KEYCODE_DPAD_CENTER,
@@ -619,26 +616,27 @@ fun PlayerScreen(
                     }
                     when (keyEvent.nativeKeyEvent.keyCode) {
                         KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> {
-                            if (!uiState.showControls) {
-                                viewModel.onEvent(PlayerEvent.OnPlayPause)
-                                true
-                            } else {
-                                // Let the focused button handle it
-                                false
+                            when {
+                                // With chrome hidden, OK should skip when the prompt is up —
+                                // not toggle play/pause. With chrome visible, the focused
+                                // button (Skip / Not now / transport) owns OK.
+                                skipPromptActive && !uiState.showControls -> {
+                                    viewModel.onEvent(PlayerEvent.OnSkipIntro)
+                                    true
+                                }
+                                !uiState.showControls -> {
+                                    viewModel.onEvent(PlayerEvent.OnPlayPause)
+                                    true
+                                }
+                                else -> false
                             }
                         }
                         KeyEvent.KEYCODE_DPAD_LEFT,
                         KeyEvent.KEYCODE_DPAD_RIGHT -> {
                             if (!uiState.showControls) {
-                                val repeatCount = keyEvent.nativeKeyEvent.repeatCount
-                                val stepMs = when {
-                                    repeatCount >= 8 -> 30_000L
-                                    repeatCount >= 3 -> 20_000L
-                                    else -> 10_000L
-                                }
-                                val isLeft = keyEvent.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_DPAD_LEFT
-                                val deltaMs = if (isLeft) -stepMs else stepMs
-                                viewModel.onEvent(PlayerEvent.OnPreviewSeekBy(deltaMs))
+                                // TV-first: reveal chrome so Left/Right can move focus among
+                                // on-screen controls. Do not seek on every D-pad press.
+                                viewModel.onEvent(PlayerEvent.OnToggleControls)
                                 true
                             } else {
                                 // Let focus system handle navigation when controls are visible
@@ -1039,6 +1037,9 @@ fun PlayerScreen(
                 onSetSubtitleOutlineEnabled = { viewModel.onEvent(PlayerEvent.OnSetSubtitleOutlineEnabled(it)) },
                 onSetSubtitleOutlineColor = { viewModel.onEvent(PlayerEvent.OnSetSubtitleOutlineColor(it)) },
                 onResetSubtitleStyle = { viewModel.onEvent(PlayerEvent.OnResetSubtitleDefaults) },
+                onAdjustSubtitleDelay = {
+                    viewModel.onEvent(PlayerEvent.OnAdjustSubtitleDelay(it, showOverlay = false))
+                },
                 onSetPlaybackSpeed = { viewModel.onEvent(PlayerEvent.OnSetPlaybackSpeed(it)) },
             ),
         )

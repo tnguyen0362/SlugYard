@@ -288,4 +288,117 @@ internal object PlayerSubtitleUtils {
         val dialogue = narrowed.filter { idx -> tracks.getOrNull(idx)?.isSignsAndSongs != true }
         return dialogue.firstOrNull() ?: narrowed.first()
     }
+
+    /**
+     * TV-friendly subtitle role tags derived from track metadata. Keeps Forced / SDH /
+     * Dialogue / Signs & Songs / Sounds / CC instead of collapsing everything to language+codec.
+     */
+    fun formatSubtitleRoleLabels(
+        name: String?,
+        isForced: Boolean = false,
+        isSignsAndSongs: Boolean = false,
+    ): List<String> {
+        val haystack = name.orEmpty()
+        val lower = haystack.lowercase()
+        val roles = linkedSetOf<String>()
+
+        if (isForced || lower.contains("forced") || Regex("\\bforce[d]?\\b").containsMatchIn(lower)) {
+            roles += "Forced"
+        }
+        if (isSignsAndSongs || isSignsAndSongsTrack(listOf(name))) {
+            roles += "Signs & Songs"
+        } else {
+            when {
+                lower.contains("dialogue") || (lower.contains("full") && lower.contains("sub")) ->
+                    roles += "Dialogue"
+                Regex("\\b(songs?|lyrics?)\\b").containsMatchIn(lower) &&
+                    !lower.contains("sign") -> roles += "Songs"
+                Regex("\\b(signs?|on[- ]?screen)\\b").containsMatchIn(lower) -> roles += "Signs"
+                Regex("\\b(sounds?|sfx|sound effects?)\\b").containsMatchIn(lower) -> roles += "Sounds"
+            }
+        }
+        if (
+            lower.contains("sdh") ||
+            lower.contains("hearing impaired") ||
+            lower.contains("hard of hearing") ||
+            Regex("\\bhoh\\b").containsMatchIn(lower)
+        ) {
+            roles += "SDH"
+        }
+        if (Regex("\\bcc\\b").containsMatchIn(lower) || lower.contains("closed caption")) {
+            roles += "CC"
+        }
+        if (lower.contains("commentary")) roles += "Commentary"
+        if (lower.contains("dubtitle") || lower.contains("dub title")) roles += "Dubtitles"
+
+        // Preserve leftover descriptive title text that isn't just the language / role tags.
+        val residual = residualSubtitleTitle(haystack, roles)
+        if (!residual.isNullOrBlank()) roles += residual
+
+        return roles.toList()
+    }
+
+    /**
+     * Primary + secondary label for a subtitle row on TV.
+     * @return Pair(title, detail) where title is "Language FORMAT" and detail holds role tags.
+     */
+    fun formatSubtitleTrackLabel(
+        languageDisplay: String,
+        formatTag: String?,
+        name: String?,
+        isForced: Boolean = false,
+        isSignsAndSongs: Boolean = false,
+    ): Pair<String, String?> {
+        val title = listOfNotNull(
+            languageDisplay.takeIf { it.isNotBlank() },
+            formatTag?.takeIf { it.isNotBlank() },
+        ).joinToString(" ").ifBlank { languageDisplay }
+        val detail = formatSubtitleRoleLabels(
+            name = name,
+            isForced = isForced,
+            isSignsAndSongs = isSignsAndSongs,
+        ).takeIf { it.isNotEmpty() }?.joinToString(" · ")
+        return title to detail
+    }
+
+    private fun residualSubtitleTitle(raw: String, knownRoles: Set<String>): String? {
+        if (raw.isBlank()) return null
+        var text = raw.trim()
+        val dropPhrases = listOf(
+            "closed captions", "closed caption", "hearing impaired", "hard of hearing",
+            "signs and songs", "songs and signs", "signs & songs", "songs & signs",
+            "signs/songs", "songs/signs", "signs only", "songs only", "sound effects",
+            "dub titles", "dubtitles", "on-screen", "on screen", "full subs", "full sub",
+        )
+        dropPhrases.forEach { phrase ->
+            text = text.replace(phrase, " ", ignoreCase = true)
+        }
+        val dropTokens = listOf(
+            "und", "unknown", "subtitle", "subtitles", "subs", "sub",
+            "forced", "force", "sdh", "cc", "hoh",
+            "signs", "sign", "songs", "song", "lyrics", "lyric",
+            "dialogue", "sounds", "sfx", "commentary", "dubtitle",
+            "english", "eng", "japanese", "jpn", "jap", "spanish", "spa",
+            "french", "fre", "fra", "german", "ger", "deu", "portuguese", "por",
+            "italian", "ita", "korean", "kor", "chinese", "chi", "zho",
+            "russian", "rus", "arabic", "ara",
+        )
+        dropTokens.forEach { token ->
+            text = text.replace(Regex("(?i)\\b${Regex.escape(token)}\\b"), " ")
+        }
+        knownRoles.forEach { role ->
+            text = text.replace(role, " ", ignoreCase = true)
+        }
+        text = text
+            .replace(Regex("[\\[\\](){}|_./\\\\,:;\\-+]+"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+        if (text.length < 2) return null
+        if (text.equals("ass", true) || text.equals("srt", true) || text.equals("vtt", true) ||
+            text.equals("pgs", true) || text.equals("ssa", true) || text.equals("sup", true)
+        ) {
+            return null
+        }
+        return text.take(48)
+    }
 }

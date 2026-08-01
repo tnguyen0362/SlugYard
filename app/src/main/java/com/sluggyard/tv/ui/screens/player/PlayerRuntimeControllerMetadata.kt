@@ -13,6 +13,16 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+internal fun PlayerRuntimeController.fetchMetaDetailsForCurrentContent() {
+    val lookup = PlayerMetaLookup.resolve(
+        contentId = contentId,
+        contentType = contentType,
+        parentId = parentId,
+        parentType = parentType,
+    ) ?: return
+    fetchMetaDetails(lookup.id, lookup.type)
+}
+
 internal fun PlayerRuntimeController.fetchMetaDetails(id: String?, type: String?) {
     if (id.isNullOrBlank() || type.isNullOrBlank()) return
 
@@ -58,9 +68,11 @@ internal fun PlayerRuntimeController.applyMetaDetails(meta: Meta) {
 internal fun PlayerRuntimeController.resolveDescription(meta: Meta): String? {
     val type = contentType
     // For series, prefer the current episode's overview when available.
-    if (type in listOf("series", "tv") && currentSeason != null && currentEpisode != null) {
+    // Absolute-numbered anime may omit season; match on episode alone in that case.
+    if (type in listOf("series", "tv") && currentEpisode != null) {
         val episodeOverview = meta.videos.firstOrNull { video ->
-            video.season == currentSeason && video.episode == currentEpisode
+            video.episode == currentEpisode &&
+                (currentSeason == null || video.season == null || video.season == currentSeason)
         }?.overview
         if (!episodeOverview.isNullOrBlank()) return episodeOverview
     }
@@ -69,7 +81,8 @@ internal fun PlayerRuntimeController.resolveDescription(meta: Meta): String? {
 
 internal fun PlayerRuntimeController.updateEpisodeDescription() {
     val overview = metaVideos.firstOrNull { video ->
-        video.season == currentSeason && video.episode == currentEpisode
+        video.episode == currentEpisode &&
+            (currentSeason == null || video.season == null || video.season == currentSeason)
     }?.overview
 
     if (!overview.isNullOrBlank()) {
@@ -79,8 +92,16 @@ internal fun PlayerRuntimeController.updateEpisodeDescription() {
     // Mirror the new episode into the MediaSession so Google Home reflects it.
     updateMediaSessionMetadata()
 
-    // Re-enrich from TMDB for the freshly selected episode.
-    scope.launch { enrichDescriptionFromTmdb(contentId, contentType) }
+    // Re-enrich from TMDB for the freshly selected episode using the series/parent id.
+    val lookup = PlayerMetaLookup.resolve(
+        contentId = contentId,
+        contentType = contentType,
+        parentId = parentId,
+        parentType = parentType,
+    )
+    if (lookup != null) {
+        scope.launch { enrichDescriptionFromTmdb(lookup.id, lookup.type) }
+    }
 }
 
 private suspend fun PlayerRuntimeController.enrichDescriptionFromTmdb(id: String?, type: String?) {
@@ -197,7 +218,9 @@ internal fun PlayerRuntimeController.recomputeNextEpisode(resetVisibility: Boole
 
     val season = currentSeason
     val episode = currentEpisode
-    if (season == null || episode == null) {
+    // Episode number is required; season may be null for absolute-numbered anime
+    // (PlayerNextEpisodeRules.resolveNextEpisode supports currentSeason=null).
+    if (episode == null) {
         nextEpisodeVideo = null
         clearNextEpisodeAndCancelPostPlay()
         return
@@ -215,11 +238,12 @@ internal fun PlayerRuntimeController.recomputeNextEpisode(resetVisibility: Boole
         return
     }
 
+    val nextEpisodeNumber = resolvedNext.episode ?: return
     val hasAired = PlayerNextEpisodeRules.hasEpisodeAired(resolvedNext.released)
     val nextInfo = NextEpisodeInfo(
         videoId = resolvedNext.id,
-        season = resolvedNext.season ?: return,
-        episode = resolvedNext.episode ?: return,
+        season = resolvedNext.season ?: season ?: 1,
+        episode = nextEpisodeNumber,
         title = resolvedNext.title,
         thumbnail = resolvedNext.thumbnail,
         overview = resolvedNext.overview,
@@ -366,11 +390,6 @@ internal fun PlayerRuntimeController.updateActiveSkipInterval(positionMs: Long) 
         return
     }
 
-    // Wait for player settings to load before evaluating — otherwise
-    // autoSkipSegmentTypes is empty on the first iterations and the skip button
-    // appears instead of auto-skipping.
-    if (!playerSettingsInitialized) return
-
     val positionSec = positionMs / 1000.0
     val active = skipIntervals.find { interval ->
         positionSec >= interval.startTime && positionSec < (interval.endTime - 0.5)
@@ -383,6 +402,8 @@ internal fun PlayerRuntimeController.updateActiveSkipInterval(positionMs: Long) 
             lastActiveSkipType = active.type
             _uiState.update { it.copy(activeSkipInterval = active, skipIntervalDismissed = false) }
         }
+        // Auto-skip still waits for settings so empty defaults do not skip prematurely.
+        if (!playerSettingsInitialized) return
         val segmentType = AutoSkipSegmentType.fromSkipIntervalType(active.type)
         val activeKey = active.autoSkipKey()
         if (segmentType != null &&

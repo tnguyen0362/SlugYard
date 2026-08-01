@@ -4,7 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.focusable
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,15 +13,14 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
@@ -36,12 +35,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -51,9 +48,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import coil3.compose.AsyncImage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import com.sluggyard.tv.core.streamresolution.StreamCacheState
 import com.sluggyard.tv.ui.design.SlugYardPalette
 import com.sluggyard.tv.ui.design.SlugYardTvMetrics
 import com.sluggyard.tv.ui.rewrite.details.RewriteDetailsEpisode
@@ -62,6 +59,7 @@ import com.sluggyard.tv.ui.rewrite.seasonDisplayLabel
 import com.sluggyard.tv.ui.rewrite.streams.RewriteStreamCandidate
 import com.sluggyard.tv.ui.rewrite.streams.RewriteStreamGroup
 import com.sluggyard.tv.ui.rewrite.streams.RewriteStreamGroupState
+import com.sluggyard.tv.ui.rewrite.streams.RewriteStreamPresentation
 
 enum class RewritePlayerSecondaryPanel {
     HIDDEN,
@@ -251,9 +249,15 @@ private fun ColumnScope.SourceContent(
             }
     }
     var firstItemPlaced by remember(state.panel, candidates.firstOrNull()?.id) { mutableStateOf(false) }
+    val listState = rememberLazyListState()
     if (candidates.isNotEmpty()) {
         LazyColumn(
-            modifier = Modifier.weight(1f).fillMaxWidth(),
+            state = listState,
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                // Keep D-pad Up/Down inside the list so focus at the bottom can walk back up.
+                .focusGroup(),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             itemsIndexed(candidates, key = { index, candidate -> "$index:${candidate.id}" }) { index, candidate ->
@@ -346,6 +350,8 @@ private fun StreamCandidateButton(
 ) {
     var focused by remember(candidate.id) { mutableStateOf(false) }
     val shape = RoundedCornerShape(8.dp)
+    val detailLine = RewriteStreamPresentation.detailLine(candidate)
+    val cacheLabel = RewriteStreamPresentation.cacheLabel(candidate.cacheState)
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -363,29 +369,45 @@ private fun StreamCandidateButton(
                     Modifier
                 },
             )
+            // clickable already installs a focus target — do not add a second .focusable().
             .clickable(onClick = onClick)
-            .focusable()
             .onGloballyPositioned { onPlaced?.invoke() }
             .semantics {
-                contentDescription = candidate.title
+                contentDescription = listOfNotNull(candidate.title, detailLine, cacheLabel)
+                    .joinToString(", ")
                 role = Role.Button
             }
             .padding(horizontal = 16.dp, vertical = 12.dp),
         horizontalAlignment = Alignment.Start,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Text(
             text = candidate.title,
             color = if (focused) SlugYardPalette.OnCanvas else SlugYardPalette.OnCanvasMuted,
             textAlign = TextAlign.Start,
-            maxLines = 1,
+            maxLines = 2,
             overflow = TextOverflow.Ellipsis,
         )
-        Text(
-            text = listOfNotNull(candidate.sourceLabel, candidate.detailLabel).joinToString(" · "),
-            color = SlugYardPalette.OnCanvasMuted,
-            textAlign = TextAlign.Start,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        if (detailLine.isNotBlank()) {
+            Text(
+                text = detailLine,
+                color = SlugYardPalette.OnCanvasMuted,
+                textAlign = TextAlign.Start,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (cacheLabel != null) {
+            Text(
+                text = cacheLabel,
+                color = when (candidate.cacheState) {
+                    StreamCacheState.CACHED -> SlugYardPalette.Accent
+                    else -> SlugYardPalette.OnCanvasMuted
+                },
+                textAlign = TextAlign.Start,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Medium,
+            )
+        }
     }
 }

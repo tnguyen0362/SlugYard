@@ -692,12 +692,17 @@ internal fun PlayerRuntimeController.switchToSourceStream(stream: Stream, resume
  * resolution itself; the retained player only receives the already-resolved URL at this boundary.
  */
 internal fun PlayerRuntimeController.switchToRewritePlaybackSource(handoff: RewritePlaybackHandoff) {
+    val previousSeason = currentSeason
+    val previousEpisode = currentEpisode
+    val previousVideoId = currentVideoId
     contentId = handoff.contentId
     contentType = handoff.contentType
     currentVideoId = handoff.contentId
     currentSeason = handoff.season
     currentEpisode = handoff.episode
     currentEpisodeTitle = handoff.episodeTitle
+    if (!handoff.parentId.isNullOrBlank()) parentId = handoff.parentId
+    if (!handoff.parentType.isNullOrBlank()) parentType = handoff.parentType
     _uiState.update {
         it.copy(
             contentType = handoff.contentType,
@@ -706,6 +711,41 @@ internal fun PlayerRuntimeController.switchToRewritePlaybackSource(handoff: Rewr
             currentEpisode = handoff.episode,
             currentEpisodeTitle = handoff.episodeTitle,
         )
+    }
+    val episodeIdentityChanged =
+        previousSeason != handoff.season ||
+            previousEpisode != handoff.episode ||
+            previousVideoId != handoff.contentId
+    if (episodeIdentityChanged) {
+        // beginHttpSourceStream does not refresh episode-scoped metadata; mirror the legacy
+        // switchToEpisodeStreamCommon path so Up Next, pause description, and IntroDB/AniSkip
+        // all rebind to the newly selected episode.
+        recomputeNextEpisode(resetVisibility = true)
+        updateEpisodeDescription()
+        if (metaVideos.isEmpty()) {
+            fetchMetaDetailsForCurrentContent()
+        }
+        playbackStartedForParentalGuide = false
+        skipIntervals = emptyList()
+        skipIntroFetchedKey = null
+        skipIntroInFlightKey = null
+        lastActiveSkipType = null
+        autoSkippedIntervalKeys.clear()
+        _uiState.update {
+            it.copy(
+                activeSkipInterval = null,
+                skipIntervalDismissed = false,
+                parentalWarnings = emptyList(),
+                showParentalGuide = false,
+                parentalGuideHasShown = false,
+            )
+        }
+        fetchParentalGuide(contentId, contentType, currentSeason, currentEpisode)
+        // Prefer parent/series id for IntroDB/IMDb; episode id still works via normalizeSkipLookupId.
+        val skipId = parentId?.takeIf { it.isNotBlank() }
+            ?: currentVideoId
+            ?: contentId
+        fetchSkipIntervals(skipId, currentSeason, currentEpisode)
     }
     val source = handoff.source
     val isTorrent = source.infoHash != null && !source.url.startsWith("http", ignoreCase = true)

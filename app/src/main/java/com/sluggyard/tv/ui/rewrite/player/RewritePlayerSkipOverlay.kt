@@ -44,11 +44,18 @@ fun RewritePlayerSkipOverlay(
         !state.showPauseOverlay &&
         !state.showLoadingOverlay &&
         state.postPlayMode == null
-    LaunchedEffect(visible, state.showControls) {
+    LaunchedEffect(visible) {
         actions.onVisibilityChanged(visible)
-        // Transport controls own focus while visible. The skip prompt only claims initial focus
-        // when the player has no other active action row.
-        if (visible && !state.showControls) focusRequester.requestFocusReliably(retries = 8)
+    }
+    // Prefer Skip Intro over transport chrome. Auto-showing controls previously stole focus
+    // from the skip button and made OK/center hit Play/Pause instead.
+    LaunchedEffect(visible, interval?.startTime, interval?.type, state.showControls) {
+        if (!visible) return@LaunchedEffect
+        if (state.showControls) {
+            // Let chrome compose, then reclaim focus for the skip action.
+            kotlinx.coroutines.delay(48)
+        }
+        focusRequester.requestFocusReliably(retries = 10)
     }
     AnimatedVisibility(visible = visible, enter = fadeIn(), exit = fadeOut()) {
         Box(modifier = modifier.fillMaxSize()) {

@@ -175,6 +175,9 @@ class PlayerRuntimeController(
     internal val headersJson: String? = navigationArgs.headersJson
     internal var contentId: String? = navigationArgs.contentId
     internal var contentType: String? = navigationArgs.contentType
+    /** Series/catalog id for meta + IntroDB when [contentId] is episode-shaped. */
+    internal var parentId: String? = navigationArgs.parentId
+    internal var parentType: String? = navigationArgs.parentType
     internal val contentName: String? = navigationArgs.contentName
     internal val poster: String? = navigationArgs.poster
     internal val backdrop: String? = navigationArgs.backdrop
@@ -578,7 +581,7 @@ class PlayerRuntimeController(
         // initializePlayer(); when ExoPlayer's STATE_READY fired before the DB
         // read finished, the resume seek was silently dropped.
         observeSubtitleSettings()
-        fetchMetaDetails(contentId, contentType)
+        fetchMetaDetailsForCurrentContent()
         observeBlurUnwatchedEpisodes()
         observeEpisodeWatchProgress()
         observeTorrentSettings()

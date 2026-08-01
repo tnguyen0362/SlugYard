@@ -669,6 +669,11 @@ private fun PlayerRuntimeController.completeSkipLookup(cacheKey: String, result:
     skipIntroInFlightKey = null
     skipIntroFetchedKey = cacheKey.takeIf { result.isNotEmpty() }
     skipIntervals = result
+    // Evaluate immediately against the live playhead so Skip Intro can appear without
+    // waiting for the next progress poll (500ms–1s), which stacks on top of network latency.
+    val positionMs = currentPlaybackPositionMs()?.coerceAtLeast(0L)
+        ?: playbackTimeline.value.currentPosition
+    updateActiveSkipInterval(positionMs)
 }
 
 /** Stremio episode IDs may append :season:episode to an otherwise valid IMDb series ID. */

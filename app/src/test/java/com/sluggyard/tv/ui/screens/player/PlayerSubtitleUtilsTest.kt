@@ -62,4 +62,29 @@ class PlayerSubtitleUtilsTest {
             PlayerSubtitleUtils.classifySubtitleFormat(trackTitle = "English Text"),
         )
     }
+
+    @Test
+    fun subtitleTrackLabelKeepsForcedSdhAndDialogueRoles() {
+        val (title, detail) = PlayerSubtitleUtils.formatSubtitleTrackLabel(
+            languageDisplay = "English",
+            formatTag = "ASS",
+            name = "English SDH Dialogue",
+            isForced = false,
+            isSignsAndSongs = false,
+        )
+        assertEquals("English ASS", title)
+        assertEquals("Dialogue · SDH", detail)
+    }
+
+    @Test
+    fun subtitleTrackLabelKeepsSignsAndSongsAndForced() {
+        val (_, detail) = PlayerSubtitleUtils.formatSubtitleTrackLabel(
+            languageDisplay = "English",
+            formatTag = "ASS",
+            name = "English Signs & Songs Forced",
+            isForced = true,
+            isSignsAndSongs = true,
+        )
+        assertEquals("Forced · Signs & Songs", detail)
+    }
 }

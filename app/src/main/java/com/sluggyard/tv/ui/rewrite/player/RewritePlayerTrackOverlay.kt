@@ -50,8 +50,10 @@ import com.sluggyard.tv.ui.rewrite.RewriteTvButton
 import com.sluggyard.tv.ui.screens.player.PlayerUiState
 import com.sluggyard.tv.ui.screens.player.PlayerSubtitleUtils
 import com.sluggyard.tv.ui.screens.player.RewritePlayerTrackActions
+import com.sluggyard.tv.ui.screens.player.SUBTITLE_DELAY_STEP_MS
 import com.sluggyard.tv.ui.screens.player.TrackInfo
 import com.sluggyard.tv.ui.util.languageCodeToName
+import kotlin.math.abs
 
 private const val SubtitleOffKey = "off"
 private const val SubtitleFooterKey = "footer"
@@ -141,12 +143,19 @@ fun RewritePlayerTrackOverlay(
                 state.subtitleTracks.forEachIndexed { ordinal, track ->
                     val language = subtitleLanguageName(track.language, track.name)
                     val format = subtitleCodecTag(track.codec, track.sampleMimeType, track.name)
+                    val (title, detail) = PlayerSubtitleUtils.formatSubtitleTrackLabel(
+                        languageDisplay = language,
+                        formatTag = format,
+                        name = track.name,
+                        isForced = track.isForced,
+                        isSignsAndSongs = track.isSignsAndSongs,
+                    )
                     add(
                         SubtitleChoice(
                             key = "embedded:$ordinal:${track.trackId.orEmpty()}:${track.index}",
                             language = language,
-                            title = listOfNotNull(language, format).joinToString(" "),
-                            detail = if (track.isForced) "Forced" else null,
+                            title = title,
+                            detail = detail,
                             // Prefer the UI index so MPV/Media3 isSelected desync cannot mark
                             // multiple rows selected after language sort (breaks initial focus).
                             selected = state.selectedAddonSubtitle == null && (
@@ -163,12 +172,17 @@ fun RewritePlayerTrackOverlay(
                 state.addonSubtitles.forEachIndexed { ordinal, subtitle ->
                     val language = subtitle.getDisplayLanguage()
                     val format = subtitleFormatTag(subtitle.format, subtitle.url)
+                    val (title, detail) = PlayerSubtitleUtils.formatSubtitleTrackLabel(
+                        languageDisplay = language,
+                        formatTag = format,
+                        name = listOfNotNull(subtitle.addonName, subtitle.format).joinToString(" "),
+                    )
                     add(
                         SubtitleChoice(
                             key = "addon:$ordinal:${subtitle.id}:${subtitle.url}",
                             language = language,
-                            title = listOfNotNull(language, format).joinToString(" "),
-                            detail = null,
+                            title = title,
+                            detail = detail,
                             selected = subtitle == state.selectedAddonSubtitle,
                             onClick = { actions.onSelectAddonSubtitle(subtitle) },
                         ),
@@ -192,6 +206,12 @@ fun RewritePlayerTrackOverlay(
             // Outline color and Reset style. Mirrors the LazyColumn.weight(1f) pattern used by
             // the speed dialog above.
             Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                Text("Timing delay", style = MaterialTheme.typography.titleSmall, color = SlugYardPalette.OnCanvas)
+                StepperRow(
+                    value = formatStyleDelay(state.subtitleDelayMs),
+                    onDecrease = { actions.onAdjustSubtitleDelay(-SUBTITLE_DELAY_STEP_MS) },
+                    onIncrease = { actions.onAdjustSubtitleDelay(SUBTITLE_DELAY_STEP_MS) },
+                )
                 Text("Size", style = MaterialTheme.typography.titleSmall, color = SlugYardPalette.OnCanvas)
                 StepperRow(
                     value = "${state.subtitleStyle.size}%",
@@ -631,4 +651,14 @@ private fun TrackStatus(message: String) {
         style = MaterialTheme.typography.bodyLarge,
         color = SlugYardPalette.OnCanvasMuted,
     )
+}
+
+private fun formatStyleDelay(delayMs: Int): String {
+    val seconds = abs(delayMs) / 1000f
+    val sign = when {
+        delayMs > 0 -> "+"
+        delayMs < 0 -> "-"
+        else -> ""
+    }
+    return "${sign}${"%.1f".format(seconds)} s"
 }

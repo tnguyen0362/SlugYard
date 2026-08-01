@@ -374,6 +374,7 @@ data class RewritePlayerTrackActions(
     val onSetSubtitleOutlineEnabled: (Boolean) -> Unit = {},
     val onSetSubtitleOutlineColor: (Int) -> Unit = {},
     val onResetSubtitleStyle: () -> Unit,
+    val onAdjustSubtitleDelay: (Int) -> Unit = {},
     val onSetPlaybackSpeed: (Float) -> Unit,
 )
 
