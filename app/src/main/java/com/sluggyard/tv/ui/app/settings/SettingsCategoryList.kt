@@ -1,5 +1,6 @@
 package com.sluggyard.tv.ui.app.settings
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -127,12 +128,16 @@ fun SettingsSplitPane(
         }
     }
     var didRequestInitialFocus by remember { mutableStateOf(false) }
+    var detailHasFocus by remember { mutableStateOf(false) }
     LaunchedEffect(entryFocusRequester) {
         if (!didRequestInitialFocus) {
             didRequestInitialFocus = true
             entryFocusRequester.requestFocusReliably(retries = 8)
         }
     }
+    // Back from the detail pane returns focus to the category rail; Back on the rail
+    // is left to the shell so Settings can exit normally.
+    BackHandler(enabled = detailHasFocus, onBack = { focusSelectedCategory() })
     Row(
         modifier = modifier.fillMaxSize().background(SlugYardPalette.Canvas),
     ) {
@@ -187,7 +192,8 @@ fun SettingsSplitPane(
             modifier = Modifier
                 .fillMaxHeight()
                 .weight(0.58f)
-                .background(SlugYardPalette.Canvas),
+                .background(SlugYardPalette.Canvas)
+                .onFocusChanged { detailHasFocus = it.hasFocus },
         ) {
             detail()
         }

@@ -1251,6 +1251,9 @@ private fun PlayerView.applyExoAspectMode(mode: AspectMode) {
     applyExoAspectMode(this, mode)
 }
 
+/** Normal TV resting inset at 0% subtitle position (~5% of view height). */
+private const val SUBTITLE_BOTTOM_PADDING_AT_ZERO = 0.05f
+
 private fun PlayerView.applySubtitleStyleIfNeeded(subtitleStyle: SubtitleStyleSettings) {
     if (getTag(R.id.player_view_subtitle_style_tag) == subtitleStyle) {
         return
@@ -1287,17 +1290,14 @@ private fun PlayerView.applySubtitleStyleIfNeeded(subtitleStyle: SubtitleStyleSe
 
         setApplyEmbeddedStyles(false)
 
-        // Leave room for the transport chrome when it is shown.  The old 6% default
-        // placed a normal one-line caption directly on the seek bar, which made
-        // subtitles harder to read and obscured the current position on TV.
+        // 0% = normal TV resting baseline (~5% inset), not flush-to-bezel and
+        // not the old hardcoded +14% lift. Positive values raise further;
+        // negatives can ease toward the edge.
         val bottomPaddingFraction =
-            (0.14f + (subtitleStyle.verticalOffset / 250f)).coerceIn(0f, 0.4f)
+            (SUBTITLE_BOTTOM_PADDING_AT_ZERO + subtitleStyle.verticalOffset / 100f)
+                .coerceIn(0f, 0.55f)
         setBottomPaddingFraction(bottomPaddingFraction)
-
-        post {
-            val extraPadding = (height * (subtitleStyle.verticalOffset / 400f)).toInt().coerceAtLeast(0)
-            setPadding(paddingLeft, paddingTop, paddingRight, extraPadding)
-        }
+        setPadding(paddingLeft, paddingTop, paddingRight, 0)
     }
 }
 

@@ -51,10 +51,7 @@ Playback builds on open-source work we gratefully acknowledge:
 
 - **[ExoPlayer / AndroidX Media3](https://github.com/androidx/media)** (Apache-2.0) — Exo engine and FFmpeg decoder base
 - **[mpv](https://mpv.io/) / [libmpv-android](https://github.com/jarnedemeulemeester/libmpv-android)** — MPV engine path
-- **[Kodi](https://github.com/xbmc/xbmc)** — FFmpeg audio downmix behavior adapted in `ffmpeg-decoder-downmix/` (see that module’s [NOTICE](ffmpeg-decoder-downmix/NOTICE.md))
-- **[NuvioTV](https://github.com/NuvioMedia/NuvioTV)** — substantial upstream lineage (see [NOTICE](NOTICE))
-
-Full attribution: [NOTICE](NOTICE).
+- **[Kodi](https://github.com/xbmc/xbmc)** — FFmpeg audio downmix behavior adapted in `ffmpeg-decoder-downmix/`
 
 [license-shield]: https://img.shields.io/github/license/tnguyen0362/SlugYard.svg?style=for-the-badge
 [license-url]: http://www.gnu.org/licenses/gpl-3.0.en.html

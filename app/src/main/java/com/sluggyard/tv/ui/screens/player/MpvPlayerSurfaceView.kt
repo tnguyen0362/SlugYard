@@ -322,11 +322,12 @@ class MpvPlayerSurfaceView @JvmOverloads constructor(
         runCatching {
             val scale = (style.size / 100.0).coerceIn(0.5, 3.0)
             val clampedOffset = style.verticalOffset.coerceIn(SUBTITLE_VERTICAL_OFFSET_MIN, SUBTITLE_VERTICAL_OFFSET_MAX)
-            val normalizedOffset = (clampedOffset - SUBTITLE_VERTICAL_OFFSET_MIN).toDouble() /
-                (SUBTITLE_VERTICAL_OFFSET_MAX - SUBTITLE_VERTICAL_OFFSET_MIN).toDouble()
-            val subPos = MPV_SUB_POS_AT_BOTTOM - (normalizedOffset * (MPV_SUB_POS_AT_BOTTOM - MPV_SUB_POS_AT_TOP))
-            val subMarginY = (MPV_SUB_MARGIN_Y_MIN +
-                (normalizedOffset * (MPV_SUB_MARGIN_Y_MAX - MPV_SUB_MARGIN_Y_MIN))).toInt()
+            // mpv sub-pos: 100 = absolute bottom, 0 = top. 0% offset uses a normal
+            // resting inset (~5%) to match Exo, not flush-to-bezel.
+            val subPos = (MPV_SUB_POS_AT_ZERO - clampedOffset.toDouble()).coerceIn(
+                MPV_SUB_POS_AT_ZERO - SUBTITLE_VERTICAL_OFFSET_MAX,
+                MPV_SUB_POS_AT_ZERO - SUBTITLE_VERTICAL_OFFSET_MIN
+            )
             val outlineSize = when {
                 !style.outlineEnabled -> 0.0
                 isAssOrSsaSubtitleSelectedNow() -> style.outlineWidth.coerceIn(1, 6).toDouble()
@@ -339,7 +340,8 @@ class MpvPlayerSurfaceView @JvmOverloads constructor(
             mpv.setPropertyBoolean("sub-bold", style.bold)
             mpv.setPropertyDouble("sub-outline-size", outlineSize)
             mpv.setPropertyDouble("sub-pos", subPos)
-            mpv.setPropertyInt("sub-margin-y", subMarginY)
+            // Position is fully owned by sub-pos; do not add a second vertical lift.
+            mpv.setPropertyInt("sub-margin-y", 0)
             mpv.setPropertyDouble("sub-shadow-offset", 0.0)
             mpv.setPropertyString("sub-border-style", borderStyle)
             mpv.setPropertyString("sub-color", toMpvColor(style.textColor))
@@ -784,10 +786,8 @@ class MpvPlayerSurfaceView @JvmOverloads constructor(
         private const val SUBTITLE_SELECTION_RETRY_COUNT = 8
         private const val SUBTITLE_VERTICAL_OFFSET_MIN = -20
         private const val SUBTITLE_VERTICAL_OFFSET_MAX = 50
-        private const val MPV_SUB_POS_AT_BOTTOM = 103.4
-        private const val MPV_SUB_POS_AT_TOP = 72.4
-        private const val MPV_SUB_MARGIN_Y_MIN = 0
-        private const val MPV_SUB_MARGIN_Y_MAX = 60
+        /** Normal TV resting place at 0% (~5% above absolute bottom). */
+        private const val MPV_SUB_POS_AT_ZERO = 95.0
     }
 }
 

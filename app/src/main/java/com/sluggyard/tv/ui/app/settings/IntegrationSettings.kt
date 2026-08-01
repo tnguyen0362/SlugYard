@@ -26,12 +26,9 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import com.sluggyard.tv.core.addonprotocol.ManagedAddon
-import com.sluggyard.tv.core.addonprotocol.SlugYardCommunitySourcePolicy
 import com.sluggyard.tv.core.streamresolution.DebridService
 import com.sluggyard.tv.data.local.TraktAuthState
 import com.sluggyard.tv.data.local.WatchProgressSource
-import com.sluggyard.tv.domain.model.TmdbSettings
 import com.sluggyard.tv.ui.app.debrid.DebridConnection
 import kotlinx.coroutines.launch
 
@@ -39,11 +36,7 @@ import kotlinx.coroutines.launch
 internal fun IntegrationsSettings(
     facade: SettingsFacade,
     traktAuth: TraktAuthState,
-    tmdb: TmdbSettings,
     debridConnection: DebridConnection,
-    addons: List<ManagedAddon>,
-    onInstallCommunityAddons: suspend () -> Unit,
-    onUninstallCommunityAddons: suspend () -> Unit,
     onConnect: suspend (DebridService, String) -> Unit,
     onDisconnect: suspend (DebridService) -> Unit,
     onSelect: suspend (DebridService) -> Unit,
@@ -54,12 +47,6 @@ internal fun IntegrationsSettings(
     var credentialError by remember { mutableStateOf<String?>(null) }
     var traktCode by remember { mutableStateOf<com.sluggyard.tv.data.remote.dto.trakt.TraktDeviceCodeResponseDto?>(null) }
     var traktMessage by remember { mutableStateOf<String?>(null) }
-    var communityBusy by remember { mutableStateOf(false) }
-    var communityMessage by remember { mutableStateOf<String?>(null) }
-    val packInstalled = SlugYardCommunitySourcePolicy.isCommunityPackInstalled(addons)
-    val watchHubInstalled = SlugYardCommunitySourcePolicy.isWatchHubInstalled(addons)
-    val debridConnected = debridConnection.activeService != null ||
-        debridConnection.configuredServices.isNotEmpty()
 
     val watchProgressSource by facade.traktSettings.watchProgressSource.collectAsState(
         initial = WatchProgressSource.TRAKT,
@@ -143,75 +130,6 @@ internal fun IntegrationsSettings(
         }
         traktMessage?.let { ValueRow("Trakt", it) }
         if (traktAuth.isAuthenticated) ActionRow("Disconnect Trakt", "Remove the Trakt token for this profile.") { scope.launch { facade.disconnectTrakt() } }
-    }
-    SettingsGroup("Community addons") {
-        Text(
-            if (debridConnected) {
-                "Installed sources power catalogs, WatchHub, and debrid torrent streams."
-            } else {
-                "Without a debrid key, Play opens WatchHub (where to watch). Connect a provider for torrent streams."
-            },
-            style = androidx.compose.material3.MaterialTheme.typography.bodyMedium,
-            color = com.sluggyard.tv.ui.design.SlugYardPalette.OnCanvasMuted,
-        )
-        ValueRow(
-            title = "Status",
-            value = when {
-                !packInstalled -> "Not installed"
-                debridConnected -> "Installed · debrid ready"
-                watchHubInstalled -> "Installed · WatchHub ready"
-                else -> "Installed"
-            },
-        )
-        ValueRow(
-            title = "WatchHub",
-            value = if (watchHubInstalled) "Ready" else "Not installed",
-        )
-        ActionRow(
-            title = "SlugYard Sources",
-            description = if (packInstalled) {
-                "Reinstall curated catalogs, WatchHub, and stream sources."
-            } else {
-                "Install curated catalogs, WatchHub, and stream sources."
-            },
-            actionLabel = if (packInstalled) "Reinstall" else "Install",
-            onClick = {
-                if (communityBusy) return@ActionRow
-                communityBusy = true
-                communityMessage = null
-                scope.launch {
-                    runCatching { onInstallCommunityAddons() }
-                        .onSuccess {
-                            communityMessage = if (debridConnected) {
-                                "Community addons installed."
-                            } else {
-                                "Community addons installed. WatchHub is ready without debrid."
-                            }
-                        }
-                        .onFailure { communityMessage = it.message ?: "Could not install community addons." }
-                    communityBusy = false
-                }
-            },
-        )
-        if (packInstalled) {
-            ActionRow(
-                title = "Uninstall community addons",
-                description = "Remove curated catalogs, WatchHub, and stream sources.",
-                actionLabel = if (communityBusy) "Working…" else "Uninstall",
-                onClick = {
-                    if (communityBusy) return@ActionRow
-                    communityBusy = true
-                    communityMessage = null
-                    scope.launch {
-                        runCatching { onUninstallCommunityAddons() }
-                            .onSuccess { communityMessage = "Community addons removed." }
-                            .onFailure { communityMessage = it.message ?: "Could not uninstall community addons." }
-                        communityBusy = false
-                    }
-                },
-            )
-        }
-        communityMessage?.let { ValueRow("Community addons", it) }
     }
     SettingsGroup("Cloud / Debrid") {
         Text(

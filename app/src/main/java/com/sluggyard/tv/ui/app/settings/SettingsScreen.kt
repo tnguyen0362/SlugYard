@@ -13,7 +13,6 @@ import androidx.compose.ui.focus.FocusRequester
 import com.sluggyard.tv.core.streamresolution.DebridService
 import com.sluggyard.tv.data.local.PlayerSettings
 import com.sluggyard.tv.data.local.TraktAuthState
-import com.sluggyard.tv.domain.model.TmdbSettings
 import com.sluggyard.tv.ui.app.data.HomeSettings
 import com.sluggyard.tv.ui.app.data.ProfileState
 import com.sluggyard.tv.ui.app.debrid.DebridConnection
@@ -30,16 +29,13 @@ fun SettingsScreen(
     profileState: ProfileState,
     onHideUnreleasedChanged: (Boolean) -> Unit,
     onRememberProfileChanged: (Boolean) -> Unit,
-    onCatalogOrderChanged: (List<HomeCatalogKey>) -> Unit,
+    @Suppress("UNUSED_PARAMETER") onCatalogOrderChanged: (List<HomeCatalogKey>) -> Unit,
     debridConnection: DebridConnection,
     onConnect: suspend (DebridService, String) -> Unit,
     onDisconnect: suspend (DebridService) -> Unit,
-    onDebridEnabledChanged: suspend (Boolean) -> Unit,
+    @Suppress("UNUSED_PARAMETER") onDebridEnabledChanged: suspend (Boolean) -> Unit,
     onSelect: suspend (DebridService) -> Unit,
     addons: List<ManagedAddon>,
-    onInstallCommunityAddons: suspend () -> Unit,
-    onUninstallCommunityAddons: suspend () -> Unit,
-    onInstallAddon: suspend (manifestUrl: String) -> Unit,
     onUninstallAddon: suspend (manifestUrl: String) -> Unit,
     onOpenProfiles: () -> Unit,
     contentFocusRequester: FocusRequester? = null,
@@ -51,7 +47,6 @@ fun SettingsScreen(
     val categoryListState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val traktAuth by facade.traktAuth.collectAsState(initial = TraktAuthState())
-    val tmdb by facade.tmdbSettings.collectAsState(initial = TmdbSettings())
     val player by facade.playerSettings.collectAsState(initial = PlayerSettings())
 
     @Composable
@@ -62,24 +57,12 @@ fun SettingsScreen(
             SettingsCategory.Layout -> LayoutSettings(homeSettings, profileState, onHideUnreleasedChanged, onRememberProfileChanged)
             SettingsCategory.Addons -> AddonsSettings(
                 addons = addons,
-                onInstallAddon = onInstallAddon,
                 onUninstallAddon = onUninstallAddon,
-            )
-            SettingsCategory.ContentDiscovery -> ContentDiscoverySettings(
-                addons = addons,
-                debridConnected = debridConnection.activeService != null ||
-                    debridConnection.configuredServices.isNotEmpty(),
-                onInstallCommunityAddons = onInstallCommunityAddons,
-                onUninstallCommunityAddons = onUninstallCommunityAddons,
             )
             SettingsCategory.Integrations -> IntegrationsSettings(
                 facade,
                 traktAuth,
-                tmdb,
                 debridConnection,
-                addons = addons,
-                onInstallCommunityAddons = onInstallCommunityAddons,
-                onUninstallCommunityAddons = onUninstallCommunityAddons,
                 onConnect,
                 onDisconnect,
                 onSelect,

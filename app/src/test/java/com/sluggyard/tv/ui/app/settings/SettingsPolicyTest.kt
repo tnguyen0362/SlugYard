@@ -14,7 +14,6 @@ class SettingsPolicyTest {
                 SettingsCategory.Profiles,
                 SettingsCategory.Layout,
                 SettingsCategory.Addons,
-                SettingsCategory.ContentDiscovery,
                 SettingsCategory.Integrations,
                 SettingsCategory.Display,
                 SettingsCategory.Subtitles,

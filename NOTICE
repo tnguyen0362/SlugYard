@@ -1,13 +1,3 @@
-SlugYard is a substantially modified version of NuvioTV.
-
-Original project: NuvioTV
-Copyright: NuvioTV contributors
-Source: https://github.com/NuvioMedia/NuvioTV
-
-SlugYard includes extensive changes to the Android TV interface, branding,
-catalog presentation, playback behavior, debrid integration, subtitle support,
-and application settings. These changes are maintained by the SlugYard project.
-
 SlugYard is distributed under the GNU General Public License, version 3.0.
 See LICENSE for the complete license text.
 

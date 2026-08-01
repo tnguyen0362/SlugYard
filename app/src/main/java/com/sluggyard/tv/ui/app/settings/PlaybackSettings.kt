@@ -87,7 +87,6 @@ internal fun AboutSettings() {
     SettingsGroup("About SlugYard") {
         ValueRow("Application", "SlugYard TV")
         ValueRow("Version", BuildConfig.VERSION_NAME)
-        ValueRow("Playback", "Automatic dual-player fallback (ExoPlayer + mpv)")
         ActionRow(
             title = "License",
             description = "GNU General Public License v3.0 (GPLv3)",
@@ -108,7 +107,7 @@ internal fun AboutSettings() {
         )
         ActionRow(
             title = "Credits & attribution",
-            description = "ExoPlayer / Media3, mpv, Kodi downmix, NuvioTV, and more.",
+            description = "ExoPlayer / Media3, mpv, Kodi downmix, and more.",
             actionLabel = "View",
             onClick = { openDoc = AboutDoc.Credits },
         )
@@ -185,11 +184,6 @@ Playback stack:
 • mpv / libmpv-android
 • Kodi-derived FFmpeg audio downmix (ffmpeg-decoder-downmix/)
 
-Lineage:
-• Substantial modifications of NuvioTV (see NOTICE)
-
 Also: Jetpack Compose, Hilt, OkHttp, Coil, and other libraries declared in Gradle.
-
-Full notices: NOTICE and ffmpeg-decoder-downmix/NOTICE.md
 """.trimIndent()
 
