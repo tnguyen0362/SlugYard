@@ -2,6 +2,9 @@ package com.sluggyard.tv.ui.app.settings
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,12 +32,19 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.sluggyard.tv.core.addonprotocol.AddonManifestContract
+import com.sluggyard.tv.core.addonprotocol.AddonResource
 import com.sluggyard.tv.core.addonprotocol.ManagedAddon
 import com.sluggyard.tv.core.addonprotocol.SlugYardCommunitySourcePolicy
 import com.sluggyard.tv.ui.app.ButtonStyle
 import com.sluggyard.tv.ui.app.TvButton
 import com.sluggyard.tv.ui.design.SlugYardPalette
+import com.sluggyard.tv.ui.design.SlugYardTvMetrics
 import kotlinx.coroutines.launch
+
+private enum class AddonsListFilter(val label: String) {
+    Installed("Installed"),
+    Community("Community addons"),
+}
 
 private data class AddonCardModel(
     val manifestUrl: String,
@@ -44,19 +54,30 @@ private data class AddonCardModel(
     val description: String,
     val logoUrl: String?,
     val showLogo: Boolean,
+    val installed: Boolean,
 )
 
 @Composable
 internal fun AddonsSettings(
     addons: List<ManagedAddon>,
+    onInstallAddon: suspend (manifestUrl: String) -> Unit,
     onUninstallAddon: suspend (manifestUrl: String) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    var listFilter by remember { mutableStateOf(AddonsListFilter.Installed) }
     var busyUrl by remember { mutableStateOf<String?>(null) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
-    val cards = remember(addons) { addons.map { it.toCardModel() } }
+
+    val cards = remember(addons, listFilter) {
+        buildAddonCards(addons, listFilter)
+    }
 
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        AddonsFilterRow(
+            listFilter = listFilter,
+            onSelect = { listFilter = it },
+        )
+
         statusMessage?.let { message ->
             Text(
                 message,
@@ -67,7 +88,10 @@ internal fun AddonsSettings(
 
         if (cards.isEmpty()) {
             Text(
-                "No installed addons.",
+                when (listFilter) {
+                    AddonsListFilter.Installed -> "No installed catalog or subtitle addons."
+                    AddonsListFilter.Community -> "No community addons available."
+                },
                 style = MaterialTheme.typography.bodyLarge,
                 color = SlugYardPalette.OnCanvasMuted,
             )
@@ -76,14 +100,26 @@ internal fun AddonsSettings(
                 AddonCard(
                     model = card,
                     busy = busyUrl == card.manifestUrl,
-                    onUninstall = {
+                    onPrimaryAction = {
                         if (busyUrl != null) return@AddonCard
                         busyUrl = card.manifestUrl
                         statusMessage = null
                         scope.launch {
-                            runCatching { onUninstallAddon(card.manifestUrl) }
-                                .onSuccess { statusMessage = "Uninstalled ${card.name}." }
-                                .onFailure { statusMessage = it.message ?: "Addon action failed." }
+                            runCatching {
+                                if (card.installed) {
+                                    onUninstallAddon(card.manifestUrl)
+                                } else {
+                                    onInstallAddon(card.manifestUrl)
+                                }
+                            }.onSuccess {
+                                statusMessage = if (card.installed) {
+                                    "Uninstalled ${card.name}."
+                                } else {
+                                    "Installed ${card.name}."
+                                }
+                            }.onFailure {
+                                statusMessage = it.message ?: "Addon action failed."
+                            }
                             busyUrl = null
                         }
                     },
@@ -94,10 +130,74 @@ internal fun AddonsSettings(
 }
 
 @Composable
+private fun AddonsFilterRow(
+    listFilter: AddonsListFilter,
+    onSelect: (AddonsListFilter) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        AddonsListFilter.entries.forEach { filter ->
+            FilterChip(
+                label = filter.label,
+                selected = listFilter == filter,
+                onClick = { onSelect(filter) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun FilterChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    val shape = RoundedCornerShape(SlugYardTvMetrics.PillCornerRadius)
+    Box(
+        modifier = Modifier
+            .background(
+                when {
+                    focused -> Color.White.copy(alpha = 0.12f)
+                    selected -> Color.White.copy(alpha = 0.08f)
+                    else -> SlugYardPalette.SurfaceElevated
+                },
+                shape,
+            )
+            .border(
+                width = SlugYardTvMetrics.FocusRingWidth,
+                color = when {
+                    focused -> SlugYardPalette.FocusRing
+                    selected -> SlugYardPalette.Accent.copy(alpha = 0.65f)
+                    else -> SlugYardPalette.Divider
+                },
+                shape,
+            )
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+                onClick = onClick,
+            )
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.titleMedium,
+            color = SlugYardPalette.OnCanvas,
+            fontWeight = if (selected || focused) FontWeight.SemiBold else FontWeight.Medium,
+        )
+    }
+}
+
+@Composable
 private fun AddonCard(
     model: AddonCardModel,
     busy: Boolean,
-    onUninstall: () -> Unit,
+    onPrimaryAction: () -> Unit,
 ) {
     val shape = RoundedCornerShape(12.dp)
     Row(
@@ -148,8 +248,13 @@ private fun AddonCard(
             )
         }
         TvButton(
-            label = if (busy) "Removing…" else "Uninstall",
-            onClick = onUninstall,
+            label = when {
+                busy && model.installed -> "Removing…"
+                busy -> "Installing…"
+                model.installed -> "Uninstall"
+                else -> "Install"
+            },
+            onClick = onPrimaryAction,
             enabled = !busy,
             style = ButtonStyle.Secondary,
         )
@@ -183,7 +288,40 @@ private fun AddonIcon(logoUrl: String?, name: String) {
     }
 }
 
-private fun ManagedAddon.toCardModel(): AddonCardModel {
+private fun buildAddonCards(
+    addons: List<ManagedAddon>,
+    listFilter: AddonsListFilter,
+): List<AddonCardModel> {
+    return when (listFilter) {
+        AddonsListFilter.Installed -> addons
+            .filter { SlugYardCommunitySourcePolicy.isUserFacingSettingsAddon(it) }
+            .map { it.toCardModel(installed = true) }
+        AddonsListFilter.Community -> buildCommunityCatalog(addons)
+    }
+}
+
+private fun buildCommunityCatalog(installed: List<ManagedAddon>): List<AddonCardModel> {
+    val playFlixInstalled = installed.firstOrNull {
+        SlugYardCommunitySourcePolicy.isPlayFlixManifest(it.manifestUrl)
+    }
+    return listOf(communityPlayFlixCard(playFlixInstalled))
+}
+
+private fun communityPlayFlixCard(installed: ManagedAddon?): AddonCardModel {
+    if (installed != null) return installed.toCardModel(installed = true)
+    return AddonCardModel(
+        manifestUrl = SlugYardCommunitySourcePolicy.PLAYFLIX_MANIFEST_URL,
+        name = SlugYardCommunitySourcePolicy.PLAYFLIX_DISPLAY_NAME,
+        version = null,
+        categoryLine = "Movie & Series",
+        description = "PlayFlix community streams and catalogs. Install when you want this source enabled.",
+        logoUrl = null,
+        showLogo = false,
+        installed = false,
+    )
+}
+
+private fun ManagedAddon.toCardModel(installed: Boolean): AddonCardModel {
     val isPlayFlix = SlugYardCommunitySourcePolicy.isPlayFlixManifest(manifestUrl)
     return AddonCardModel(
         manifestUrl = manifestUrl,
@@ -198,6 +336,7 @@ private fun ManagedAddon.toCardModel(): AddonCardModel {
             },
         logoUrl = manifest.logoUrl,
         showLogo = !isPlayFlix,
+        installed = installed,
     )
 }
 
@@ -213,9 +352,16 @@ private fun formatAddonTypes(manifest: AddonManifestContract): String {
         }
     }.distinct()
     return when {
-        labels.isEmpty() -> "Other"
+        labels.isEmpty() -> resourceFallbackLabel(manifest)
         labels.size == 1 -> labels.single()
         labels.size == 2 -> "${labels[0]} & ${labels[1]}"
         else -> labels.dropLast(1).joinToString(", ") + " & ${labels.last()}"
     }
+}
+
+private fun resourceFallbackLabel(manifest: AddonManifestContract): String = when {
+    AddonResource.SUBTITLES in manifest.resources -> "Subtitles"
+    AddonResource.META in manifest.resources -> "Metadata"
+    AddonResource.CATALOG in manifest.resources -> "Catalog"
+    else -> "Other"
 }

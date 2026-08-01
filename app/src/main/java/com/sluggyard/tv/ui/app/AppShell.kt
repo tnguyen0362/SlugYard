@@ -1773,6 +1773,9 @@ private fun AppContent(
                         graph.provisionCommunitySources(true)
                     },
                     addons = registry.addons,
+                    onInstallAddon = { manifestUrl ->
+                        graph.installAllowlistedAddon(manifestUrl)
+                    },
                     onUninstallAddon = { manifestUrl ->
                         graph.uninstallAllowlistedAddon(manifestUrl)
                     },
@@ -2052,8 +2055,7 @@ private fun AppContent(
                 }
             }
             if (destination == RootDestination.Home && homeSplashVisible) {
-                val catalogTotal = catalogState.rows.size
-                val catalogDone = catalogState.rows.count { it.loadState !is CatalogLoadState.Loading }
+                // Logo mark only — dark canvas, no blue tile, no wordmark / status chrome.
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -2061,33 +2063,14 @@ private fun AppContent(
                         .zIndex(8f),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(22.dp),
-                    ) {
-                        androidx.compose.foundation.Image(
-                            painter = androidx.compose.ui.res.painterResource(
-                                id = com.sluggyard.tv.R.drawable.app_logo_wordmark,
-                            ),
-                            contentDescription = "SlugYard",
-                            contentScale = androidx.compose.ui.layout.ContentScale.Fit,
-                            modifier = Modifier
-                                .fillMaxWidth(0.42f)
-                                .padding(horizontal = 24.dp),
-                        )
-                        com.sluggyard.tv.ui.components.LoadingIndicator(
-                            color = SlugYardPalette.Accent,
-                        )
-                        Text(
-                            if (catalogTotal > 0) {
-                                "Loading catalogs ($catalogDone / $catalogTotal)"
-                            } else {
-                                "Getting your home ready"
-                            },
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = SlugYardPalette.OnCanvasMuted,
-                        )
-                    }
+                    androidx.compose.foundation.Image(
+                        painter = androidx.compose.ui.res.painterResource(
+                            id = com.sluggyard.tv.R.drawable.app_logo_mark_clear,
+                        ),
+                        contentDescription = null,
+                        contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+                        modifier = Modifier.size(168.dp),
+                    )
                 }
             }
             continueWatchingMenuPoster?.let { poster ->

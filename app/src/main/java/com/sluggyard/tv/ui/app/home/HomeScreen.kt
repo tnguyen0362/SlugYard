@@ -56,6 +56,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -84,7 +85,6 @@ import androidx.compose.ui.zIndex
 import coil3.compose.AsyncImage
 import coil3.imageLoader
 import coil3.request.ImageRequest
-import coil3.request.SuccessResult
 import coil3.size.Size
 import com.sluggyard.tv.ui.design.SlugYardPalette
 import com.sluggyard.tv.ui.design.SlugYardTvMetrics
@@ -98,11 +98,9 @@ import com.sluggyard.tv.ui.app.verticalFocusExits
 import com.sluggyard.tv.ui.util.DpadVerticalNeighbors
 import com.sluggyard.tv.ui.util.LocalDpadVerticalNeighbors
 import com.sluggyard.tv.ui.util.dpadRepeatThrottle
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 data class HomePoster(
     val id: String,
@@ -1139,48 +1137,34 @@ internal fun PosterCard(
             ?.let { preferCardBackdropUrl(it) }
             ?.takeIf { it != posterUrl }
     }
-    // Width expands only once landscape art is in memory. Expanding first leaves grey gutters
-    // beside the centered portrait for a frame — the classic first-focus flicker.
-    // Only decode landscape after focus settles — eager per-composition 1280px loads starved
-    // portrait rails during fast D-pad / fling (bitmapFactoryMaxParallelism is only 3).
-    var landscapeReady by remember(poster.id, landscapeUrl) { mutableStateOf(false) }
-    var landscapeBitmapReady by remember(poster.id, landscapeUrl) { mutableStateOf(false) }
-    LaunchedEffect(focused, poster.id, landscapeUrl, landscapeDecode) {
-        if (!focused) return@LaunchedEffect
-        val url = landscapeUrl
-        if (url == null) {
-            landscapeReady = true
-            landscapeBitmapReady = false
+    // Root cause of portrait↔empty↔landscape flash:
+    // 1) Expanding when landscapeUrl == null → empty 16:9 title banner.
+    // 2) Gating on Coil execute() then swapping AsyncImage → one blank frame after portrait
+    //    is torn down and before the new image paints.
+    // Fix: stay portrait-sized with portrait art until landscape AsyncImage onSuccess; only
+    // then widen. Load landscape invisibly underneath so the swap is paint-complete.
+    var loadLandscape by remember(poster.id, landscapeUrl) { mutableStateOf(false) }
+    var landscapePainted by remember(poster.id, landscapeUrl) { mutableStateOf(false) }
+    LaunchedEffect(focused, poster.id, landscapeUrl, expandOnFocus) {
+        if (!focused || !expandOnFocus || landscapeUrl == null) {
+            loadLandscape = false
+            // Drop paint gate on blur so the next focus keeps portrait until AsyncImage
+            // onSuccess again — remounting landscape from cache still costs a blank frame
+            // if we widen/tear down portrait prematurely.
+            landscapePainted = false
             return@LaunchedEffect
         }
-        if (landscapeBitmapReady && landscapeReady) return@LaunchedEffect
-        val cacheKey = "card-backdrop:${poster.id}:$url"
+        val cacheKey = "card-backdrop:${poster.id}:$landscapeUrl"
         val memoryHit = runCatching {
             context.imageLoader.memoryCache?.get(coil3.memory.MemoryCache.Key(cacheKey)) != null
         }.getOrDefault(false)
         if (!memoryHit) {
             delay(HomeLandscapeFocusSettleMs)
         }
-        val request = ImageRequest.Builder(context)
-            .data(url)
-            .size(landscapeDecode)
-            .memoryCacheKey(cacheKey)
-            .diskCacheKey(cacheKey)
-            .build()
-        val result = withContext(Dispatchers.IO) { context.imageLoader.execute(request) }
-        landscapeBitmapReady = result is SuccessResult
-        landscapeReady = true
+        loadLandscape = true
     }
-    // Expand only when landscape is actually painted — never widen on portrait interim.
-    val layoutWidth = if (
-        focused &&
-        expandOnFocus &&
-        (landscapeUrl == null || landscapeBitmapReady)
-    ) {
-        focusedWidth
-    } else {
-        cardWidth
-    }
+    val showLandscape = focused && expandOnFocus && landscapeUrl != null && landscapePainted
+    val layoutWidth = if (showLandscape) focusedWidth else cardWidth
     LaunchedEffect(focused) {
         onFocusedChanged?.invoke(focused)
     }
@@ -1352,9 +1336,7 @@ internal fun PosterCard(
                 maxLines = 4,
                 overflow = TextOverflow.Ellipsis,
             )
-            // Portrait only while not showing landscape. Never paint portrait as the focused
-            // interim once a backdrop URL exists — that was the portrait→landscape flash.
-            val showLandscape = focused && landscapeUrl != null && landscapeBitmapReady
+            // Keep portrait visible until landscape has actually painted — never an empty banner.
             if (posterUrl != null && !showLandscape) {
                 // Stable by content id + URL; reloadToken remounts after error so fast
                 // LazyRow reuse / cancelled fetches cannot leave a permanently empty tile.
@@ -1412,7 +1394,8 @@ internal fun PosterCard(
                     )
                 }
             }
-            if (showLandscape) {
+            // Decode at landscape size invisibly; flip showLandscape only from onSuccess.
+            if (focused && expandOnFocus && landscapeUrl != null && loadLandscape) {
                 val landscapeRequest = remember(poster.id, landscapeUrl, landscapeDecode) {
                     ImageRequest.Builder(context)
                         .data(landscapeUrl)
@@ -1424,9 +1407,13 @@ internal fun PosterCard(
                 AsyncImage(
                     model = landscapeRequest,
                     contentDescription = null,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .alpha(if (landscapePainted) 1f else 0f),
                     contentScale = ContentScale.Crop,
                     alignment = Alignment.Center,
+                    onSuccess = { landscapePainted = true },
+                    onError = { landscapePainted = false },
                 )
             }
             if (focused) {

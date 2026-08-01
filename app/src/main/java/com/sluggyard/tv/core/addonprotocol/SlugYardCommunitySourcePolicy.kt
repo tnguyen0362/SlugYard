@@ -106,6 +106,31 @@ object SlugYardCommunitySourcePolicy {
         !isContentSourceManifest(url)
 
     /**
+     * Stream scrapers / torrent providers that should stay out of Addons Settings lists.
+     * PlayFlix is a community catalog/stream pack and is not treated as scraper chrome here.
+     */
+    fun isStreamScraperManifest(url: String): Boolean {
+        if (isPlayFlixManifest(url) || isWatchHubManifest(url)) return false
+        val normalized = url.lowercase()
+        return "torrentio" in normalized ||
+            "comet" in normalized ||
+            "meteor" in normalized ||
+            isAioStreamsManifest(url) ||
+            ("mediafusion" in normalized)
+    }
+
+    /** Catalog / meta / subtitle / PlayFlix entries shown in Settings → Addons. */
+    fun isUserFacingSettingsAddon(addon: ManagedAddon): Boolean {
+        if (isStreamScraperManifest(addon.manifestUrl)) return false
+        if (isPlayFlixManifest(addon.manifestUrl)) return true
+        if (isInfrastructureManifest(addon.manifestUrl)) return true
+        val resources = addon.manifest.resources
+        return AddonResource.CATALOG in resources ||
+            AddonResource.META in resources ||
+            AddonResource.SUBTITLES in resources
+    }
+
+    /**
      * Manifests to fetch for a provision pass.
      * Without debrid, skip torrent content sources so Play falls through to WatchHub cleanly.
      * PlayFlix (optional community) is never auto-provisioned — install from Community addons.

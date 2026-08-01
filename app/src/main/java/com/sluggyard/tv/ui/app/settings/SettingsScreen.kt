@@ -36,10 +36,11 @@ fun SettingsScreen(
     @Suppress("UNUSED_PARAMETER") onDebridEnabledChanged: suspend (Boolean) -> Unit,
     onSelect: suspend (DebridService) -> Unit,
     addons: List<ManagedAddon>,
+    onInstallAddon: suspend (manifestUrl: String) -> Unit,
     onUninstallAddon: suspend (manifestUrl: String) -> Unit,
     onOpenProfiles: () -> Unit,
     contentFocusRequester: FocusRequester? = null,
-    headerFocusRequester: FocusRequester? = null,
+    @Suppress("UNUSED_PARAMETER") headerFocusRequester: FocusRequester? = null,
     modifier: Modifier = Modifier,
 ) {
     var destination by remember { mutableStateOf<SettingsDestination>(SettingsDestination.Root) }
@@ -57,6 +58,7 @@ fun SettingsScreen(
             SettingsCategory.Layout -> LayoutSettings(homeSettings, profileState, onHideUnreleasedChanged, onRememberProfileChanged)
             SettingsCategory.Addons -> AddonsSettings(
                 addons = addons,
+                onInstallAddon = onInstallAddon,
                 onUninstallAddon = onUninstallAddon,
             )
             SettingsCategory.Integrations -> IntegrationsSettings(
@@ -75,34 +77,26 @@ fun SettingsScreen(
     }
 
     when (val current = destination) {
-        SettingsDestination.Root -> {
-            val selectedCategory = lastOpenedCategory ?: facade.categories.firstOrNull()
-            if (selectedCategory != null) {
-                SettingsSplitPane(
-                    categories = facade.categories,
-                    selected = selectedCategory,
-                    onSelect = { category ->
-                        lastOpenedCategory = category
-                    },
-                    categoryListState = categoryListState,
-                    initialFocusRequester = contentFocusRequester,
-                    headerFocusRequester = headerFocusRequester,
-                    modifier = modifier,
-                ) {
-                    SettingsDetailScaffold(
-                        category = selectedCategory,
-                        onBack = {},
-                        showBack = false,
-                        content = { RenderSettingsDetail(selectedCategory) },
-                    )
-                }
-            }
-        }
+        // Categories-only root: no sticky left rail beside content.
+        SettingsDestination.Root -> SettingsCategoryList(
+            categories = facade.categories,
+            onOpen = { category ->
+                lastOpenedCategory = category
+                destination = SettingsDestination.Detail(category)
+            },
+            state = categoryListState,
+            restoreFocusCategory = lastOpenedCategory,
+            initialFocusRequester = contentFocusRequester,
+            modifier = modifier,
+        )
 
+        // Full-pane category content; Back returns to the category list.
         is SettingsDestination.Detail -> SettingsDetailScaffold(
             category = current.category,
             onBack = { destination = SettingsDestination.Root },
             contentFocusRequester = contentFocusRequester,
+            showBack = true,
+            modifier = modifier,
         ) { RenderSettingsDetail(current.category) }
     }
 }

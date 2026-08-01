@@ -86,6 +86,40 @@ class SlugYardCommunitySourcePolicyTest {
     }
 
     @Test
+    fun `settings addon list hides scrapers but keeps playflix and infrastructure`() {
+        val cinemeta = ManagedAddon(
+            manifestUrl = "https://v3-cinemeta.strem.io/manifest.json",
+            manifest = AddonManifestContract(
+                id = "cinemeta",
+                name = "Cinemeta",
+                resources = setOf(AddonResource.META, AddonResource.CATALOG),
+            ),
+        )
+        val torrentio = ManagedAddon(
+            manifestUrl = "https://torrentio.strem.fun/manifest.json",
+            manifest = AddonManifestContract(
+                id = "torrentio",
+                name = "Torrentio",
+                resources = setOf(AddonResource.STREAM),
+            ),
+        )
+        val playflix = ManagedAddon(
+            manifestUrl = SlugYardCommunitySourcePolicy.PLAYFLIX_MANIFEST_URL,
+            manifest = AddonManifestContract(
+                id = "mediafusion",
+                name = "MediaFusion",
+                resources = setOf(AddonResource.STREAM, AddonResource.CATALOG),
+            ),
+        )
+
+        assertTrue(SlugYardCommunitySourcePolicy.isUserFacingSettingsAddon(cinemeta))
+        assertTrue(SlugYardCommunitySourcePolicy.isUserFacingSettingsAddon(playflix))
+        assertFalse(SlugYardCommunitySourcePolicy.isUserFacingSettingsAddon(torrentio))
+        assertTrue(SlugYardCommunitySourcePolicy.isStreamScraperManifest(torrentio.manifestUrl))
+        assertFalse(SlugYardCommunitySourcePolicy.isStreamScraperManifest(playflix.manifestUrl))
+    }
+
+    @Test
     fun `play without debrid routes to WatchHub`() {
         assertTrue(SlugYardCommunitySourcePolicy.shouldRoutePlayToWatchHub(hasActiveDebrid = false))
         assertFalse(SlugYardCommunitySourcePolicy.shouldRoutePlayToWatchHub(hasActiveDebrid = true))
