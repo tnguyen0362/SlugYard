@@ -88,9 +88,9 @@ internal object RewriteStreamScoringEngine {
         // Auto-Play is instant/cached only. Uncached torrents stay in Sources for manual pick —
         // never auto-start a debrid download from ranking.
         val instantPool = safePool.filter { it.isInstantOrCachedAutoPlay() }
-        // Hard gate: episode auto-play must be a single-episode-sized file. MediaFusion often
-        // marks whole season packs CACHED (~15–80GB) with opaque titles; softsub ranking then
-        // picks them and MPV hangs on TorBox CDN ("Starting stream" forever).
+        // Size gate: reject opaque huge torrents that hang TorBox/MPV, but allow named
+        // multi-file season packs (Judas/Anime Time Dual+Multi-Subs) so episode file-select
+        // can pick SxxExx out of the pack. Resolve failure still rejects and tries the next.
         val sizedPool = instantPool.filter { it.isSaneAutoPlaySize(context) }
         return sizedPool.maxWithOrNull(rankComparator(context))
     }
@@ -157,9 +157,9 @@ internal object RewriteStreamScoringEngine {
 
     /**
      * SoftsubFit (higher better):
-     * 3 preferred-lang / multi-subs / known softsub group
-     * 2 any softsub/sub tag
-     * 1 none
+     * 3 preferred-lang match / multi-subs
+     * 2 softsub/sub tag without preferred-lang match (or any softsub when no preference)
+     * 1 none / conflicting language softsub (e.g. Spanish ASS when preferred is en)
      * 0 RAW / hardsub
      *
      * DualFit (anime only; always 0 for K/J drama):
@@ -176,10 +176,13 @@ internal object RewriteStreamScoringEngine {
         val hardsub = HARD_SUB_REGEX.containsMatchIn(text)
         val raw = RAW_REGEX.containsMatchIn(text)
         val hasPreferred = preferred != null && textMentionsLanguage(text, preferred)
+        val conflictingLang = preferred != null && hasConflictingSubtitleLanguage(text, preferred)
 
         val softsubFit = when {
             raw || (hardsub && !hasSoftSignal) -> 0
-            hasSoftSignal && (hasPreferred || multiSubs || softsub) -> 3
+            conflictingLang -> 1
+            hasSoftSignal && (hasPreferred || multiSubs) -> 3
+            hasSoftSignal && softsub && preferred == null -> 3
             hasSoftSignal -> 2
             else -> 1
         }
@@ -314,7 +317,7 @@ internal object RewriteStreamScoringEngine {
             "en", "eng", "english" -> listOf("en", "eng", "english")
             "es", "spa", "spanish" -> listOf("es", "spa", "spanish", "espanol", "español", "latino", "latin")
             "pt", "por", "portuguese" -> listOf("pt", "por", "portuguese", "portugues", "brazilian", "brasil", "pt-br", "ptbr")
-            "fr", "fre", "fra", "french" -> listOf("fr", "fre", "fra", "french")
+            "fr", "fre", "fra", "french" -> listOf("fr", "fre", "fra", "french", "vostfr", "vf")
             "de", "ger", "deu", "german" -> listOf("de", "ger", "deu", "german")
             "it", "ita", "italian" -> listOf("it", "ita", "italian")
             "ru", "rus", "russian" -> listOf("ru", "rus", "russian")
@@ -427,16 +430,74 @@ internal object RewriteStreamScoringEngine {
         !directUrl.isNullOrBlank() || !infoHash.isNullOrBlank()
 
     /**
-     * Single-episode auto-play size ceiling. Season packs marked CACHED still report total
-     * torrent size (often 15–80GB) and break playback when auto-started.
+     * Episode auto-play size policy:
+     * - Under soft ceiling (5GB / 12GB UHD): always ok (single-ep sized).
+     * - Over soft ceiling: allow only named multi-file season packs (Dual/Multi-Subs/softsub
+     *   group + Season/COMPLETE/batch) up to a hard pack ceiling — TorBox file-select can
+     *   pull the episode out. Opaque giants (S01E01.mkv at 20GB+) stay blocked.
      */
     private fun RewriteStreamCandidate.isSaneAutoPlaySize(context: Context): Boolean {
         if (!isEpisodeLike(context)) return true
         val size = resolveSizeBytes(this) ?: return true
         if (size <= 0L) return true
-        val text = searchText().lowercase()
-        val maxGb = if (RESOLUTION_UHD.containsMatchIn(text)) 12.0 else 5.0
-        return size <= (maxGb * 1_073_741_824.0)
+        val text = releaseText().lowercase()
+        val uhd = RESOLUTION_UHD.containsMatchIn(text)
+        val softMaxBytes = (if (uhd) 12.0 else 5.0) * 1_073_741_824.0
+        if (size <= softMaxBytes) return true
+        val packMaxBytes = (if (uhd) 40.0 else 20.0) * 1_073_741_824.0
+        if (size > packMaxBytes) return false
+        return looksLikeResolvableSeasonPack(text)
+    }
+
+    /**
+     * True for Dual/Multi-Subs season packs we want auto-play to try (Judas, Anime Time, …).
+     * False for single-episode labels with inflated torrent size (MediaFusion hang repro).
+     */
+    private fun looksLikeResolvableSeasonPack(text: String): Boolean {
+        if (!SEASON_PACK_MARKER.containsMatchIn(text)) return false
+        return DUAL_AUDIO_REGEX.containsMatchIn(text) ||
+            MULTI_SUBS_REGEX.containsMatchIn(text) ||
+            ENG_SUB_REGEX.containsMatchIn(text) ||
+            isLikelySoftsubRelease(text)
+    }
+
+    /** Other explicit subtitle languages present while preferred is missing (and not multi-subs). */
+    private fun hasConflictingSubtitleLanguage(text: String, preferred: String): Boolean {
+        if (MULTI_SUBS_REGEX.containsMatchIn(text)) return false
+        if (textMentionsLanguage(text, preferred)) return false
+        val preferredBase = preferred.substringBefore('-').substringBefore('_').lowercase()
+        return SUBTITLE_CONFLICT_LANGUAGE_BASES.any { base ->
+            base != preferredBase &&
+                // Japanese is usually the dual-audio source track, not a subtitle conflict.
+                base != "ja" &&
+                textMentionsConflictLanguage(text, base)
+        }
+    }
+
+    /**
+     * Conflict detection uses unambiguous language names / codes only — short aliases like
+     * "it" / "de" / "hi" / "es" false-positive on ordinary title words ("Make It Right",
+     * "Hi Score Girl") and would demote good softsubs to the Spanish-ASS tier.
+     */
+    private fun textMentionsConflictLanguage(text: String, base: String): Boolean {
+        val aliases = when (base) {
+            "en" -> listOf("english", "eng")
+            "es" -> listOf("spanish", "espanol", "español", "latino", "castellano")
+            "pt" -> listOf("portuguese", "portugues", "brazilian", "brasil", "pt-br", "ptbr")
+            "fr" -> listOf("french", "vostfr")
+            "de" -> listOf("german", "deutsch")
+            "it" -> listOf("italian", "italiano")
+            "ru" -> listOf("russian", "русский")
+            "ar" -> listOf("arabic")
+            "hi" -> listOf("hindi")
+            "ko" -> listOf("korean")
+            "zh" -> listOf("chinese", "mandarin", "cantonese")
+            else -> return false
+        }
+        return aliases.any { alias ->
+            Regex("\\b${Regex.escape(alias)}\\b").containsMatchIn(text) ||
+                Regex("""[\[(]\s*${Regex.escape(alias)}\s*[\])]""").containsMatchIn(text)
+        }
     }
 
     private fun RewriteStreamCandidate.isAutoPlayEligible(): Boolean {
@@ -511,10 +572,17 @@ internal object RewriteStreamScoringEngine {
 
     private val MULTI_SUBS_REGEX = Regex("\\b(multi.?subs?|dual.?subs?|multiple.?subtitle)\\b")
     private val EXPLICIT_SUB_REGEX = Regex("\\b(sub|subs|subtitle|subtitles|cc)\\b")
+    private val ENG_SUB_REGEX = Regex("\\b(eng(?:lish)?\\s*subs?|subs?\\s*(?:eng|english))\\b")
     private val DUAL_AUDIO_REGEX = Regex("\\b(dual.?audio|multi.?audio)\\b")
     private val HARD_SUB_REGEX = Regex("\\b(hardsub|hard.?subs?|burned.?in)\\b")
     private val RAW_REGEX = Regex("\\b(raw|no.?subs?|unsubbed)\\b")
     private val SOFTSUB_KEYWORD = Regex("\\b(softsub|soft.?subs?|ass|ssa)\\b")
+    private val SEASON_PACK_MARKER = Regex(
+        "\\b(season\\s*\\d+|complete|batch|s\\d{1,2}\\s*\\+\\s*specials|ep(?:isodes?)?\\s*\\d+\\s*[-~]\\s*\\d+)\\b",
+    )
+    private val SUBTITLE_CONFLICT_LANGUAGE_BASES = listOf(
+        "en", "es", "pt", "fr", "de", "it", "ru", "ar", "hi", "ko", "zh", "ja",
+    )
     private val RESOLUTION_UHD = Regex("\\b(2160p|4k|uhd)\\b")
     private val RESOLUTION_1080 = Regex("\\b1080p\\b")
     private val RESOLUTION_720 = Regex("\\b720p\\b")

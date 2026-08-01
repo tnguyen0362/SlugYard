@@ -230,8 +230,8 @@ class RewriteStreamAutoPickerTest {
 
     @Test
     fun animeRejectsHugeCachedSeasonPackEvenIfSoftsubTagged() {
-        // Onn repro: MediaFusion CACHED ~17GB season pack won softsub ranking and
-        // MPV hung forever on TorBox CDN ("Starting stream").
+        // Onn repro: MediaFusion CACHED ~17GB with a single-episode filename (not a named
+        // multi-file pack) won softsub ranking and MPV hung on TorBox CDN.
         val pack = candidate("pack", cacheState = StreamCacheState.CACHED, infoHash = "pack-hash")
             .copy(
                 title = "MediaFusion | Midnight cached pack",
@@ -254,6 +254,103 @@ class RewriteStreamAutoPickerTest {
         )
         assertEquals(sane, selectRewriteAutoPlayCandidate(groups(pack, sane), context))
         assertNull(selectRewriteAutoPlayCandidate(groups(pack), context))
+    }
+
+    @Test
+    fun animeAllowsNamedDualSeasonPackOverSizeGate() {
+        // Judas/Anime Time Dual+Multi-Subs packs report ~8GB season totals but are the
+        // releases we want — TorBox episode file-select picks SxxExx out of the pack.
+        val pack = candidate("pack", cacheState = StreamCacheState.CACHED, infoHash = "pack-hash")
+            .copy(
+                title = "MediaFusion | Midnight 1080p",
+                filename = "[Judas] Akame ga Kill! (Season 1) [BD 1080p][HEVC x265 10bit][Dual-Audio][Multi-Subs]",
+                videoSizeBytes = 8_269_959_528L,
+                seeders = 30,
+            )
+        val spanish = candidate("es", cacheState = StreamCacheState.CACHED, infoHash = "es-hash")
+            .copy(
+                title = "MediaFusion | Midnight 1080p",
+                filename = "[Moozzi2] Akame ga Kill! Spanish ASS Softsub (BD 1080p)",
+                videoSizeBytes = 1_395_864_405L,
+                seeders = 40,
+            )
+        val context = RewriteStreamScoringEngine.Context(
+            title = "Akame ga Kill!",
+            contentType = "series",
+            genres = listOf("Animation", "Action"),
+            preferredSubtitleLanguage = "en",
+        )
+        assertEquals(pack, selectRewriteAutoPlayCandidate(groups(spanish, pack), context))
+        assertEquals(pack, selectRewriteAutoPlayCandidate(groups(pack), context))
+    }
+
+    @Test
+    fun animeRejectsOpaqueHugeSingleEpisodeLabel() {
+        val opaque = candidate("opaque", cacheState = StreamCacheState.CACHED, infoHash = "opaque-hash")
+            .copy(
+                filename = "Akame ga Kill! (2014) - S01E01 - Kill the Darkness (1080p BluRay x265 SAMPA).mkv",
+                videoSizeBytes = 15_784_036_608L,
+                seeders = 50,
+            )
+        val context = RewriteStreamScoringEngine.Context(
+            title = "Akame ga Kill!",
+            contentType = "series",
+            genres = listOf("Animation"),
+            preferredSubtitleLanguage = "en",
+        )
+        assertNull(selectRewriteAutoPlayCandidate(groups(opaque), context))
+    }
+
+    @Test
+    fun preferredEnglishDemotesSpanishAssSoftsub() {
+        val spanish = candidate("es", cacheState = StreamCacheState.CACHED, infoHash = "es-hash")
+            .copy(
+                title = "Show.S01E01.1080p.Spanish.Softsub.ASS",
+                videoSizeBytes = 400L * 1024 * 1024,
+                seeders = 80,
+            )
+        val english = candidate("en", cacheState = StreamCacheState.CACHED, infoHash = "en-hash")
+            .copy(
+                title = "[Anime Time] Show [Dual Audio][BD][1080p][HEVC][Eng Sub]",
+                videoSizeBytes = 400L * 1024 * 1024,
+                seeders = 20,
+            )
+        val context = RewriteStreamScoringEngine.Context(
+            title = "Show",
+            contentType = "series",
+            genres = listOf("Animation"),
+            preferredSubtitleLanguage = "en",
+        )
+        assertEquals(english, selectRewriteAutoPlayCandidate(groups(spanish, english), context))
+        assertTrue(
+            RewriteStreamScoringEngine.rank(english, context).softsubFit >
+                RewriteStreamScoringEngine.rank(spanish, context).softsubFit,
+        )
+    }
+
+    @Test
+    fun shortLanguageAliasInTitleDoesNotFalseConflict() {
+        // "It" / "Hi" must not demote softsubs as Italian / Hindi conflicts.
+        val soft = candidate("soft", cacheState = StreamCacheState.CACHED, infoHash = "soft-hash")
+            .copy(
+                title = "[SubsPlease] Make It Right - 01 (1080p) SoftSub",
+                videoSizeBytes = 400L * 1024 * 1024,
+                seeders = 40,
+            )
+        val spanish = candidate("es", cacheState = StreamCacheState.CACHED, infoHash = "es-hash")
+            .copy(
+                title = "Make It Right.S01E01.1080p.Spanish.ASS",
+                videoSizeBytes = 400L * 1024 * 1024,
+                seeders = 90,
+            )
+        val context = RewriteStreamScoringEngine.Context(
+            title = "Make It Right",
+            contentType = "series",
+            genres = listOf("Animation"),
+            preferredSubtitleLanguage = "en",
+        )
+        assertEquals(soft, selectRewriteAutoPlayCandidate(groups(spanish, soft), context))
+        assertTrue(RewriteStreamScoringEngine.rank(soft, context).softsubFit >= 2)
     }
 
     @Test
