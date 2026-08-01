@@ -1773,18 +1773,6 @@ private fun AppContent(
                         graph.provisionCommunitySources(true)
                     },
                     addons = registry.addons,
-                    onInstallCommunityAddons = {
-                        settingsFacade.setCommunityAddonEnabled(true)
-                        val hasDebrid = graph.debridRuntime.configuredService() != null
-                        graph.provisionCommunitySources(hasDebrid)
-                    },
-                    onUninstallCommunityAddons = {
-                        settingsFacade.setCommunityAddonEnabled(false)
-                        graph.uninstallCommunitySources()
-                    },
-                    onInstallAddon = { manifestUrl ->
-                        graph.installAllowlistedAddon(manifestUrl)
-                    },
                     onUninstallAddon = { manifestUrl ->
                         graph.uninstallAllowlistedAddon(manifestUrl)
                     },
