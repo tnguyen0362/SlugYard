@@ -92,6 +92,33 @@ class DebridRuntime(
             else -> emptyList()
         }
     }
+
+    /**
+     * Resolves a TorBox cloud torrent into a direct HTTP URL for the retained player.
+     * Picks the largest playable video inside the torrent (same autofile rules as stream resolve).
+     */
+    suspend fun resolveTorboxCloudPlayback(item: TorboxCloudItem): ResolvedPlaybackSource {
+        val key = credentials.keyForActiveProfile(DebridService.TORBOX).takeIf(String::isNotBlank)
+            ?: throw IllegalStateException("Connect TorBox to play cloud files")
+        val files = torbox.torrentFiles(key, item.id).orUnavailable("TorBox could not list files for this torrent")
+        val selected = TorboxFileSelector().selectFile(
+            files.map { TorboxTorrentFileDto(it.id, it.name, null, null, it.mimeType, it.sizeBytes) },
+            resolveFor("torbox-cloud-${item.id}", null),
+            season = null,
+            episode = null,
+        ) ?: throw IllegalStateException("No playable video file in this torrent")
+        val fileId = selected.id ?: throw IllegalStateException("TorBox did not return a playable file")
+        val url = torbox.downloadUrl(key, item.id, fileId)
+            .orUnavailable("TorBox did not return a download URL for this file")
+        return ResolvedPlaybackSource(
+            url = url,
+            sourceId = "torbox-cloud-${item.id}-$fileId",
+            streamName = item.name,
+            filename = selected.displayName().ifBlank { item.name },
+            videoSizeBytes = selected.size ?: item.sizeBytes,
+            addonName = "TorBox Cloud",
+        )
+    }
 }
 
 private class TorboxManualResolver(

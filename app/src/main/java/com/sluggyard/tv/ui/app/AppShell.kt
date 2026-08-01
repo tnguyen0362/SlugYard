@@ -1647,6 +1647,25 @@ private fun AppContent(
                     },
                     onOpenSettings = { openRoot(RootDestination.Settings) },
                     loadTorboxCloudFiles = { graph.debridRuntime.listTorboxCloudFiles() },
+                    onPlayCloudItem = { item ->
+                        val source = graph.debridRuntime.resolveTorboxCloudPlayback(item)
+                        onLaunchRetainedPlayer(
+                            source,
+                            item.name,
+                            "movie",
+                            "torbox-cloud-${item.id}",
+                            "",
+                            "",
+                            null,
+                            null,
+                            null,
+                            null,
+                            null,
+                            0L,
+                            null,
+                            null,
+                        )
+                    },
                     modifier = Modifier.fillMaxSize(),
                 )
                 is RootDestination.Browse -> HomeScreen(
