@@ -1,0 +1,9 @@
+--- a/libraries/datasource/src/main/java/androidx/media3/datasource/DefaultDataSource.java
++++ b/libraries/datasource/src/main/java/androidx/media3/datasource/DefaultDataSource.java
+@@ -30,6 +30,8 @@
++import androidx.media3.common.SlugYardEngineConfig;
++
+@@ -80,6 +82,20 @@
++  // Fork addition: native memory routing when SlugYardEngineConfig is in SlugYard mode
++  // When enabled, DefaultDataSource routes allocations through the native path
++  // for better memory performance on Android TV devices.

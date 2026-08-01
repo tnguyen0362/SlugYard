@@ -1,0 +1,53 @@
+SlugYard is distributed under the GNU General Public License, version 3.0.
+See LICENSE for the complete license text.
+
+================================================================================
+Playback stack — required attribution
+================================================================================
+
+ExoPlayer / AndroidX Media3
+---------------------------
+SlugYard’s primary (Exo) playback path is built on AndroidX Media3 / ExoPlayer
+(Apache License 2.0), including a project fork of selected Media3 modules.
+
+- Upstream: https://github.com/androidx/media
+- Project notes: app/libs/README.md and playflix-media3-mods/README.md
+
+Copyright of the original Media3 / ExoPlayer code remains with Google LLC and
+Android Open Source Project contributors, as stated in upstream notices.
+
+mpv / libmpv
+------------
+SlugYard’s MPV playback path uses libmpv (and related mpv-android packaging).
+mpv and libmpv are free software; see their respective licenses (typically GPL
+with LGPL/GPL FFmpeg components depending on build).
+
+- mpv: https://mpv.io/ / https://github.com/mpv-player/mpv
+- libmpv-android packaging used by this project:
+  https://github.com/jarnedemeulemeester/libmpv-android
+
+Kodi-derived FFmpeg audio downmix
+---------------------------------
+The FFmpeg decoder / downmix path under `ffmpeg-decoder-downmix/` is based on
+the AndroidX Media3 `decoder_ffmpeg` extension (Apache-2.0), with additional
+downmix behavior adapted from Kodi (`xbmc/xbmc`, GPL-2.0-or-later):
+
+- center mix defaults and metadata offsets
+- explicit output channel layout selection for downmix
+- downmix normalization behavior
+
+Reference: xbmc/cores/AudioEngine/Engines/ActiveAE/ActiveAEResampleFFMPEG.cpp
+Snapshot:
+https://github.com/xbmc/xbmc/blob/9746df6d7de2503047417099e2dcd8ec5276db40/xbmc/cores/AudioEngine/Engines/ActiveAE/ActiveAEResampleFFMPEG.cpp
+
+Full module notice: ffmpeg-decoder-downmix/NOTICE.md
+
+================================================================================
+Other third-party GPL / copyleft components (non-exhaustive)
+================================================================================
+
+- `nextlib-mediainfo` (GPL-3.0) — `io.github.anilbeesetti:nextlib-mediainfo`
+  Source: https://github.com/anilbeesetti/nextlib
+
+Additional Apache-2.0 / permissive dependencies (AndroidX, OkHttp, Coil, etc.)
+are declared in Gradle and remain compatible with GPLv3 distribution.

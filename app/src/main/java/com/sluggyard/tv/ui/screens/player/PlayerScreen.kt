@@ -1,0 +1,2044 @@
+@file:OptIn(
+    ExperimentalTvMaterial3Api::class,
+    androidx.compose.ui.ExperimentalComposeUiApi::class,
+    androidx.media3.common.util.UnstableApi::class
+)
+
+package com.sluggyard.tv.ui.screens.player
+
+import com.sluggyard.tv.ui.theme.SlugYardMotion
+
+import com.sluggyard.tv.ui.theme.SlugYardTheme
+
+import android.view.KeyEvent
+import android.view.View
+import androidx.annotation.RawRes
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.filled.AspectRatio
+import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ClosedCaption
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Replay10
+import androidx.compose.material.icons.filled.Forward10
+import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.zIndex
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.PlayerView
+import androidx.tv.material3.Border
+import androidx.tv.material3.Button
+import androidx.tv.material3.ButtonDefaults
+import androidx.tv.material3.Card
+import androidx.tv.material3.CardDefaults
+import androidx.tv.material3.ExperimentalTvMaterial3Api
+import androidx.tv.material3.Icon
+import androidx.tv.material3.IconButton
+import androidx.tv.material3.IconButtonDefaults
+import androidx.tv.material3.MaterialTheme
+import androidx.tv.material3.Text
+import coil3.compose.rememberAsyncImagePainter
+import coil3.request.ImageRequest
+import androidx.compose.ui.res.stringResource
+import com.sluggyard.tv.R
+import com.sluggyard.tv.data.local.InternalPlayerEngine
+import com.sluggyard.tv.data.local.LibassRenderType
+import com.sluggyard.tv.data.local.SubtitleStyleSettings
+import com.sluggyard.tv.data.local.StreamAutoPlayMode
+import com.sluggyard.tv.domain.model.Subtitle
+import com.sluggyard.tv.domain.model.WatchProgress
+import android.text.format.DateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.concurrent.TimeUnit
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.foundation.lazy.rememberLazyListState
+import kotlinx.coroutines.delay
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.media3.exoplayer.ExoPlayer
+import io.github.peerless2012.ass.media.widget.AssSubtitleView
+import kotlin.math.abs
+
+@Composable
+fun PlayerScreen(
+    viewModel: PlayerViewModel = hiltViewModel(),
+    onBackPress: (currentVideoId: String?, currentSeason: Int?, currentEpisode: Int?, autoPlayEnabled: Boolean, playbackCompleted: Boolean) -> Unit,
+    onPlaybackErrorBack: () -> Unit = { onBackPress(null, null, null, false, false) },
+    onBeforeExit: ((PlaybackTimelineState) -> Unit)? = null,
+    onNextEpisode: (() -> Boolean)? = null,
+    onPlaybackEnded: ((nextVideoId: String?, nextSeason: Int?, nextEpisode: Int?, exitReason: PlayerExitReason?) -> Unit)? = null,
+    controlsOverlay: @Composable (PlayerUiState, PlayerControlActions, FocusRequester, PlaybackTimelineState) -> Unit,
+    secondaryOverlay: @Composable (PlayerUiState, PlayerSecondaryActions) -> Unit,
+    trackOverlay: @Composable (PlayerUiState, PlayerTrackActions) -> Unit,
+    skipOverlay: @Composable (PlayerUiState, PlayerSkipActions, FocusRequester) -> Unit,
+    postPlayOverlay: @Composable (PlayerUiState, PlayerPostPlayActions) -> Unit,
+    diagnosticsOverlay: @Composable (PlayerUiState, PlayerDiagnosticsActions) -> Unit,
+    subtitleTimingOverlay: @Composable (PlayerUiState, Long, PlayerSubtitleTimingActions) -> Unit,
+    systemOverlay: @Composable (PlayerUiState, PlayerSystemActions) -> Unit,
+    legacyChromeEnabled: Boolean = true,
+    playbackPositionMs: Long = 0L,
+    onOpenSourcesPanel: () -> Unit = { viewModel.onEvent(PlayerEvent.OnShowSourcesPanel) },
+    onOpenEpisodesPanel: () -> Unit = { viewModel.onEvent(PlayerEvent.OnShowEpisodesPanel) },
+    externalSecondaryOpen: () -> Boolean = { false },
+    onDismissExternalSecondary: () -> Unit = {},
+) {
+    val uiState by viewModel.uiState.collectAsState()
+    val isExternalSecondaryOpen = externalSecondaryOpen()
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val context = LocalContext.current
+    val containerFocusRequester = remember { FocusRequester() }
+    val playPauseFocusRequester = remember { FocusRequester() }
+    val episodesFocusRequester = remember { FocusRequester() }
+    val streamsFocusRequester = remember { FocusRequester() }
+    val sourceStreamsFocusRequester = remember { FocusRequester() }
+    val skipIntroFocusRequester = remember { FocusRequester() }
+    var skipButtonActuallyVisible by remember { mutableStateOf(false) }
+    var subtitleDelayAutoSyncFocused by remember { mutableStateOf(false) }
+    var subtitleTimingConsumeNextConfirmKeyUp by remember { mutableStateOf(false) }
+    var reportCodeVisible by remember { mutableStateOf(false) }
+
+    val exitPlayer: () -> Unit = {
+        val timeline = viewModel.playbackTimeline.value
+        onBeforeExit?.invoke(timeline)
+        viewModel.stopAndRelease()
+        val completed = timeline.duration > 0L &&
+            (timeline.currentPosition.toFloat() / timeline.duration.toFloat()) >= WatchProgress.COMPLETED_THRESHOLD
+        onBackPress(uiState.currentVideoId, uiState.currentSeason, uiState.currentEpisode, uiState.streamAutoPlayMode != StreamAutoPlayMode.MANUAL, completed)
+    }
+    val exitPlayerFromError: () -> Unit = {
+        viewModel.stopAndRelease()
+        onPlaybackErrorBack()
+    }
+    val dismissStreamInfoOverlay = {
+        viewModel.onEvent(PlayerEvent.OnDismissStreamInfo)
+    }
+
+    val currentOnPlaybackEnded by rememberUpdatedState(onPlaybackEnded)
+    val currentOnBackPress by rememberUpdatedState(onBackPress)
+    val nextEpisodeForEndPrompt = uiState.nextEpisode?.takeIf { it.hasAired }
+    val shouldConfirmNextEpisodeOnEnd =
+        uiState.playbackEnded &&
+            uiState.error == null &&
+            (uiState.streamAutoPlayMode != StreamAutoPlayMode.MANUAL ||
+                uiState.streamAutoPlayPreferBingeGroupForNextEpisode) &&
+            !uiState.streamAutoPlayNextEpisodeEnabled &&
+            nextEpisodeForEndPrompt != null
+    val returnToDetailsFromEndPrompt = {
+        viewModel.stopAndRelease()
+        currentOnBackPress(
+            uiState.currentVideoId,
+            uiState.currentSeason,
+            uiState.currentEpisode,
+            true,
+            true
+        )
+    }
+    val continueToNextEpisodeFromEndPrompt = nextAction@{
+        val next = nextEpisodeForEndPrompt
+        if (next != null) {
+            if (onNextEpisode?.invoke() == true) return@nextAction
+            viewModel.stopAndRelease()
+            val cb = currentOnPlaybackEnded
+            if (cb != null) {
+                cb(next.videoId, next.season, next.episode, null)
+            } else {
+                currentOnBackPress(
+                    uiState.currentVideoId,
+                    uiState.currentSeason,
+                    uiState.currentEpisode,
+                    false,
+                    true
+                )
+            }
+        }
+    }
+
+    LaunchedEffect(uiState.playbackIssueReportStatus, uiState.playbackIssueReportId) {
+        if (uiState.playbackIssueReportStatus == PlaybackIssueReportStatus.Sent &&
+            !uiState.playbackIssueReportId.isNullOrBlank()
+        ) {
+            reportCodeVisible = true
+            viewModel.scheduleHideControls()
+            viewModel.onUserInteraction()
+            delay(5000)
+            reportCodeVisible = false
+        } else if (uiState.playbackIssueReportStatus != PlaybackIssueReportStatus.Sent) {
+            reportCodeVisible = false
+        }
+    }
+
+    val handleBackPress = {
+        if (shouldConfirmNextEpisodeOnEnd) {
+            returnToDetailsFromEndPrompt()
+        } else if (uiState.error != null) {
+            exitPlayerFromError()
+        } else if (uiState.showAudioOverlay || uiState.showSubtitleOverlay) {
+            viewModel.onEvent(PlayerEvent.OnDismissTransientOverlay)
+        } else if (uiState.showStreamInfoOverlay) {
+            dismissStreamInfoOverlay()
+        } else if (uiState.showPauseOverlay) {
+            viewModel.onEvent(PlayerEvent.OnDismissPauseOverlay)
+        } else if (uiState.showMoreDialog) {
+            viewModel.onEvent(PlayerEvent.OnDismissMoreDialog)
+        } else if (uiState.showSubtitleTimingDialog) {
+            viewModel.onEvent(PlayerEvent.OnDismissSubtitleTimingDialog)
+        } else if (uiState.showSubtitleDelayOverlay) {
+            viewModel.onEvent(PlayerEvent.OnHideSubtitleDelayOverlay)
+        } else if (uiState.showSubtitleStylePanel) {
+            viewModel.onEvent(PlayerEvent.OnDismissSubtitleStylePanel)
+        } else if (isExternalSecondaryOpen) {
+            onDismissExternalSecondary()
+        } else if (uiState.showSourcesPanel) {
+            if (uiState.currentStreamUrl.isNullOrBlank()) {
+                exitPlayer()
+            } else {
+                viewModel.onEvent(PlayerEvent.OnDismissSourcesPanel)
+            }
+        } else if (uiState.showEpisodesPanel) {
+            if (uiState.showEpisodeStreams) {
+                viewModel.onEvent(PlayerEvent.OnBackFromEpisodeStreams)
+            } else {
+                viewModel.onEvent(PlayerEvent.OnDismissEpisodesPanel)
+            }
+        } else if (uiState.postPlayMode is PostPlayMode.AutoPlay) {
+            viewModel.onEvent(PlayerEvent.OnDismissNextEpisodeCard)
+            // Transfer focus to skip button if it's still visible
+            if (skipButtonActuallyVisible) {
+                runCatching { skipIntroFocusRequester.requestFocus() }
+            }
+        } else if (uiState.activeSkipInterval != null && !uiState.skipIntervalDismissed && !uiState.showControls) {
+            viewModel.onEvent(PlayerEvent.OnDismissSkipIntro)
+        } else if (uiState.postPlayMode is PostPlayMode.StillWatching) {
+            viewModel.onEvent(PlayerEvent.OnDismissStillWatchingPrompt)
+        } else if (uiState.showControls) {
+            viewModel.hideControls()
+        } else {
+            exitPlayer()
+        }
+    }
+
+    BackHandler {
+        handleBackPress()
+    }
+
+    LaunchedEffect(uiState.playbackEnded, uiState.error, uiState.pendingExitReason, shouldConfirmNextEpisodeOnEnd) {
+        val explicitReason = uiState.pendingExitReason
+        val shouldDispatchNatural = uiState.playbackEnded &&
+            uiState.error == null &&
+            uiState.postPlayMode?.blocksNaturalCompletion() != true &&
+            !shouldConfirmNextEpisodeOnEnd &&
+            explicitReason == null
+        when {
+            explicitReason == PlayerExitReason.StillWatchingPrompt -> {
+                viewModel.stopAndRelease()
+                val cb = currentOnPlaybackEnded
+                if (cb != null) {
+                    cb(null, null, null, PlayerExitReason.StillWatchingPrompt)
+                } else {
+                    currentOnBackPress(
+                        uiState.currentVideoId,
+                        uiState.currentSeason,
+                        uiState.currentEpisode,
+                        uiState.streamAutoPlayMode != StreamAutoPlayMode.MANUAL,
+                        true
+                    )
+                }
+                viewModel.consumePendingExitReason()
+            }
+            shouldDispatchNatural -> {
+                viewModel.stopAndRelease()
+                val next = uiState.nextEpisode?.takeIf { it.hasAired }
+                val cb = currentOnPlaybackEnded
+                if (cb != null) {
+                    cb(next?.videoId, next?.season, next?.episode, null)
+                } else {
+                    currentOnBackPress(
+                        uiState.currentVideoId,
+                        uiState.currentSeason,
+                        uiState.currentEpisode,
+                        uiState.streamAutoPlayMode != StreamAutoPlayMode.MANUAL,
+                        true
+                    )
+                }
+            }
+        }
+    }
+
+    // Handle lifecycle events
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_PAUSE -> {
+                    viewModel.pauseForLifecycle()
+                }
+                Lifecycle.Event.ON_RESUME -> {
+                    // Re-create the MediaSession so media controls work in foreground.
+                    // Don't auto-resume playback Ã¢â‚¬â€ let the user press play.
+                    viewModel.resumeForLifecycle()
+                }
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    // Bump UI thread priority to THREAD_PRIORITY_DISPLAY (-4) while the player is active.
+    // The Linux scheduler favors the thread under CPU pressure (background addon prefetch,
+    // Trakt sync, image decode), reducing dropped frames at scene cuts and during decoder
+    // spin-up. Restored on dispose so non-player screens stay at default priority.
+    DisposableEffect(Unit) {
+        val tid = android.os.Process.myTid()
+        val previousPriority = runCatching { android.os.Process.getThreadPriority(tid) }.getOrDefault(0)
+        runCatching {
+            android.os.Process.setThreadPriority(tid, android.os.Process.THREAD_PRIORITY_DISPLAY)
+        }
+        onDispose {
+            runCatching {
+                android.os.Process.setThreadPriority(tid, previousPriority)
+            }
+        }
+    }
+
+    // Frame rate matching lifecycle.
+    @Suppress("ContextCastToActivity")
+    val activity = LocalContext.current as? android.app.Activity
+    LaunchedEffect(activity) {
+        viewModel.attachHostActivity(activity)
+        viewModel.startInitialPlaybackIfNeeded()
+    }
+    DisposableEffect(activity) {
+        onDispose {
+            viewModel.attachHostActivity(null)
+        }
+    }
+    LaunchedEffect(uiState.frameRateMatchingMode) {
+        if (activity != null &&
+            uiState.frameRateMatchingMode == com.sluggyard.tv.data.local.FrameRateMatchingMode.OFF
+        ) {
+            com.sluggyard.tv.core.player.FrameRateUtils.restoreOriginalDisplayMode(activity)
+        }
+    }
+    // Restore original display mode when leaving the player
+    DisposableEffect(activity, uiState.frameRateMatchingMode) {
+        onDispose {
+            if (activity != null) {
+                if (uiState.frameRateMatchingMode == com.sluggyard.tv.data.local.FrameRateMatchingMode.START_STOP) {
+                    com.sluggyard.tv.core.player.FrameRateUtils.restoreOriginalDisplayMode(activity)
+                } else {
+                    com.sluggyard.tv.core.player.FrameRateUtils.cleanupDisplayListener()
+                    com.sluggyard.tv.core.player.FrameRateUtils.clearOriginalDisplayMode()
+                }
+            }
+        }
+    }
+
+    // Request focus for key events when controls visibility or panel state changes
+    LaunchedEffect(
+        uiState.showControls,
+        uiState.showEpisodesPanel,
+        uiState.showSourcesPanel,
+        uiState.showSubtitleStylePanel,
+        uiState.showSubtitleDelayOverlay,
+        uiState.showSubtitleTimingDialog,
+        uiState.showAudioOverlay,
+        uiState.showSubtitleOverlay,
+        uiState.showSpeedDialog,
+        isExternalSecondaryOpen,
+        shouldConfirmNextEpisodeOnEnd,
+        uiState.activeSkipInterval,
+        uiState.skipIntervalDismissed,
+        uiState.postPlayMode,
+    ) {
+        if (shouldConfirmNextEpisodeOnEnd) return@LaunchedEffect
+        val skipVisible = uiState.activeSkipInterval != null && !uiState.skipIntervalDismissed
+        val postPlayVisible = uiState.postPlayMode != null
+        if (uiState.showControls && !isExternalSecondaryOpen && !uiState.showEpisodesPanel && !uiState.showSourcesPanel &&
+            !uiState.showAudioOverlay && !uiState.showSubtitleOverlay &&
+            !uiState.showSubtitleStylePanel && !uiState.showSubtitleDelayOverlay &&
+            !uiState.showSubtitleTimingDialog &&
+            !uiState.showSpeedDialog &&
+            // Skip / Up next keep focus while visible — do not yank to play/pause.
+            !skipVisible &&
+            !postPlayVisible
+        ) {
+            // Wait for AnimatedVisibility animation to complete before focusing play/pause button
+            kotlinx.coroutines.delay(250)
+            try {
+                playPauseFocusRequester.requestFocus()
+            } catch (e: Exception) {
+                // Focus requester may not be ready yet
+            }
+        } else if (!uiState.showControls && !isExternalSecondaryOpen) {
+            // When controls are hidden, let skip / Up next own focus if visible
+            if (!skipVisible && !postPlayVisible) {
+                try {
+                    containerFocusRequester.requestFocus()
+                } catch (e: Exception) {
+                    // Focus requester may not be ready yet
+                }
+            }
+            // If skip or next episode card is visible, their own LaunchedEffect will request focus
+        }
+    }
+
+    // Initial focus on container - the LaunchedEffect above will handle focusing controls
+    LaunchedEffect(Unit) {
+        containerFocusRequester.requestFocus()
+    }
+    LaunchedEffect(uiState.showSubtitleDelayOverlay) {
+        subtitleDelayAutoSyncFocused = false
+    }
+    LaunchedEffect(uiState.showSubtitleTimingDialog) {
+        if (!uiState.showSubtitleTimingDialog) {
+            subtitleTimingConsumeNextConfirmKeyUp = false
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+            .focusRequester(containerFocusRequester)
+            .focusable()
+            .onPreviewKeyEvent { keyEvent ->
+                if (
+                    keyEvent.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_BACK ||
+                    keyEvent.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_ESCAPE
+                ) {
+                    return@onPreviewKeyEvent when (keyEvent.nativeKeyEvent.action) {
+                        KeyEvent.ACTION_DOWN -> true
+                        KeyEvent.ACTION_UP -> {
+                            handleBackPress()
+                            true
+                        }
+                        else -> true
+                    }
+                }
+
+                if (keyEvent.nativeKeyEvent.keyCode != KeyEvent.KEYCODE_CAPTIONS) {
+                    return@onPreviewKeyEvent false
+                }
+
+                if (keyEvent.nativeKeyEvent.action != KeyEvent.ACTION_UP) {
+                    return@onPreviewKeyEvent true
+                }
+
+                if (uiState.showSubtitleDelayOverlay) {
+                    viewModel.onEvent(PlayerEvent.OnHideSubtitleDelayOverlay)
+                } else if (
+                    !uiState.showEpisodesPanel &&
+                    !uiState.showSourcesPanel &&
+                    !uiState.showAudioOverlay &&
+                    !uiState.showSubtitleOverlay &&
+                    !uiState.showSubtitleStylePanel &&
+                    !uiState.showSubtitleTimingDialog &&
+                    !uiState.showSpeedDialog
+                ) {
+                    viewModel.onEvent(PlayerEvent.OnShowSubtitleOverlay)
+                }
+                true
+            }
+            .onKeyEvent { keyEvent ->
+                if (subtitleTimingConsumeNextConfirmKeyUp &&
+                    keyEvent.nativeKeyEvent.action == KeyEvent.ACTION_UP &&
+                    (keyEvent.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
+                        keyEvent.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_ENTER)
+                ) {
+                    subtitleTimingConsumeNextConfirmKeyUp = false
+                    return@onKeyEvent true
+                }
+                if (uiState.showSubtitleDelayOverlay) {
+                    if (keyEvent.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
+                        if (subtitleDelayAutoSyncFocused) {
+                            when (keyEvent.nativeKeyEvent.keyCode) {
+                                KeyEvent.KEYCODE_DPAD_CENTER,
+                                KeyEvent.KEYCODE_ENTER -> {
+                                    subtitleDelayAutoSyncFocused = false
+                                    subtitleTimingConsumeNextConfirmKeyUp = true
+                                    viewModel.onEvent(PlayerEvent.OnShowSubtitleTimingDialog)
+                                    return@onKeyEvent true
+                                }
+                                KeyEvent.KEYCODE_DPAD_UP -> {
+                                    subtitleDelayAutoSyncFocused = false
+                                    return@onKeyEvent true
+                                }
+                                KeyEvent.KEYCODE_DPAD_DOWN,
+                                KeyEvent.KEYCODE_DPAD_LEFT,
+                                KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                                    return@onKeyEvent true
+                                }
+                            }
+                        } else {
+                            when (keyEvent.nativeKeyEvent.keyCode) {
+                                KeyEvent.KEYCODE_DPAD_LEFT -> {
+                                    viewModel.onEvent(PlayerEvent.OnAdjustSubtitleDelay(-SUBTITLE_DELAY_STEP_MS))
+                                    return@onKeyEvent true
+                                }
+                                KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                                    viewModel.onEvent(PlayerEvent.OnAdjustSubtitleDelay(SUBTITLE_DELAY_STEP_MS))
+                                    return@onKeyEvent true
+                                }
+                                KeyEvent.KEYCODE_DPAD_DOWN -> {
+                                    subtitleDelayAutoSyncFocused = true
+                                    return@onKeyEvent true
+                                }
+                                KeyEvent.KEYCODE_DPAD_CENTER,
+                                KeyEvent.KEYCODE_ENTER,
+                                KeyEvent.KEYCODE_DPAD_UP -> {
+                                    return@onKeyEvent true
+                                }
+                            }
+                        }
+                    }
+                    if (keyEvent.nativeKeyEvent.action == KeyEvent.ACTION_UP &&
+                        (keyEvent.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_DPAD_LEFT ||
+                            keyEvent.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_DPAD_RIGHT)
+                    ) {
+                        return@onKeyEvent true
+                    }
+                    if (keyEvent.nativeKeyEvent.keyCode != KeyEvent.KEYCODE_BACK) {
+                        // While open, consume all non-back keys to avoid accidental dismissal.
+                        return@onKeyEvent true
+                    }
+                }
+
+                // When a side panel or dialog is open, let it handle all keys
+                val panelOrDialogOpen = uiState.showEpisodesPanel || uiState.showSourcesPanel ||
+                        uiState.showAudioOverlay || uiState.showSubtitleOverlay ||
+                        uiState.showSubtitleStylePanel || uiState.showSpeedDialog ||
+                        uiState.showSubtitleDelayOverlay || uiState.showSubtitleTimingDialog ||
+                        uiState.showMoreDialog ||
+                        isExternalSecondaryOpen ||
+                        shouldConfirmNextEpisodeOnEnd ||
+                        // Up next / Still watching own OK and L/R — do not map to play/pause or chrome.
+                        uiState.postPlayMode != null
+                if (panelOrDialogOpen) return@onKeyEvent false
+
+                if (keyEvent.nativeKeyEvent.action == KeyEvent.ACTION_UP) {
+                    // Left/Right no longer auto-seek; do not commit a preview seek on key-up.
+                    return@onKeyEvent false
+                }
+
+                if (keyEvent.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
+                    val skipPromptActive = uiState.activeSkipInterval != null &&
+                        !uiState.skipIntervalDismissed &&
+                        !uiState.showPauseOverlay &&
+                        !uiState.showLoadingOverlay &&
+                        uiState.postPlayMode == null
+                    if (uiState.showPauseOverlay) {
+                        when (keyEvent.nativeKeyEvent.keyCode) {
+                            KeyEvent.KEYCODE_DPAD_CENTER,
+                            KeyEvent.KEYCODE_ENTER,
+                            KeyEvent.KEYCODE_NUMPAD_ENTER,
+                            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+                            KeyEvent.KEYCODE_MEDIA_PLAY -> {
+                                // Resume directly from pause overlay in one click.
+                                viewModel.onEvent(PlayerEvent.OnPlayPause)
+                            }
+                            else -> {
+                                viewModel.onEvent(PlayerEvent.OnDismissPauseOverlay)
+                            }
+                        }
+                        return@onKeyEvent true
+                    }
+                    when (keyEvent.nativeKeyEvent.keyCode) {
+                        KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> {
+                            when {
+                                // Chrome hidden + skip up: default OK→Skip (seeded focus / container
+                                // fallback). Focused Not now still owns OK via its own clickable
+                                // before this parent handler runs.
+                                skipPromptActive && !uiState.showControls -> {
+                                    viewModel.onEvent(PlayerEvent.OnSkipIntro)
+                                    true
+                                }
+                                // Chrome visible: focused Skip / Not now / transport owns OK.
+                                // Do not hard-map to Skip (would fight play/pause).
+                                skipPromptActive -> false
+                                !uiState.showControls -> {
+                                    viewModel.onEvent(PlayerEvent.OnPlayPause)
+                                    true
+                                }
+                                else -> false
+                            }
+                        }
+                        KeyEvent.KEYCODE_DPAD_LEFT,
+                        KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                            when {
+                                // Skip row owns horizontal nav (Skip ↔ Not now) while visible.
+                                skipPromptActive -> false
+                                !uiState.showControls -> {
+                                    // TV-first: reveal chrome so Left/Right can move focus among
+                                    // on-screen controls. Do not seek on every D-pad press.
+                                    viewModel.onEvent(PlayerEvent.OnToggleControls)
+                                    true
+                                }
+                                else -> false
+                            }
+                        }
+                        KeyEvent.KEYCODE_DPAD_UP -> {
+                            if (!uiState.showControls) {
+                                viewModel.onEvent(PlayerEvent.OnToggleControls)
+                                true
+                            } else {
+                                // With controls visible, the focused control owns UP traversal.
+                                // Do not consume it while targeting the hidden seek overlay.
+                                false
+                            }
+                        }
+                        KeyEvent.KEYCODE_DPAD_DOWN -> {
+                            if (!uiState.showControls) {
+                                viewModel.onEvent(PlayerEvent.OnToggleControls)
+                                true
+                            } else {
+                                // Let focus system handle navigation when controls are visible
+                                false
+                            }
+                        }
+                        KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
+                            viewModel.onEvent(PlayerEvent.OnPlayPause)
+                            true
+                        }
+                        KeyEvent.KEYCODE_MEDIA_PLAY -> {
+                            if (!uiState.isPlaying) {
+                                viewModel.onEvent(PlayerEvent.OnPlayPause)
+                            }
+                            true
+                        }
+                        KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> {
+                            viewModel.onEvent(PlayerEvent.OnSeekForward)
+                            true
+                        }
+                        KeyEvent.KEYCODE_MEDIA_REWIND -> {
+                            viewModel.onEvent(PlayerEvent.OnSeekBackward)
+                            true
+                        }
+                        else -> false
+                    }
+                } else false
+            }
+    ) {
+        // Video Player
+        if (uiState.internalPlayerEngine == InternalPlayerEngine.MVP_PLAYER) {
+            MpvPlayerSurface(
+                viewModel = viewModel,
+                isPlaying = uiState.isPlaying,
+                isBuffering = uiState.isBuffering,
+                aspectMode = uiState.aspectMode,
+                subtitleStyle = uiState.subtitleStyle,
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            viewModel.exoPlayer?.let { player ->
+                ExoPlayerSurface(
+                    player = player,
+                    isPlaying = uiState.isPlaying,
+                    isBuffering = uiState.isBuffering,
+                    aspectMode = uiState.aspectMode,
+                    useLibass = uiState.shouldRenderLibassOverlay(),
+                    libassRenderType = uiState.libassRenderType,
+                    subtitleStyle = uiState.subtitleStyle,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+        }
+
+        if (legacyChromeEnabled && uiState.playbackIssueReportsEnabled &&
+            uiState.showLoadingOverlay &&
+            uiState.error == null &&
+            uiState.loadingIssueReportVisible
+        ) {
+            LoadingIssueReportAction(
+                elapsedMs = uiState.loadingIssueElapsedMs,
+                reportStatus = uiState.playbackIssueReportStatus,
+                reportId = uiState.playbackIssueReportId,
+                reportError = uiState.playbackIssueReportError,
+                onReport = { viewModel.onEvent(PlayerEvent.OnReportPlaybackIssue) },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 72.dp)
+                    .zIndex(2.4f)
+            )
+        }
+
+        diagnosticsOverlay(
+            uiState.copy(
+                showStreamInfoOverlay =
+                    uiState.showStreamInfoOverlay && uiState.error == null && !uiState.showLoadingOverlay,
+            ),
+            PlayerDiagnosticsActions(onDismiss = dismissStreamInfoOverlay),
+        )
+
+        // Torrent stats overlay (top-right corner)
+        TorrentOverlay(
+            visible = legacyChromeEnabled && uiState.isTorrentStream && uiState.showTorrentStats && !uiState.hideTorrentStats && uiState.error == null,
+            downloadSpeed = uiState.torrentDownloadSpeed,
+            uploadSpeed = uiState.torrentUploadSpeed,
+            peers = uiState.torrentPeers,
+            seeds = uiState.torrentSeeds,
+            totalProgress = uiState.torrentTotalProgress,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(top = SlugYardTheme.spacing.lg, end = SlugYardTheme.spacing.lg)
+                .zIndex(2.7f)
+        )
+
+        // Buffering indicator Ã¢â‚¬â€ isolated in its own composable scope so that
+        // isBuffering state changes only recompose this small subtree instead
+        // of the entire PlayerScreen.
+        PlayerBufferingIndicator(
+            isBuffering = legacyChromeEnabled && uiState.isBuffering,
+            showLoadingOverlay = uiState.showLoadingOverlay,
+            isTorrentStream = uiState.isTorrentStream,
+            torrentBufferingMessage = uiState.torrentBufferingMessage,
+            torrentBufferingProgress = uiState.torrentBufferingProgress
+        )
+
+        // Error state Ã¢â‚¬â€ handled by systemOverlay, legacy ErrorOverlay removed.
+
+        systemOverlay.invoke(
+            uiState,
+            PlayerSystemActions(
+                onDismissPause = { viewModel.onEvent(PlayerEvent.OnDismissPauseOverlay) },
+                onExitError = exitPlayerFromError,
+            ),
+        )
+
+        val endPromptEpisode = nextEpisodeForEndPrompt.takeIf { shouldConfirmNextEpisodeOnEnd }
+        if (endPromptEpisode != null) {
+            NextEpisodeEndPromptOverlay(
+                nextEpisode = endPromptEpisode,
+                onContinue = continueToNextEpisodeFromEndPrompt,
+                onReturnToDetails = returnToDetailsFromEndPrompt
+            )
+        }
+
+        val skipButtonBottomPadding by animateDpAsState(
+            targetValue = if (uiState.showControls) 122.dp else 30.dp,
+            animationSpec = tween(durationMillis = SlugYardMotion.tokens.durations.fast),
+            label = "skipButtonBottomPadding"
+        )
+
+        skipOverlay(
+            uiState,
+            PlayerSkipActions(
+                onSkip = { viewModel.onEvent(PlayerEvent.OnSkipIntro) },
+                onDismiss = { viewModel.onEvent(PlayerEvent.OnDismissSkipIntro) },
+                onVisibilityChanged = { skipButtonActuallyVisible = it },
+            ),
+            skipIntroFocusRequester,
+        )
+        val visiblePostPlayMode = uiState.postPlayMode.takeIf {
+            uiState.error == null &&
+                !shouldConfirmNextEpisodeOnEnd &&
+                !uiState.showLoadingOverlay &&
+                !uiState.showPauseOverlay &&
+                !uiState.showStreamInfoOverlay &&
+                !uiState.showEpisodesPanel &&
+                !uiState.showSourcesPanel &&
+                !uiState.showAudioOverlay &&
+                !uiState.showSubtitleOverlay &&
+                !uiState.showSubtitleStylePanel &&
+                !uiState.showSubtitleDelayOverlay &&
+                !uiState.showSubtitleTimingDialog &&
+                !uiState.showSpeedDialog &&
+                !uiState.showMoreDialog
+        }
+        postPlayOverlay(
+            uiState.copy(postPlayMode = visiblePostPlayMode),
+            PlayerPostPlayActions(
+                onPlayNext = {
+                    if (onNextEpisode?.invoke() != true) {
+                        viewModel.onEvent(PlayerEvent.OnPlayNextEpisode)
+                    }
+                },
+                onContinueStillWatching = { viewModel.onEvent(PlayerEvent.OnStillWatchingContinue) },
+                onDismiss = {
+                    when (uiState.postPlayMode) {
+                        is PostPlayMode.StillWatching ->
+                            viewModel.onEvent(PlayerEvent.OnDismissStillWatchingPrompt)
+                        else -> viewModel.onEvent(PlayerEvent.OnDismissNextEpisodeCard)
+                    }
+                },
+            ),
+        )
+
+        // Parental guide overlay (shows when video first starts playing)
+        ParentalGuideOverlay(
+            warnings = uiState.parentalWarnings,
+            // The guide is a short-lived informational overlay, while the
+            // top-left edge belongs to the persistent Back control whenever
+            // player chrome is visible. Let the overlay's quick-hide branch
+            // clear it instead of letting the two occupy the same region.
+            isVisible = legacyChromeEnabled && uiState.showParentalGuide && !uiState.showControls,
+            onAnimationComplete = {
+                viewModel.onEvent(PlayerEvent.OnParentalGuideHide)
+            },
+            modifier = Modifier.align(Alignment.TopStart)
+        )
+
+        DisplayModeOverlay(
+            info = uiState.displayModeInfo,
+            isVisible = legacyChromeEnabled && uiState.showDisplayModeInfo,
+            onAnimationComplete = {
+                viewModel.onEvent(PlayerEvent.OnHideDisplayModeInfo)
+            },
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .zIndex(2.2f)
+        )
+
+        val showClockOverlay = legacyChromeEnabled && uiState.showControls &&
+            uiState.osdClockEnabled &&
+            uiState.error == null &&
+            !uiState.showLoadingOverlay &&
+            !uiState.showPauseOverlay &&
+            !uiState.showEpisodesPanel &&
+            !uiState.showSourcesPanel &&
+            !isExternalSecondaryOpen &&
+            !uiState.showAudioOverlay &&
+            !uiState.showSubtitleOverlay &&
+            !uiState.showSubtitleStylePanel &&
+            !uiState.showSpeedDialog &&
+            !uiState.showMoreDialog &&
+            !uiState.showDisplayModeInfo
+
+        val actions = PlayerControlActions(
+            onPlayPause = { viewModel.onEvent(PlayerEvent.OnPlayPause) },
+            onSeekForward = { viewModel.onEvent(PlayerEvent.OnSeekForward) },
+            onSeekBackward = { viewModel.onEvent(PlayerEvent.OnSeekBackward) },
+            onSeekPreview = { deltaMs -> viewModel.onEvent(PlayerEvent.OnPreviewSeekBy(deltaMs)) },
+            onSeekCommit = { viewModel.onEvent(PlayerEvent.OnCommitPreviewSeek) },
+            onSources = onOpenSourcesPanel,
+            onEpisodes = onOpenEpisodesPanel,
+            onAudio = { viewModel.onEvent(PlayerEvent.OnShowAudioOverlay) },
+            onSubtitles = { viewModel.onEvent(PlayerEvent.OnShowSubtitleOverlay) },
+            onSpeed = { viewModel.onEvent(PlayerEvent.OnShowSpeedDialog) },
+            onToggleAspectRatio = { viewModel.onEvent(PlayerEvent.OnToggleAspectRatio) },
+            onBack = { handleBackPress() },
+        )
+
+        AnimatedVisibility(
+            visible = showClockOverlay,
+            enter = fadeIn(animationSpec = tween(150)),
+            exit = fadeOut(animationSpec = tween(150)),
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(end = 28.dp, top = SlugYardTheme.spacing.xl)
+                .zIndex(2.15f)
+        ) {
+            PlayerClockOverlayHost(
+                viewModel = viewModel,
+                playbackSpeed = uiState.playbackSpeed
+            )
+        }
+
+        // Controls overlay — hidden while Up next / Still watching owns the end card.
+        AnimatedVisibility(
+            visible = uiState.showControls && uiState.error == null &&
+                !uiState.showLoadingOverlay && !uiState.showPauseOverlay &&
+                !uiState.showStreamInfoOverlay &&
+                !isExternalSecondaryOpen &&
+                !uiState.showSubtitleStylePanel &&
+                !uiState.showSubtitleDelayOverlay &&
+                !uiState.showEpisodesPanel &&
+                !uiState.showSourcesPanel &&
+                !uiState.showAudioOverlay &&
+                !uiState.showSubtitleOverlay &&
+                !uiState.showSpeedDialog &&
+                uiState.postPlayMode == null,
+            enter = fadeIn(animationSpec = tween(200)),
+            exit = fadeOut(animationSpec = tween(200))
+        ) {
+            ControlsOverlayHost(
+                viewModel = viewModel,
+                uiState = uiState,
+                actions = actions,
+                playPauseFocusRequester = playPauseFocusRequester,
+                controlsOverlay = controlsOverlay,
+            )
+        }
+
+        // Aspect ratio indicator (floating pill)
+        AnimatedVisibility(
+            visible = legacyChromeEnabled && uiState.showAspectRatioIndicator,
+            enter = fadeIn(animationSpec = tween(200)),
+            exit = fadeOut(animationSpec = tween(200)),
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 80.dp)
+        ) {
+            AspectRatioIndicator(text = uiState.aspectRatioIndicatorText)
+        }
+
+        AnimatedVisibility(
+            visible = legacyChromeEnabled && uiState.showStreamSourceIndicator,
+            enter = fadeIn(animationSpec = tween(SlugYardMotion.tokens.durations.fast)),
+            exit = fadeOut(animationSpec = tween(SlugYardMotion.tokens.durations.fast)),
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 128.dp)
+        ) {
+            StreamSourceIndicator(text = uiState.streamSourceIndicatorText)
+        }
+
+        AnimatedVisibility(
+            visible = legacyChromeEnabled && uiState.showPlayerEngineSwitchInfo && uiState.error == null,
+            enter = fadeIn(animationSpec = tween(SlugYardMotion.tokens.durations.fast)),
+            exit = fadeOut(animationSpec = tween(SlugYardMotion.tokens.durations.fast)),
+            modifier = Modifier
+                .align(Alignment.Center)
+                .zIndex(2.35f)
+        ) {
+            PlayerEngineSwitchIndicator(
+                title = stringResource(R.string.player_engine_switching_title),
+                message = uiState.playerEngineSwitchInfoText
+            )
+        }
+
+        // Seek-only overlay (progress bar + time) when controls are hidden
+        AnimatedVisibility(
+            visible = legacyChromeEnabled && uiState.showSubtitleDelayOverlay &&
+                !uiState.showControls &&
+                uiState.error == null &&
+                !uiState.showLoadingOverlay &&
+                !uiState.showPauseOverlay &&
+                !uiState.showSubtitleStylePanel &&
+                !uiState.showEpisodesPanel &&
+                !uiState.showSourcesPanel &&
+                !uiState.showAudioOverlay &&
+                !uiState.showSubtitleOverlay &&
+                !uiState.showSubtitleTimingDialog &&
+                !uiState.showSpeedDialog,
+            enter = fadeIn(animationSpec = tween(120)),
+            exit = fadeOut(animationSpec = tween(120)),
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 44.dp)
+                .zIndex(2.3f)
+        ) {
+            SubtitleDelayOverlay(
+                subtitleDelayMs = uiState.subtitleDelayMs,
+                isAutoSyncButtonFocused = subtitleDelayAutoSyncFocused,
+                isSliderFocused = !subtitleDelayAutoSyncFocused,
+                onOpenSyncByLine = {
+                    subtitleDelayAutoSyncFocused = false
+                    subtitleTimingConsumeNextConfirmKeyUp = true
+                    viewModel.onEvent(PlayerEvent.OnShowSubtitleTimingDialog)
+                }
+            )
+        }
+
+        AnimatedVisibility(
+            visible = legacyChromeEnabled && uiState.showSeekOverlay && !uiState.showControls && uiState.error == null &&
+                !uiState.showLoadingOverlay && !uiState.showPauseOverlay &&
+                !uiState.showSubtitleDelayOverlay && !uiState.showSubtitleTimingDialog &&
+                !uiState.showMoreDialog,
+            enter = fadeIn(animationSpec = tween(150)),
+            exit = fadeOut(animationSpec = tween(150)),
+            modifier = Modifier.align(Alignment.BottomCenter)
+        ) {
+            SeekOverlayHost(viewModel = viewModel)
+        }
+
+        secondaryOverlay(
+            uiState,
+            PlayerSecondaryActions(
+                onDismissSources = { viewModel.onEvent(PlayerEvent.OnDismissSourcesPanel) },
+                onReloadSources = { viewModel.onEvent(PlayerEvent.OnReloadSourceStreams) },
+                onSelectSourceAddon = { viewModel.onEvent(PlayerEvent.OnSourceAddonFilterSelected(it)) },
+                onSelectSource = { viewModel.onEvent(PlayerEvent.OnSourceStreamSelected(it)) },
+                onDismissEpisodes = { viewModel.onEvent(PlayerEvent.OnDismissEpisodesPanel) },
+                onBackToEpisodes = { viewModel.onEvent(PlayerEvent.OnBackFromEpisodeStreams) },
+                onReloadEpisodeStreams = { viewModel.onEvent(PlayerEvent.OnReloadEpisodeStreams) },
+                onSelectEpisodeSeason = { viewModel.onEvent(PlayerEvent.OnEpisodeSeasonSelected(it)) },
+                onSelectEpisode = { viewModel.onEvent(PlayerEvent.OnEpisodeSelected(it)) },
+                onSelectEpisodeAddon = { viewModel.onEvent(PlayerEvent.OnEpisodeAddonFilterSelected(it)) },
+                onSelectEpisodeStream = { viewModel.onEvent(PlayerEvent.OnEpisodeStreamSelected(it)) },
+            ),
+        )
+
+        trackOverlay(
+            uiState,
+            PlayerTrackActions(
+                onDismiss = { viewModel.onEvent(PlayerEvent.OnDismissTransientOverlay) },
+                onSelectAudio = { viewModel.onEvent(PlayerEvent.OnSelectAudioTrack(it)) },
+                onSelectSubtitleTrack = { viewModel.onEvent(PlayerEvent.OnSelectSubtitleTrack(it)) },
+                onDisableSubtitles = { viewModel.onEvent(PlayerEvent.OnDisableSubtitles) },
+                onSelectAddonSubtitle = { viewModel.onEvent(PlayerEvent.OnSelectAddonSubtitle(it)) },
+                onRetrySubtitleSearch = { viewModel.onEvent(PlayerEvent.OnRetrySubtitleSearch) },
+                onOpenSubtitleStyle = { viewModel.onEvent(PlayerEvent.OnOpenSubtitleStylePanel) },
+                onCloseSubtitleStyle = { viewModel.onEvent(PlayerEvent.OnDismissSubtitleStylePanel) },
+                onSetSubtitleSize = { viewModel.onEvent(PlayerEvent.OnSetSubtitleSize(it)) },
+                onSetSubtitleVerticalOffset = { viewModel.onEvent(PlayerEvent.OnSetSubtitleVerticalOffset(it)) },
+                onSetSubtitleBold = { viewModel.onEvent(PlayerEvent.OnSetSubtitleBold(it)) },
+                onSetSubtitleTextColor = { viewModel.onEvent(PlayerEvent.OnSetSubtitleTextColor(it)) },
+                onSetSubtitleOutlineEnabled = { viewModel.onEvent(PlayerEvent.OnSetSubtitleOutlineEnabled(it)) },
+                onSetSubtitleOutlineColor = { viewModel.onEvent(PlayerEvent.OnSetSubtitleOutlineColor(it)) },
+                onResetSubtitleStyle = { viewModel.onEvent(PlayerEvent.OnResetSubtitleDefaults) },
+                onAdjustSubtitleDelay = {
+                    viewModel.onEvent(PlayerEvent.OnAdjustSubtitleDelay(it, showOverlay = false))
+                },
+                onSetPlaybackSpeed = { viewModel.onEvent(PlayerEvent.OnSetPlaybackSpeed(it)) },
+            ),
+        )
+
+        subtitleTimingOverlay(
+            uiState,
+            playbackPositionMs,
+            PlayerSubtitleTimingActions(
+                onAdjustDelay = { delta -> viewModel.onEvent(PlayerEvent.OnAdjustSubtitleDelay(delta)) },
+                onOpenSyncByLine = {
+                    subtitleTimingConsumeNextConfirmKeyUp = true
+                    viewModel.onEvent(PlayerEvent.OnShowSubtitleTimingDialog)
+                },
+                onDismissDelay = { viewModel.onEvent(PlayerEvent.OnHideSubtitleDelayOverlay) },
+                onDismissSync = { viewModel.onEvent(PlayerEvent.OnDismissSubtitleTimingDialog) },
+                onCaptureNow = { viewModel.onEvent(PlayerEvent.OnCaptureSubtitleAutoSyncTime) },
+                onCueSelected = { cue -> viewModel.onEvent(PlayerEvent.OnApplySubtitleAutoSyncCue(cue.startTimeMs)) },
+            ),
+        )
+    }
+}
+
+@Composable
+private fun MpvPlayerSurface(
+    viewModel: PlayerViewModel,
+    isPlaying: Boolean,
+    isBuffering: Boolean,
+    aspectMode: AspectMode,
+    subtitleStyle: SubtitleStyleSettings,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val latestAspectMode by rememberUpdatedState(aspectMode)
+    val mpvView = remember(context) {
+        MpvPlayerSurfaceView(context)
+    }
+
+    AndroidView(
+        factory = { mpvView },
+        modifier = modifier
+    )
+
+    DisposableEffect(viewModel, mpvView) {
+        viewModel.attachMpvView(mpvView)
+        onDispose {
+            viewModel.attachMpvView(null)
+        }
+    }
+
+    DisposableEffect(mpvView) {
+        val listener = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            mpvView.applyAspectMode(latestAspectMode)
+        }
+        mpvView.addOnLayoutChangeListener(listener)
+        onDispose {
+            mpvView.removeOnLayoutChangeListener(listener)
+        }
+    }
+
+    LaunchedEffect(mpvView, isPlaying, isBuffering) {
+        val shouldKeepScreenOn = isPlaying || isBuffering
+        if (mpvView.keepScreenOn != shouldKeepScreenOn) {
+            mpvView.keepScreenOn = shouldKeepScreenOn
+        }
+    }
+
+    LaunchedEffect(mpvView, aspectMode) {
+        mpvView.applyAspectMode(aspectMode)
+    }
+
+    LaunchedEffect(mpvView, subtitleStyle) {
+        mpvView.applySubtitleStyle(subtitleStyle)
+    }
+}
+
+@Composable
+private fun ExoPlayerSurface(
+    player: ExoPlayer,
+    isPlaying: Boolean,
+    isBuffering: Boolean,
+    aspectMode: AspectMode,
+    useLibass: Boolean,
+    libassRenderType: LibassRenderType,
+    subtitleStyle: SubtitleStyleSettings,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val latestAspectMode by rememberUpdatedState(aspectMode)
+    val playerView = remember(context, player) {
+        PlayerView(context).apply {
+            useController = false
+            keepScreenOn = false
+            resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+            setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
+            enableComposeSurfaceSyncWorkaroundIfAvailable()
+            this.player = player
+        }
+    }
+
+    AndroidView(
+        factory = { playerView },
+        modifier = modifier,
+        update = {
+            it.syncLibassOverlay(
+                player = player,
+                enabled = useLibass,
+                renderType = libassRenderType
+            )
+        }
+    )
+
+    DisposableEffect(playerView, player) {
+        if (playerView.player !== player) {
+            playerView.player = player
+        }
+        onDispose {
+            if (playerView.player === player) {
+                playerView.player = null
+            }
+        }
+    }
+
+    DisposableEffect(player, playerView) {
+        val listener = object : androidx.media3.common.Player.Listener {
+            override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
+                playerView.post {
+                    playerView.applyExoAspectMode(latestAspectMode)
+                }
+            }
+
+            override fun onRenderedFirstFrame() {
+                playerView.post {
+                    playerView.applyExoAspectMode(latestAspectMode)
+                }
+            }
+        }
+        player.addListener(listener)
+        playerView.post {
+            playerView.applyExoAspectMode(latestAspectMode)
+        }
+        onDispose {
+            player.removeListener(listener)
+        }
+    }
+
+    DisposableEffect(playerView) {
+        val listener = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            playerView.post {
+                playerView.applyExoAspectMode(latestAspectMode)
+            }
+        }
+        val removeListener = addExoAspectLayoutChangeListener(playerView, listener)
+        onDispose {
+            removeListener()
+        }
+    }
+
+    LaunchedEffect(playerView, isPlaying, isBuffering) {
+        val shouldKeepScreenOn = isPlaying || isBuffering
+        if (playerView.keepScreenOn != shouldKeepScreenOn) {
+            playerView.keepScreenOn = shouldKeepScreenOn
+        }
+    }
+
+    LaunchedEffect(playerView, aspectMode) {
+        playerView.applyExoAspectMode(aspectMode)
+    }
+
+    LaunchedEffect(playerView, player, useLibass, libassRenderType) {
+        playerView.syncLibassOverlay(
+            player = player,
+            enabled = useLibass,
+            renderType = libassRenderType
+        )
+    }
+
+    LaunchedEffect(playerView, subtitleStyle) {
+        playerView.applySubtitleStyleIfNeeded(subtitleStyle)
+    }
+}
+
+private fun PlayerView.enableComposeSurfaceSyncWorkaroundIfAvailable() {
+    runCatching {
+        javaClass
+            .getMethod("setEnableComposeSurfaceSyncWorkaround", java.lang.Boolean.TYPE)
+            .invoke(this, false)
+    }
+}
+
+private fun PlayerView.applyExoAspectMode(mode: AspectMode) {
+    setTag(R.id.player_view_aspect_mode_tag, mode)
+    applyExoAspectMode(this, mode)
+}
+
+/** Normal TV resting inset at 0% subtitle position (~5% of view height). */
+private const val SUBTITLE_BOTTOM_PADDING_AT_ZERO = 0.05f
+
+private fun PlayerView.applySubtitleStyleIfNeeded(subtitleStyle: SubtitleStyleSettings) {
+    if (getTag(R.id.player_view_subtitle_style_tag) == subtitleStyle) {
+        return
+    }
+    setTag(R.id.player_view_subtitle_style_tag, subtitleStyle)
+    subtitleView?.apply {
+        val baseFontSize = 24f
+        val scaledFontSize = baseFontSize * (subtitleStyle.size / 100f)
+        setFixedTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, scaledFontSize)
+        setApplyEmbeddedFontSizes(false)
+
+        val typeface = if (subtitleStyle.bold) {
+            android.graphics.Typeface.DEFAULT_BOLD
+        } else {
+            android.graphics.Typeface.DEFAULT
+        }
+
+        val edgeType = if (subtitleStyle.outlineEnabled) {
+            androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_OUTLINE
+        } else {
+            androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_NONE
+        }
+
+        setStyle(
+            androidx.media3.ui.CaptionStyleCompat(
+                subtitleStyle.textColor,
+                subtitleStyle.backgroundColor,
+                android.graphics.Color.TRANSPARENT,
+                edgeType,
+                subtitleStyle.outlineColor,
+                typeface
+            )
+        )
+
+        setApplyEmbeddedStyles(false)
+
+        // 0% = normal TV resting baseline (~5% inset), not flush-to-bezel and
+        // not the old hardcoded +14% lift. Positive values raise further;
+        // negatives can ease toward the edge.
+        val bottomPaddingFraction =
+            (SUBTITLE_BOTTOM_PADDING_AT_ZERO + subtitleStyle.verticalOffset / 100f)
+                .coerceIn(0f, 0.55f)
+        setBottomPaddingFraction(bottomPaddingFraction)
+        setPadding(paddingLeft, paddingTop, paddingRight, 0)
+    }
+}
+
+private fun PlayerView.syncLibassOverlay(
+    player: ExoPlayer,
+    enabled: Boolean,
+    renderType: LibassRenderType
+) {
+    val containerId = if (renderType == LibassRenderType.OVERLAY_OPEN_GL) {
+        R.id.libass_overlay_container_gl
+    } else {
+        R.id.libass_overlay_container
+    }
+    val overlayContainer = findViewById<android.widget.FrameLayout>(containerId) ?: return
+    val needsOverlay = enabled && renderType.usesOverlaySubtitleView()
+    val boundPlayer = getTag(R.id.libass_overlay_bound_player) as? ExoPlayer
+    val hasOverlayChild = overlayContainer.hasAssOverlayChild()
+
+    if (!needsOverlay) {
+        if (hasOverlayChild) {
+            overlayContainer.removeAssOverlayChildren()
+        }
+        if (boundPlayer != null) {
+            setTag(R.id.libass_overlay_bound_player, null)
+        }
+        return
+    }
+
+    val assHandler = player.getAssHandlerCompat() ?: return
+    if (boundPlayer === player && hasOverlayChild) {
+        return
+    }
+
+    overlayContainer.removeAssOverlayChildren()
+    val assSubtitleView = AssSubtitleView(overlayContainer.context, assHandler)
+    overlayContainer.addView(
+        assSubtitleView,
+        android.widget.FrameLayout.LayoutParams(
+            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+            android.view.ViewGroup.LayoutParams.MATCH_PARENT
+        )
+    )
+    setTag(R.id.libass_overlay_bound_player, player)
+}
+
+private fun LibassRenderType.usesOverlaySubtitleView(): Boolean {
+    return this == LibassRenderType.OVERLAY_CANVAS || this == LibassRenderType.OVERLAY_OPEN_GL
+}
+
+private fun PlayerUiState.shouldRenderLibassOverlay(): Boolean {
+    if (!useLibass || selectedAddonSubtitle != null) return false
+    val selected = subtitleTracks.getOrNull(selectedSubtitleTrackIndex)
+        ?: subtitleTracks.firstOrNull { it.isSelected }
+    // Keep the overlay mounted while tracks are still being discovered. Once a concrete track is
+    // known, only ASS/SSA tracks may use libass; SRT/VTT addon tracks must use Media3 alone.
+    return selected?.codec?.contains("ass", ignoreCase = true) != false
+}
+
+private fun android.widget.FrameLayout.hasAssOverlayChild(): Boolean {
+    for (index in 0 until childCount) {
+        if (getChildAt(index) is AssSubtitleView) {
+            return true
+        }
+    }
+    return false
+}
+
+private fun android.widget.FrameLayout.removeAssOverlayChildren() {
+    for (index in childCount - 1 downTo 0) {
+        if (getChildAt(index) is AssSubtitleView) {
+            removeViewAt(index)
+        }
+    }
+}
+
+
+@Composable
+private fun ProgressBar(
+    currentPosition: Long,
+    duration: Long,
+    onSeekPreview: (Long) -> Unit,
+    onSeekCommit: () -> Unit,
+    focusRequester: FocusRequester? = null,
+    upFocusRequester: FocusRequester? = null,
+    downFocusRequester: FocusRequester? = null,
+    onUpKey: (() -> Unit)? = null,
+    onFocused: (() -> Unit)? = null,
+    /** Position (ms) up to which content is buffered. Pass 0 to skip the overlay. */
+    bufferedPosition: Long = 0L
+) {
+    val progress = if (duration > 0) {
+        (currentPosition.toFloat() / duration.toFloat()).coerceIn(0f, 1f)
+    } else 0f
+
+    val bufferedProgress = if (duration > 0 && bufferedPosition > currentPosition) {
+        (bufferedPosition.toFloat() / duration.toFloat()).coerceIn(0f, 1f)
+    } else 0f
+
+    val animatedProgress by animateFloatAsState(
+        targetValue = progress,
+        animationSpec = tween(100),
+        label = "progress"
+    )
+    val animatedBufferedProgress by animateFloatAsState(
+        targetValue = bufferedProgress,
+        animationSpec = tween(200),
+        label = "bufferedProgress"
+    )
+    var isFocused by remember { mutableStateOf(false) }
+
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(if (isFocused) SlugYardTheme.spacing.md else SlugYardTheme.spacing.sm)
+            .then(
+                if (focusRequester != null) Modifier.focusRequester(focusRequester)
+                else Modifier
+            )
+            .then(
+                if (upFocusRequester != null || downFocusRequester != null) {
+                    Modifier.focusProperties {
+                        upFocusRequester?.let { up = it }
+                        downFocusRequester?.let { down = it }
+                    }
+                } else {
+                    Modifier
+                }
+            )
+            .onFocusChanged {
+                isFocused = it.isFocused
+                if (it.isFocused) onFocused?.invoke()
+            }
+            .focusable()
+            .onPreviewKeyEvent { keyEvent ->
+                if (keyEvent.nativeKeyEvent.action == KeyEvent.ACTION_UP) {
+                    when (keyEvent.nativeKeyEvent.keyCode) {
+                        KeyEvent.KEYCODE_DPAD_LEFT,
+                        KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                            onSeekCommit()
+                            return@onPreviewKeyEvent true
+                        }
+                    }
+                    return@onPreviewKeyEvent false
+                }
+
+                // testing additional key handling for DPAD_LEFT and DPAD_RIGHT to allow seek in focus (check)
+                if (keyEvent.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
+                    when (keyEvent.nativeKeyEvent.keyCode) {
+                        KeyEvent.KEYCODE_DPAD_DOWN -> {
+                            if (downFocusRequester != null) {
+                                try {
+                                    downFocusRequester.requestFocus()
+                                } catch (_: Exception) {
+                                }
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                        KeyEvent.KEYCODE_DPAD_UP -> {
+                            if (upFocusRequester != null) {
+                                try {
+                                    upFocusRequester.requestFocus()
+                                } catch (_: Exception) {
+                                }
+                                true
+                            } else if (onUpKey != null) {
+                                onUpKey.invoke()
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                        KeyEvent.KEYCODE_DPAD_LEFT -> {
+                            onSeekPreview(-10_000L)
+                            true
+                        }
+                        KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                            onSeekPreview(10_000L)
+                            true
+                        }
+                        else -> false
+                    }
+                } else {
+                    false
+                }
+            }
+            .clip(RoundedCornerShape(3.dp))
+            .background(
+                if (isFocused) Color.White.copy(alpha = 0.45f)
+                else Color.White.copy(alpha = 0.3f)
+            )
+    ) {
+        val trackWidth = maxWidth
+
+        // Buffered-ahead overlay: the theme accent, faded so it reads under the played
+        // fill and on light themes.
+        if (animatedBufferedProgress > 0f) {
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .width(trackWidth * animatedBufferedProgress)
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(SlugYardTheme.colors.Secondary.copy(alpha = 0.35f))
+            )
+        }
+        // Played fill.
+        Box(
+            modifier = Modifier
+                .fillMaxHeight()
+                .width(trackWidth * animatedProgress)
+                .clip(RoundedCornerShape(3.dp))
+                .background(SlugYardTheme.colors.Secondary)
+        )
+    }
+}
+
+@Composable
+private fun SeekOverlay(
+    currentPosition: Long,
+    duration: Long,
+    bufferedPosition: Long = 0L
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = SlugYardTheme.spacing.xxl, vertical = SlugYardTheme.spacing.xl)
+    ) {
+        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+            ProgressBar(
+                currentPosition = currentPosition,
+                duration = duration,
+                onSeekPreview = {},
+                onSeekCommit = {},
+                bufferedPosition = bufferedPosition
+            )
+        }
+
+        Spacer(modifier = Modifier.height(SlugYardTheme.spacing.md))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "${formatTime(currentPosition)} / ${formatTime(duration)}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color.White.copy(alpha = 0.9f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun ControlsOverlayHost(
+    viewModel: PlayerViewModel,
+    uiState: PlayerUiState,
+    actions: PlayerControlActions,
+    playPauseFocusRequester: FocusRequester,
+    controlsOverlay: @Composable (PlayerUiState, PlayerControlActions, FocusRequester, PlaybackTimelineState) -> Unit,
+) {
+    val playbackTimeline by viewModel.playbackTimeline.collectAsState()
+    controlsOverlay(uiState, actions, playPauseFocusRequester, playbackTimeline)
+}
+
+@Composable
+private fun SeekOverlayHost(viewModel: PlayerViewModel) {
+    val playbackTimeline by viewModel.playbackTimeline.collectAsState()
+
+    SeekOverlay(
+        currentPosition = playbackTimeline.currentPosition,
+        duration = playbackTimeline.duration,
+        bufferedPosition = playbackTimeline.bufferedPosition
+    )
+}
+
+@Composable
+private fun PlayerClockOverlay(
+    currentPosition: Long,
+    duration: Long,
+    playbackSpeed: Float
+) {
+    var nowMs by remember { mutableStateOf(System.currentTimeMillis()) }
+    val context = LocalContext.current
+    val timeFormatter = remember(context) { DateFormat.getTimeFormat(context) }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            val current = System.currentTimeMillis()
+            nowMs = current
+            val delayMs = (1_000L - (current % 1_000L)).coerceAtLeast(250L)
+            delay(delayMs)
+        }
+    }
+
+    val effectiveSpeed = playbackSpeed.takeIf { it > 0f } ?: 1f
+    val remainingMediaMs = (duration - currentPosition).coerceAtLeast(0L)
+    val remainingMs = kotlin.math.ceil(remainingMediaMs.toDouble() / effectiveSpeed.toDouble()).toLong()
+    val endTimeText = if (duration > 0L) {
+        timeFormatter.format(Date(nowMs + remainingMs))
+    } else {
+        "--:--"
+    }
+
+    Column(
+        modifier = Modifier
+            .padding(horizontal = SlugYardTheme.spacing.xxs, vertical = SlugYardTheme.spacing.xxs),
+        horizontalAlignment = Alignment.End
+    ) {
+        Text(
+            text = timeFormatter.format(Date(nowMs)),
+            style = MaterialTheme.typography.bodyMedium.copy(
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold
+            ),
+            color = Color.White.copy(alpha = 0.96f)
+        )
+        Text(
+            text = stringResource(R.string.player_ends_at, endTimeText),
+            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 10.sp),
+            color = Color.White.copy(alpha = 0.78f)
+        )
+    }
+}
+
+@Composable
+private fun PlayerClockOverlayHost(viewModel: PlayerViewModel, playbackSpeed: Float) {
+    val playbackTimeline by viewModel.playbackTimeline.collectAsState()
+
+    PlayerClockOverlay(
+        currentPosition = playbackTimeline.currentPosition,
+        duration = playbackTimeline.duration,
+        playbackSpeed = playbackSpeed
+    )
+}
+
+@Composable
+private fun AspectRatioIndicator(text: String) {
+    val customAspectPainter = rememberRawSvgPainter(R.raw.ic_player_aspect_ratio)
+
+    // Floating pill indicator for aspect ratio changes
+    Row(
+        modifier = Modifier
+            .background(
+                color = Color.Black.copy(alpha = 0.85f),
+                shape = RoundedCornerShape(SlugYardTheme.spacing.xl)
+            )
+            .padding(horizontal = 20.dp, vertical = SlugYardTheme.spacing.md),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Icon background circle
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .background(
+                    color = Color(0xFF3B3B3B),
+                    shape = CircleShape
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                painter = customAspectPainter,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+
+        Spacer(modifier = Modifier.width(SlugYardTheme.spacing.md))
+
+        // Text
+        Text(
+            text = text,
+            style = MaterialTheme.typography.titleMedium.copy(
+                fontSize = 18.sp,
+                fontWeight = FontWeight.SemiBold
+            ),
+            color = Color.White
+        )
+    }
+}
+
+@Composable
+private fun StreamSourceIndicator(text: String) {
+    Row(
+        modifier = Modifier
+            .background(
+                color = Color.Black.copy(alpha = 0.82f),
+                shape = RoundedCornerShape(20.dp)
+            )
+            .padding(horizontal = 14.dp, vertical = SlugYardTheme.spacing.sm),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+            color = Color.White,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
+private fun PlayerEngineSwitchIndicator(
+    title: String,
+    message: String
+) {
+    Column(
+        modifier = Modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(Color.Black.copy(alpha = 0.86f))
+            .padding(horizontal = 22.dp, vertical = SlugYardTheme.spacing.lg),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Default.SwapHoriz,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(22.dp)
+            )
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                color = Color.White
+            )
+        }
+
+        Spacer(modifier = Modifier.height(SlugYardTheme.spacing.sm))
+
+        Text(
+            text = message,
+            style = MaterialTheme.typography.bodyMedium,
+            color = Color.White.copy(alpha = 0.92f),
+            textAlign = TextAlign.Center
+        )
+    }
+}
+
+@Composable
+private fun SubtitleDelayOverlay(
+    subtitleDelayMs: Int,
+    isAutoSyncButtonFocused: Boolean,
+    isSliderFocused: Boolean,
+    onOpenSyncByLine: () -> Unit
+) {
+    val fraction = ((subtitleDelayMs - SUBTITLE_DELAY_MIN_MS).toFloat() /
+        (SUBTITLE_DELAY_MAX_MS - SUBTITLE_DELAY_MIN_MS).toFloat()).coerceIn(0f, 1f)
+    val sliderAccent = if (isSliderFocused) Color(0xFF4AA3FF) else Color.White
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth(0.6f)
+            .clip(RoundedCornerShape(26.dp))
+            .background(Color(0xCC0F0F0F))
+            .padding(horizontal = 26.dp, vertical = 20.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = stringResource(R.string.player_subtitle_delay),
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold),
+                color = Color.White
+            )
+            Text(
+                text = formatSubtitleDelay(subtitleDelayMs),
+                style = MaterialTheme.typography.titleLarge,
+                color = Color.White.copy(alpha = 0.95f)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(18.dp))
+
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(SlugYardTheme.spacing.xl)
+        ) {
+            val thumbWidth = 22.dp
+            val thumbOffset = (maxWidth - thumbWidth) * fraction
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(SlugYardTheme.spacing.xs)
+                    .clip(RoundedCornerShape(SlugYardTheme.radii.xxs))
+                    .align(Alignment.CenterStart)
+                    .background(Color.White.copy(alpha = 0.15f))
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                repeat(5) { index ->
+                    val tickHeight = if (index == 2) 13.dp else 9.dp
+                    Box(
+                        modifier = Modifier
+                            .width(SlugYardTheme.spacing.hairline)
+                            .height(tickHeight)
+                            .background(sliderAccent.copy(alpha = if (isSliderFocused) 0.52f else 0.22f))
+                    )
+                }
+            }
+
+            Box(
+                modifier = Modifier
+                    .offset(x = thumbOffset)
+                    .align(Alignment.CenterStart)
+                    .width(thumbWidth)
+                    .height(SlugYardTheme.spacing.sm)
+                    .clip(RoundedCornerShape(SlugYardTheme.radii.sm))
+                    .background(sliderAccent.copy(alpha = 0.95f))
+            )
+        }
+
+        Spacer(modifier = Modifier.height(SlugYardTheme.spacing.lg))
+
+        Card(
+            onClick = onOpenSyncByLine,
+            colors = CardDefaults.colors(
+                containerColor = if (isAutoSyncButtonFocused) {
+                    Color.White.copy(alpha = 0.22f)
+                } else {
+                    Color.White.copy(alpha = 0.11f)
+                },
+                focusedContainerColor = Color.White.copy(alpha = 0.22f)
+            ),
+            shape = CardDefaults.shape(RoundedCornerShape(SlugYardTheme.radii.md))
+        ) {
+            Text(
+                text = stringResource(R.string.player_sync_line),
+                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                color = Color.White,
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun rememberRawSvgPainter(@RawRes iconRes: Int): Painter {
+    val context = LocalContext.current
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val sizePx = with(density) { SlugYardTheme.spacing.xl.roundToPx() }
+    val request = remember(iconRes, context, sizePx) {
+        ImageRequest.Builder(context)
+            .data(iconRes)
+            .size(sizePx)
+            .build()
+    }
+    return rememberAsyncImagePainter(model = request)
+}
+
+@Composable
+private fun LoadingIssueReportAction(
+    elapsedMs: Long,
+    reportStatus: PlaybackIssueReportStatus,
+    reportId: String?,
+    reportError: String?,
+    onReport: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val focusRequester = remember { FocusRequester() }
+    val context = LocalContext.current
+    LaunchedEffect(Unit) {
+        focusRequester.requestFocus()
+    }
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(SlugYardTheme.radii.lg))
+            .background(Color.Black.copy(alpha = 0.72f))
+            .padding(horizontal = SlugYardTheme.spacing.lg, vertical = SlugYardTheme.spacing.md),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(SlugYardTheme.spacing.sm)
+    ) {
+        val reportMessage = when (reportStatus) {
+            PlaybackIssueReportStatus.Sent -> stringResource(R.string.player_report_issue_sent, reportId.orEmpty())
+            PlaybackIssueReportStatus.Failed -> reportError ?: stringResource(R.string.player_report_issue_failed)
+            PlaybackIssueReportStatus.Sending -> stringResource(R.string.player_report_issue_sending)
+            PlaybackIssueReportStatus.Idle -> {
+                val elapsedSeconds = (elapsedMs / 1000L).coerceAtLeast(1L).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+                context.resources.getQuantityString(
+                    R.plurals.player_report_loading_issue_prompt,
+                    elapsedSeconds,
+                    elapsedSeconds
+                )
+            }
+        }
+        Text(
+            text = reportMessage,
+            style = MaterialTheme.typography.bodyMedium,
+            color = Color.White.copy(alpha = 0.86f),
+            textAlign = TextAlign.Center
+        )
+        DialogButton(
+            text = when (reportStatus) {
+                PlaybackIssueReportStatus.Sending -> stringResource(R.string.player_report_issue_sending_button)
+                PlaybackIssueReportStatus.Sent -> stringResource(R.string.player_report_issue_sent_button)
+                else -> stringResource(R.string.player_report_loading_issue)
+            },
+            onClick = onReport,
+            isPrimary = false,
+            enabled = reportStatus != PlaybackIssueReportStatus.Sending &&
+                reportStatus != PlaybackIssueReportStatus.Sent,
+            modifier = Modifier.focusRequester(focusRequester)
+        )
+    }
+}
+
+
+@Composable
+internal fun DialogButton(
+    text: String,
+    onClick: () -> Unit,
+    isPrimary: Boolean,
+    enabled: Boolean = true,
+    modifier: Modifier = Modifier
+) {
+    Button(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier,
+        colors = ButtonDefaults.colors(
+            containerColor = if (isPrimary) SlugYardTheme.colors.Secondary else SlugYardTheme.colors.BackgroundCard,
+            contentColor = if (isPrimary) SlugYardTheme.colors.OnSecondary else SlugYardTheme.colors.TextSecondary,
+            focusedContainerColor = if (isPrimary) SlugYardTheme.colors.SecondaryVariant else SlugYardTheme.colors.FocusBackground,
+            focusedContentColor = if (isPrimary) SlugYardTheme.colors.OnSecondaryVariant else SlugYardTheme.colors.Primary
+        ),
+        border = ButtonDefaults.border(
+            focusedBorder = Border(
+                border = BorderStroke(SlugYardTheme.spacing.xxs, if (isPrimary) SlugYardTheme.colors.SecondaryVariant else SlugYardTheme.colors.FocusRing),
+                shape = RoundedCornerShape(SlugYardTheme.radii.md)
+            )
+        ),
+        shape = ButtonDefaults.shape(RoundedCornerShape(SlugYardTheme.radii.md)),
+        scale = ButtonDefaults.scale(focusedScale = 1f)
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelLarge,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+private fun formatTime(millis: Long): String {
+    if (millis <= 0) return "0:00"
+
+    val hours = TimeUnit.MILLISECONDS.toHours(millis)
+    val minutes = TimeUnit.MILLISECONDS.toMinutes(millis) % 60
+    val seconds = TimeUnit.MILLISECONDS.toSeconds(millis) % 60
+
+    return if (hours > 0) {
+        String.format("%d:%02d:%02d", hours, minutes, seconds)
+    } else {
+        String.format("%d:%02d", minutes, seconds)
+    }
+}
+
+private fun formatSubtitleDelay(delayMs: Int): String {
+    return String.format(Locale.US, "%+.3fs", delayMs / 1000f)
+}
+
+/**
+ * Buffering indicator extracted into its own composable to isolate
+ * recomposition scope. When [isBuffering] toggles, only this subtree
+ * is recomposed — the rest of [PlayerScreen] is skipped by Compose.
+ *
+ * Never uses the old Lottie LoadingIndicator during prepare — that flash
+ * between Finding stream and Building player is owned by PlayPreparingSurface.
+ * Mid-playback rebuffer keeps a quiet Material spinner only.
+ */
+@Composable
+private fun PlayerBufferingIndicator(
+    isBuffering: Boolean,
+    showLoadingOverlay: Boolean,
+    isTorrentStream: Boolean,
+    torrentBufferingMessage: String?,
+    torrentBufferingProgress: Float
+) {
+    if (!isBuffering || showLoadingOverlay) return
+
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        if (isTorrentStream && torrentBufferingMessage != null) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                androidx.compose.material3.CircularProgressIndicator(
+                    color = Color.White.copy(alpha = 0.85f),
+                    strokeWidth = 2.dp,
+                    modifier = Modifier.size(36.dp),
+                )
+                Spacer(modifier = Modifier.height(SlugYardTheme.spacing.md))
+                Text(
+                    text = torrentBufferingMessage,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = Color.White.copy(alpha = 0.8f)
+                )
+                if (torrentBufferingProgress > 0f) {
+                    Spacer(modifier = Modifier.height(SlugYardTheme.spacing.sm))
+                    Box(
+                        modifier = Modifier
+                            .width(200.dp)
+                            .height(3.dp)
+                            .background(
+                                color = Color.White.copy(alpha = 0.2f),
+                                shape = RoundedCornerShape(SlugYardTheme.radii.xxs)
+                            )
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(torrentBufferingProgress.coerceIn(0f, 1f))
+                                .height(3.dp)
+                                .background(
+                                    color = Color.White.copy(alpha = 0.85f),
+                                    shape = RoundedCornerShape(SlugYardTheme.radii.xxs)
+                                )
+                        )
+                    }
+                }
+            }
+        } else {
+            androidx.compose.material3.CircularProgressIndicator(
+                color = Color.White.copy(alpha = 0.85f),
+                strokeWidth = 2.dp,
+                modifier = Modifier.size(36.dp),
+            )
+        }
+    }
+}

@@ -1,0 +1,16 @@
+--- a/libraries/exoplayer/src/main/java/androidx/media3/exoplayer/upstream/Allocation.java
++++ b/libraries/exoplayer/src/main/java/androidx/media3/exoplayer/upstream/Allocation.java
+@@ -30,6 +30,18 @@
++    /** Native memory handle (0L = heap-backed). Fork addition for SlugYardEngineConfig. */
++    public long nativeHandle;
++
++    /**
++     * Constructor for native-backed allocations.
++     * Fork addition for SlugYardEngineConfig.
++     */
++    public Allocation(AlignedAllocator alignedAllocator, int size, long nativeHandle) {
++        this.buffer = alignedAllocator.allocate(size);
++        this.position = 0;
++        this.size = size;
++        this.nativeHandle = nativeHandle;
++    }
