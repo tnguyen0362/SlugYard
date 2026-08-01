@@ -229,8 +229,6 @@ private const val HomePosterLandscapeAspect = 16f / 9f
 /** Coil decode cap for card landscapes — match preferCardBackdropUrl (w780), not hero w1280. */
 private const val MaxLandscapeDecodeWidthPx = 780
 private const val RowBringIntoViewDebounceMs = 120L
-/** Wait for focus to settle before kicking a cold landscape decode (fast D-pad). */
-private const val HomeLandscapeFocusSettleMs = 48L
 /** Neighbor portrait warm-cache window after focus settles (leading..trailing). */
 private const val HomePosterPrefetchBehind = 1
 /** Keep ahead prefetch short so landscape decode keeps Coil slots on weak TVs. */
@@ -1175,32 +1173,22 @@ internal fun PosterCard(
             ?.let { preferCardBackdropUrl(it) }
             ?.takeIf { it != posterUrl }
     }
-    // Root cause of portrait↔empty↔landscape flash:
-    // 1) Expanding when landscapeUrl == null → empty 16:9 title banner.
-    // 2) Gating on Coil execute() then swapping AsyncImage → one blank frame after portrait
-    //    is torn down and before the new image paints.
-    // Fix: stay portrait-sized with portrait art until landscape AsyncImage onSuccess; only
-    // then widen. Load landscape invisibly underneath so the swap is paint-complete.
+    // Keep the landscape layer alive after it has painted. Resetting this on every blur forces
+    // the next landscape-to-landscape move through portrait -> decode -> landscape again, which
+    // is the visible hitch even when the backdrop is already cached.
     var loadLandscape by remember(poster.id, landscapeUrl) { mutableStateOf(false) }
     var landscapePainted by remember(poster.id, landscapeUrl) { mutableStateOf(false) }
     LaunchedEffect(focused, poster.id, landscapeUrl, expandOnFocus) {
-        if (!focused || !expandOnFocus || landscapeUrl == null) {
+        if (!expandOnFocus || landscapeUrl == null) {
             loadLandscape = false
-            // Drop paint gate on blur so the next focus keeps portrait until landscape paints.
             landscapePainted = false
             return@LaunchedEffect
         }
-        val cacheKey = "card-backdrop:${poster.id}:$landscapeUrl"
-        val memoryHit = runCatching {
-            context.imageLoader.memoryCache?.get(coil3.memory.MemoryCache.Key(cacheKey)) != null
-        }.getOrDefault(false)
-        if (memoryHit) {
-            // Skip settle delay only — still wait for AsyncImage onSuccess so we never
-            // widen to an empty 16:9 frame while the landscape composable remounts.
-            loadLandscape = true
-            return@LaunchedEffect
-        }
-        delay(HomeLandscapeFocusSettleMs)
+        // Once loaded, keep the composable mounted off-focus so the next focus can reveal the
+        // existing bitmap instead of waiting for a new request/onSuccess cycle.
+        if (!focused || loadLandscape) return@LaunchedEffect
+        // A focused card should request immediately. The row-level prefetcher handles nearby
+        // cards; delaying here only creates a visible portrait interstitial on a cache miss.
         loadLandscape = true
     }
     val showLandscape = focused && expandOnFocus && landscapeUrl != null && landscapePainted
@@ -1434,8 +1422,9 @@ internal fun PosterCard(
                     )
                 }
             }
-            // Decode at landscape size invisibly; flip showLandscape only from onSuccess.
-            if (focused && expandOnFocus && landscapeUrl != null && loadLandscape) {
+            // Keep the warmed landscape bitmap mounted while unfocused. This avoids a fresh Coil
+            // composition and decode when focus moves between adjacent landscape cards.
+            if (expandOnFocus && landscapeUrl != null && loadLandscape) {
                 val landscapeRequest = remember(poster.id, landscapeUrl, landscapeDecode) {
                     ImageRequest.Builder(context)
                         .data(landscapeUrl)
@@ -1449,7 +1438,7 @@ internal fun PosterCard(
                     contentDescription = null,
                     modifier = Modifier
                         .fillMaxSize()
-                        .alpha(if (landscapePainted) 1f else 0f),
+                        .alpha(if (focused && landscapePainted) 1f else 0f),
                     contentScale = ContentScale.Crop,
                     alignment = Alignment.Center,
                     onSuccess = { landscapePainted = true },
