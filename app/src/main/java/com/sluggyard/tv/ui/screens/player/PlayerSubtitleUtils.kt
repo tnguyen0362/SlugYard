@@ -154,6 +154,20 @@ internal object PlayerSubtitleUtils {
     }
 
     /**
+     * Lower is better. Prefer dialogue/full ASS over Signs & Songs when auto-selecting
+     * anime softsubs — pack track order often lists signs first (lowest sid).
+     */
+    fun assDialoguePreferenceScore(name: String?, isForced: Boolean = false): Int {
+        if (isForced) return 50
+        val lower = name.orEmpty().lowercase()
+        if (isSignsAndSongsTrack(listOf(name))) return 20
+        if (lower.contains("dialogue") || (lower.contains("full") && lower.contains("sub"))) return 0
+        if (Regex("\\b(signs?|on[- ]?screen)\\b").containsMatchIn(lower)) return 18
+        if (Regex("\\b(songs?|lyrics?)\\b").containsMatchIn(lower)) return 16
+        return 5
+    }
+
+    /**
      * Classify a subtitle's container/payload format using every available metadata layer:
      * the derived codec label, the raw sample MIME type, the URL extension, and the track
      * title / declared format string. Returns one of ASS, SSA, SRT, VTT, TTML, PGS, SUP,

@@ -459,11 +459,20 @@ class MpvPlayerSurfaceView @JvmOverloads constructor(
                 PlayerSubtitleUtils.matchesLanguageCode(language, preferred)
             }.let { if (it < 0) 100 else it }
         }
+        // Dialogue/full before Signs & Songs — lowest id ASS is often the signs track.
+        fun dialogueScore(track: MpvTrack): Int =
+            PlayerSubtitleUtils.assDialoguePreferenceScore(
+                name = track.name,
+                isForced = track.isForced,
+            )
         val ranked = tracks
-            .filter { isAss(it) && !it.isForced }
-            .sortedWith(compareBy(::languageScore).thenBy { it.id })
+            .filter(::isAss)
+            .sortedWith(
+                compareBy(::languageScore)
+                    .thenBy(::dialogueScore)
+                    .thenBy { it.id },
+            )
         return ranked.firstOrNull()?.id
-            ?: tracks.filter { isAss(it) }.minByOrNull(::languageScore)?.id
     }
 
     private fun hasSelectedPreferredSubtitleTrack(): Boolean {
@@ -474,6 +483,9 @@ class MpvPlayerSurfaceView @JvmOverloads constructor(
             val haystack = listOfNotNull(selected.codec, selected.name).joinToString(" ").lowercase(Locale.US)
             val isAss = "ass" in haystack || "ssa" in haystack
             if (!isAss) return false
+            // Keep retrying when MPV landed on Signs & Songs while a dialogue ASS exists.
+            val preferredDialogueId = pickPreferredAssSubtitleTrackId()
+            if (preferredDialogueId != null && selected.id != preferredDialogueId) return false
             val language = selected.language ?: selected.name
             if (language.isBlank()) return false
             return preferredSubtitleLanguages.any { preferred ->

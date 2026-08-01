@@ -143,6 +143,7 @@ import com.sluggyard.tv.ui.app.home.withHeroEnrichments
 import com.sluggyard.tv.ui.app.home.enrichContinueWatchingPosters
 import com.sluggyard.tv.ui.app.home.withContinueWatchingPosters
 import com.sluggyard.tv.ui.app.home.CatalogRequest
+import com.sluggyard.tv.ui.app.streams.hasEligibleSoftsubAutoPlay
 import com.sluggyard.tv.ui.app.streams.selectAutoPlayCandidate
 import com.sluggyard.tv.ui.app.streams.hasPendingCacheChecks
 import com.sluggyard.tv.ui.app.streams.matchesLastPlayed
@@ -1351,9 +1352,8 @@ private fun AppContent(
     }
     // Once at least one addon has settled (Content/Empty/Error), do not wait forever for hung
     // addons that often return empty — unblock auto-pick after a short grace.
-    // Anime is special: AIOStreams (AnimeTosho/SeaDex/Torz) is slower than Comet; do not fire
-    // the grace while AIO is still Loading or Play locks Comet before ASS softsubs arrive.
-    LaunchedEffect(streamsDiscoveryKey, streamGroups) {
+    // Anime: wait on AIOStreams only while no cached ASS/softsub winner exists yet.
+    LaunchedEffect(streamsDiscoveryKey, streamGroups, playerSettings.subtitleStyle.preferredLanguage) {
         val streams = destination as? RootDestination.Streams ?: return@LaunchedEffect
         if (streamDiscoveryComplete) return@LaunchedEffect
         val hasSettled = streamGroups.any {
@@ -1365,22 +1365,42 @@ private fun AppContent(
         if (!hasSettled || !stillLoading) return@LaunchedEffect
         delay(4_000)
         if (destination != streams || streamDiscoveryComplete) return@LaunchedEffect
-        val animeWaitOnAio = isAnimeAutoPlayWait(streams) &&
+        val softsubReady = hasEligibleAnimeSoftsub(
+            streams,
+            streamGroups,
+            playerSettings.subtitleStyle.preferredLanguage,
+        )
+        val animeWaitOnAio = !softsubReady &&
+            isAnimeAutoPlayWait(streams) &&
             streamGroups.any { it.isAioStreamsGroup() && it.state is com.sluggyard.tv.ui.app.streams.StreamGroupState.Loading }
         if (animeWaitOnAio) return@LaunchedEffect
         streamDiscoveryComplete = true
     }
-    // Hard ceiling: if an addon never leaves Loading, still unblock the building screen.
-    // Must share streamsDiscoveryKey so a rediscovery restart also re-arms the timer.
-    // 22s covers AIO's 20s stream budget plus a small settle margin.
+    // Hard ceiling: last-resort unblock if an addon never leaves Loading.
+    // Softsub-ready anime paths exit earlier; this is not the primary wait gate.
     var discoveryHardCeilingReached by remember(streamsDiscoveryKey) { mutableStateOf(false) }
     LaunchedEffect(streamsDiscoveryKey) {
         val streams = destination as? RootDestination.Streams ?: return@LaunchedEffect
         discoveryHardCeilingReached = false
-        delay(22_000)
+        delay(20_000)
         if (destination == streams) {
             streamDiscoveryComplete = true
             discoveryHardCeilingReached = true
+        }
+    }
+    // Anime fast-path: once any addon already has a cached ASS/softsub auto-play winner,
+    // stop idling on AIOStreams Loading (the old path waited ~20–30s every time).
+    LaunchedEffect(streamsDiscoveryKey, streamGroups, playerSettings.subtitleStyle.preferredLanguage) {
+        val streams = destination as? RootDestination.Streams ?: return@LaunchedEffect
+        if (streamDiscoveryComplete || !isAnimeAutoPlayWait(streams)) return@LaunchedEffect
+        if (
+            hasEligibleAnimeSoftsub(
+                streams,
+                streamGroups,
+                playerSettings.subtitleStyle.preferredLanguage,
+            )
+        ) {
+            streamDiscoveryComplete = true
         }
     }
     val displayStreamGroups = remember(streamGroups, cacheWaitExpired, streamBadgeSettings.rules) {
@@ -1489,9 +1509,14 @@ private fun AppContent(
         // Always wait for every enabled addon to leave Loading before choosing a winner. A cached
         // result from one provider must not hide a slower source that can return better streams.
         if (!streamDiscoveryComplete) return@LaunchedEffect
-        // Anime: prefer waiting on AIOStreams so Comet does not lock before ASS softsubs land —
-        // but never past the hard ceiling or Finding freezes ~20–30s with a dead spinner.
+        // Anime: wait on AIOStreams only until a cached ASS/softsub winner exists (or ceiling).
+        val softsubReady = hasEligibleAnimeSoftsub(
+            streams,
+            streamGroups,
+            playerSettings.subtitleStyle.preferredLanguage,
+        )
         if (!discoveryHardCeilingReached &&
+            !softsubReady &&
             isAnimeAutoPlayWait(streams) &&
             streamGroups.any {
                 it.isAioStreamsGroup() &&
@@ -2797,6 +2822,28 @@ private fun isAnimeAutoPlayWait(streams: RootDestination.Streams): Boolean {
             language = streams.contentLanguage,
         ),
     ) == StreamScoringEngine.ContentKind.ANIME
+}
+
+private fun hasEligibleAnimeSoftsub(
+    streams: RootDestination.Streams,
+    groups: List<com.sluggyard.tv.ui.app.streams.StreamGroup>,
+    preferredSubtitleLanguage: String?,
+): Boolean {
+    val genreList = streams.contentGenres
+        ?.split(',', '|', '/')
+        ?.map { it.trim() }
+        ?.filter { it.isNotEmpty() }
+        .orEmpty()
+    return hasEligibleSoftsubAutoPlay(
+        groups = groups,
+        context = StreamScoringEngine.Context(
+            title = streams.title,
+            contentType = streams.type,
+            genres = genreList,
+            language = streams.contentLanguage,
+            preferredSubtitleLanguage = preferredSubtitleLanguage,
+        ),
+    )
 }
 
 private fun StreamGroup.isAioStreamsGroup(): Boolean {

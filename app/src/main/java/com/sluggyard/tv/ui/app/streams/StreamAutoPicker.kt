@@ -138,6 +138,22 @@ internal fun hasPendingCacheChecks(groups: List<StreamGroup>): Boolean =
             ?.any { it.cacheState == StreamCacheState.CHECKING } == true
     }
 
+/**
+ * True when auto-play already has a cached/instant winner with real softsub signal (ASS/softsubs).
+ * Used to stop anime from idling on AIOStreams Loading when Comet/others already have playable ASS.
+ */
+internal fun hasEligibleSoftsubAutoPlay(
+    groups: List<StreamGroup>,
+    context: StreamScoringEngine.Context,
+    minSoftsubFit: Int = 3,
+): Boolean {
+    val candidates = groups
+        .flatMap { group -> (group.state as? StreamGroupState.Content)?.streams.orEmpty() }
+        .filter { it.isWellFormed() }
+    val winner = StreamScoringEngine.choose(candidates, context) ?: return false
+    return StreamScoringEngine.rank(winner, context).softsubFit >= minSoftsubFit
+}
+
 /** Guards against candidates with no actionable source at all (neither a direct URL nor a
  * torrent hash) — these should never be selectable by auto-pick, manual or not. */
 private fun StreamCandidate.isWellFormed(): Boolean =

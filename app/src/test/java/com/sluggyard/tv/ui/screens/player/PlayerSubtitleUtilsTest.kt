@@ -5,6 +5,20 @@ import org.junit.Test
 
 class PlayerSubtitleUtilsTest {
     @Test
+    fun assDialoguePreferenceScoreRanksDialogueAboveSigns() {
+        assertEquals(
+            true,
+            PlayerSubtitleUtils.assDialoguePreferenceScore("English Dialogue") <
+                PlayerSubtitleUtils.assDialoguePreferenceScore("English Signs and Songs"),
+        )
+        assertEquals(
+            true,
+            PlayerSubtitleUtils.assDialoguePreferenceScore("eng") <
+                PlayerSubtitleUtils.assDialoguePreferenceScore("Signs"),
+        )
+    }
+
+    @Test
     fun dialogueBeatsSignsAndSongsForSameLanguage() {
         val tracks = listOf(
             TrackInfo(

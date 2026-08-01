@@ -345,13 +345,21 @@ private fun PlayerRuntimeController.applyMpvTrackSnapshot(snapshot: MpvTrackSnap
         shouldPreferAssSubtitles() &&
         !subtitleDisabledByPersistedPreference
     ) {
-        val assId = effectiveSnapshot.subtitleTracks.firstOrNull { track ->
-            if (track.isExternal) return@firstOrNull false
+        val assCandidates = effectiveSnapshot.subtitleTracks.filter { track ->
+            if (track.isExternal) return@filter false
             val haystack = listOfNotNull(track.codec, track.name).joinToString(" ").lowercase()
             "ass" in haystack || "ssa" in haystack
-        }?.id
+        }
+        val assId = assCandidates
+            .sortedWith(
+                compareBy<MpvTrack> {
+                    PlayerSubtitleUtils.assDialoguePreferenceScore(name = it.name, isForced = it.isForced)
+                }.thenBy { it.id },
+            )
+            .firstOrNull()
+            ?.id
         if (assId != null) {
-            Log.d(PlayerRuntimeController.TAG, "MPV_TRACKS: forcing preferAss sid=$assId for UI sync")
+            Log.d(PlayerRuntimeController.TAG, "MPV_TRACKS: forcing preferAss dialogue sid=$assId for UI sync")
             mpvView?.selectSubtitleTrackById(assId)
             effectiveSnapshot = mpvView?.readTrackSnapshot() ?: effectiveSnapshot
         }
@@ -385,6 +393,7 @@ private fun PlayerRuntimeController.applyMpvTrackSnapshot(snapshot: MpvTrackSnap
                 codec = CustomDefaultTrackNameProvider.formatNameFromMime(track.codec)
                     ?: track.codec,
                 isForced = track.isForced,
+                isSignsAndSongs = PlayerSubtitleUtils.isSignsAndSongsTrack(listOf(track.name)),
                 isSelected = track.isSelected
             )
         }
