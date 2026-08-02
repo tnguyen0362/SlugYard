@@ -47,6 +47,16 @@ class PlaybackProgressStoreTest {
         assertEquals(emptyList<PlaybackCheckpoint>(), store.checkpoints.first())
     }
 
+    @Test
+    fun `sub threshold exit does not wipe existing resume checkpoint`() = runBlocking {
+        val store = PlaybackProgressStore(createDataStore(), FakeProfiles())
+        val resumed = checkpoint(season = 1, episode = 1, updatedAt = 1L) // 100/1000 = 10%
+        store.save(resumed)
+        store.save(resumed.copy(positionMs = 5_000L, durationMs = 3_600_000L, updatedAtEpochMs = 2L))
+
+        assertEquals(listOf(resumed), store.checkpoints.first())
+    }
+
     private fun checkpoint(season: Int, episode: Int, updatedAt: Long) = PlaybackCheckpoint(
         contentId = "show-1",
         contentType = "series",

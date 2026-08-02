@@ -48,9 +48,12 @@ import com.sluggyard.tv.ui.screens.player.PlayerScreen
 import com.sluggyard.tv.ui.screens.player.PlayerControlActions
 import com.sluggyard.tv.ui.screens.player.PlayerSystemActions
 import com.sluggyard.tv.ui.screens.player.PlayerViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
 // First periodic checkpoint lands at ~10s so a short sample still reaches Continue Watching,
@@ -222,14 +225,14 @@ fun RetainedPlayerHost(
                     id = requestId,
                     configuredDebrid = configuredDebrid(),
                 )
-                groups.collect { next ->
-                    val withoutPlayFlix = next.filterNot {
-                        com.sluggyard.tv.core.addonprotocol.SlugYardCommunitySourcePolicy
-                            .isPlayFlixStreamAddon(it.addonId, it.addonName)
+                groups.collectLatest { next ->
+                    // Badge regex packs must not run on main — that ANR'd Sources on Onn (~179% CPU).
+                    val applied = withContext(Dispatchers.Default) {
+                        StreamBadgeApplicator.apply(next, latestStreamBadgeRules)
                     }
                     secondaryState = secondaryState.copy(
-                        sourceGroups = StreamBadgeApplicator.apply(withoutPlayFlix, latestStreamBadgeRules),
-                        sourceLoading = withoutPlayFlix.isEmpty() || withoutPlayFlix.all { it.state is StreamGroupState.Loading },
+                        sourceGroups = applied,
+                        sourceLoading = applied.isEmpty() || applied.all { it.state is StreamGroupState.Loading },
                         digitalReleaseStatus = digitalReleaseStatus ?: secondaryState.digitalReleaseStatus,
                     )
                 }

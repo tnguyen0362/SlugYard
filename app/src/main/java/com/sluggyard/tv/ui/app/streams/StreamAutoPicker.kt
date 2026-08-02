@@ -140,6 +140,9 @@ internal fun hasPendingCacheChecks(groups: List<StreamGroup>): Boolean =
             ?.any { it.cacheState == StreamCacheState.CHECKING } == true
     }
 
+private val RAW_HINT = Regex("""\braw\b""")
+private val SOFTSUB_HINT = Regex("""\b(?:soft\s*subs?|multi\s*subs?|ass|ssa|srt|subbed|subs)\b""")
+
 /**
  * Cheap softsub readiness for Finding gates — keyword scan only.
  * Full [StreamScoringEngine.rank] belongs in the single-flight pick, not every scrape tick.
@@ -150,9 +153,8 @@ internal fun hasLikelySoftsubCachedHint(groups: List<StreamGroup>): Boolean =
         .filter { it.isWellFormed() && it.isAutoPlayEligibleForLog() }
         .any { candidate ->
             val text = candidate.releaseTextForLog().lowercase()
-            if (Regex("""\braw\b""").containsMatchIn(text)) return@any false
-            Regex("""\b(?:soft\s*subs?|multi\s*subs?|ass|ssa|srt|subbed|subs)\b""")
-                .containsMatchIn(text)
+            if (RAW_HINT.containsMatchIn(text)) return@any false
+            SOFTSUB_HINT.containsMatchIn(text)
         }
 
 /**
