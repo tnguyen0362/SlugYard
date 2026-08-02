@@ -113,10 +113,12 @@ class PlaybackProgressStore(
                 .associateBy { progressKey(it.contentId, it.season, it.episode) }
                 .toMutableMap()
             val checkpointKey = progressKey(checkpoint.contentId, checkpoint.season, checkpoint.episode)
-            if (!checkpoint.isResumable) {
-                existing.remove(checkpointKey)
-            } else {
-                existing[checkpointKey] = checkpoint
+            when {
+                checkpoint.isResumable -> existing[checkpointKey] = checkpoint
+                // Completing (≥90%) clears CW. Sub-threshold exits must NOT wipe a longer resume —
+                // backing out at 5s used to delete a 40% checkpoint (user-reported CW disappear).
+                WatchStatePolicy.isCompleted(checkpoint.progressFraction) -> existing.remove(checkpointKey)
+                else -> Unit
             }
             val retained = existing.values
                 .asSequence()
@@ -127,14 +129,16 @@ class PlaybackProgressStore(
             preferences[key] = PlaybackProgressCodec.encode(retained)
         }
         val numericProfileId = cloudLinkedProfileIdOrNull(profileId) ?: return
-        if (!checkpoint.isResumable) {
-            syncBridge?.remove(
-                profileId = numericProfileId,
-                progressKey = progressKey(checkpoint.contentId, checkpoint.season, checkpoint.episode),
-                changedAtEpochMs = checkpoint.updatedAtEpochMs,
-            )
-        } else {
-            syncBridge?.record(checkpoint.toCloudProgress(numericProfileId))
+        when {
+            checkpoint.isResumable ->
+                syncBridge?.record(checkpoint.toCloudProgress(numericProfileId))
+            WatchStatePolicy.isCompleted(checkpoint.progressFraction) ->
+                syncBridge?.remove(
+                    profileId = numericProfileId,
+                    progressKey = progressKey(checkpoint.contentId, checkpoint.season, checkpoint.episode),
+                    changedAtEpochMs = checkpoint.updatedAtEpochMs,
+                )
+            else -> Unit
         }
     }
 

@@ -62,6 +62,9 @@ import com.sluggyard.tv.ui.app.streams.StreamGroup
 import com.sluggyard.tv.ui.app.streams.StreamGroupState
 import com.sluggyard.tv.ui.app.streams.StreamPresentation
 
+/** Hard cap before regex-heavy Sources ranking — unlimited dumps ANR'd the Onn. */
+private const val MaxPlayerSourcesRanked = 60
+
 enum class PlayerSecondaryPanel {
     HIDDEN,
     SOURCES,
@@ -211,53 +214,77 @@ private fun ColumnScope.SourceContent(
     if (addonNames.size > 1) {
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             item {
-                FilterChip(
+                SourceAddonChip(
+                    label = "All",
                     selected = state.selectedSourceAddon == null,
                     onClick = { actions.onSelectSourceAddon(null) },
-                    label = { Text("All") },
                 )
             }
             items(addonNames, key = { it }) { name ->
-                FilterChip(
+                SourceAddonChip(
+                    label = name,
                     selected = state.selectedSourceAddon == name,
                     onClick = { actions.onSelectSourceAddon(name) },
-                    label = { Text(name) },
                 )
             }
         }
     }
 
-    // Keep the last ranked list visible while re-ranking. produceState(emptyList, keys…)
-    // resets to [] on every sourceGroups emission (titles/cache), which unmounted the
-    // LazyColumn and killed D-pad Up/Down until focus was forcibly re-seeded.
+    // Keep the last ranked list visible while re-ranking. Identity ignores cache-state churn
+    // (probe spam) so we don't re-sort hundreds of rows on every TorBox tick.
     var candidates by remember(state.panel) { mutableStateOf<List<StreamCandidate>>(emptyList()) }
-    LaunchedEffect(
+    // Drop the previous All/addon list immediately on chip change so stale rows aren't clickable.
+    LaunchedEffect(state.selectedSourceAddon) {
+        candidates = emptyList()
+    }
+    val rankingIdentity = remember(
         state.sourceGroups,
         state.selectedSourceAddon,
         state.failedSourceIds,
+    ) {
+        state.sourceGroups.joinToString("|") { group ->
+            val content = group.state as? StreamGroupState.Content
+            val count = content?.streams?.size ?: -1
+            val head = content?.streams?.firstOrNull()?.id.orEmpty()
+            val tail = content?.streams?.lastOrNull()?.id.orEmpty()
+            "${group.addonId}:${group.state::class.simpleName}:$count:$head:$tail"
+        } + "#${state.selectedSourceAddon}#${state.failedSourceIds.size}"
+    }
+    LaunchedEffect(
+        rankingIdentity,
         state.title,
         state.contentType,
         state.preferredSubtitleLanguage,
         state.digitalReleaseStatus,
     ) {
         val next = withContext(Dispatchers.Default) {
-            state.sourceGroups
+            val values = state.sourceGroups
                 .filter { state.selectedSourceAddon == null || it.addonName == state.selectedSourceAddon }
                 .flatMap { group ->
                     (group.state as? StreamGroupState.Content)?.streams.orEmpty()
                 }
                 .filterNot { it.id in state.failedSourceIds }
-                .let { values ->
-                    com.sluggyard.tv.ui.app.streams.StreamScoringEngine.rankedCandidates(
-                        values,
-                        com.sluggyard.tv.ui.app.streams.StreamScoringEngine.Context(
-                            title = state.title,
-                            contentType = state.contentType,
-                            preferredSubtitleLanguage = state.preferredSubtitleLanguage,
-                            digitalReleaseStatus = state.digitalReleaseStatus,
-                        ),
+            // Cap before full regex ranking — unlimited dumps froze Sources (ANR on main/Default).
+            val pool = if (values.size <= MaxPlayerSourcesRanked) {
+                values
+            } else {
+                values
+                    .sortedWith(
+                        compareByDescending<StreamCandidate> {
+                            it.cacheState == com.sluggyard.tv.core.streamresolution.StreamCacheState.CACHED
+                        }.thenByDescending { it.seeders ?: 0 },
                     )
-                }
+                    .take(MaxPlayerSourcesRanked)
+            }
+            com.sluggyard.tv.ui.app.streams.StreamScoringEngine.rankedCandidates(
+                pool,
+                com.sluggyard.tv.ui.app.streams.StreamScoringEngine.Context(
+                    title = state.title,
+                    contentType = state.contentType,
+                    preferredSubtitleLanguage = state.preferredSubtitleLanguage,
+                    digitalReleaseStatus = state.digitalReleaseStatus,
+                ),
+            )
         }
         candidates = next
     }
@@ -292,7 +319,9 @@ private fun ColumnScope.SourceContent(
         }
     } else {
         val message = when {
-            state.sourceLoading -> "Finding sources..."
+            state.sourceLoading ||
+                state.sourceGroups.any { it.state is StreamGroupState.Loading } ->
+                "Finding sources..."
             state.sourceError != null -> state.sourceError
             state.sourceGroups.any { it.state is StreamGroupState.Error } ->
                 state.sourceGroups.firstNotNullOfOrNull { (it.state as? StreamGroupState.Error)?.message }
@@ -433,3 +462,44 @@ private fun StreamCandidateButton(
         }
     }
 }
+
+@Composable
+private fun SourceAddonChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    var focused by remember(label) { mutableStateOf(false) }
+    val shape = RoundedCornerShape(SlugYardTvMetrics.ButtonCornerRadius)
+    val bg = if (selected) SoftYardAccentFill else SlugYardPalette.SurfaceElevated
+    val fg = when {
+        selected -> Color.Black
+        focused -> SlugYardPalette.OnCanvas
+        else -> SoftYardChipLabel
+    }
+    val border = when {
+        focused -> SlugYardPalette.FocusRing
+        selected -> SlugYardPalette.Accent
+        else -> SoftYardChipBorder
+    }
+    Box(
+        modifier = Modifier
+            .onFocusChanged { focused = it.isFocused }
+            .border(if (focused) SlugYardTvMetrics.FocusRingWidth else 2.dp, border, shape)
+            .background(bg, shape)
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+    ) {
+        Text(
+            text = label,
+            color = fg,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = if (selected || focused) FontWeight.Bold else FontWeight.SemiBold,
+            maxLines = 1,
+        )
+    }
+}
+
+private val SoftYardAccentFill = Color(0xFFF2C94C)
+private val SoftYardChipLabel = Color(0xFFF5F5F1)
+private val SoftYardChipBorder = Color(0xFF6B6B6B)

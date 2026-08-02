@@ -55,13 +55,17 @@ class StreamsDataSource(
         id: String,
         configuredDebrid: DebridService?,
         maxConcurrent: Int = DEFAULT_ADDON_CONCURRENCY,
+        /**
+         * Finding/auto-pick for movies skips AIO (slow anime scrapers). Player / manual
+         * Sources should keep AIO so users can still browse those listings.
+         */
+        includeAioStreams: Boolean = true,
     ): Flow<List<StreamGroup>> = channelFlow {
         val addons = registrySnapshot().enabledAddons.filter { addon ->
             AddonResource.STREAM in addon.manifest.resources &&
                 // WatchHub is availability metadata for Details, not a playable torrent source.
                 !addon.isWatchHubSource() &&
-                // AIOStreams is anime-oriented and its 20s scrape blocks movie Finding on leanback.
-                !(addon.isAioStreamsSource() && type.equals("movie", ignoreCase = true))
+                (includeAioStreams || !addon.isAioStreamsSource())
         }
         if (BuildConfig.DEBUG) {
             Log.i(
@@ -300,20 +304,26 @@ private fun AddonTransportResult<*>.userMessage(): String = when (this) {
 }
 
 private fun String.cleanStreamPresentation(): String =
-    replace(Regex("[\\r\\n\\t]+"), " ")
-        .replace(Regex("[\\uD800-\\uDBFF][\\uDC00-\\uDFFF]"), "")
-        .replace(Regex("\\s+"), " ")
+    replace(CLEAN_CTRL, " ")
+        .replace(CLEAN_SURROGATE, "")
+        .replace(CLEAN_SPACE, " ")
         .trim()
         .take(120)
         .ifBlank { "Available stream" }
+
+private val CLEAN_CTRL = Regex("[\\r\\n\\t]+")
+private val CLEAN_SURROGATE = Regex("[\\uD800-\\uDBFF][\\uDC00-\\uDFFF]")
+private val CLEAN_SPACE = Regex("\\s+")
+private val TB_BADGE_HINT = Regex("""\[\s*tb""")
+private val INSTANT_CACHED_HINT = Regex("""\b(?:instant|cached)\b""")
 
 /** True when Meteor/Torrentio/Comet already labeled the row Instant/⚡/Cached. */
 internal fun looksAddonMarkedInstant(text: String): Boolean {
     val value = text.lowercase()
     if (value.isBlank()) return false
-    if ('⚡' in text || "⚡" in value) return true
-    if (Regex("""\[\s*tb""").containsMatchIn(value)) return true
-    return Regex("""\b(?:instant|cached)\b""").containsMatchIn(value)
+    if ('⚡' in text) return true
+    if (TB_BADGE_HINT.containsMatchIn(value)) return true
+    return INSTANT_CACHED_HINT.containsMatchIn(value)
 }
 
 private fun ManagedAddon.isWatchHubSource(): Boolean {

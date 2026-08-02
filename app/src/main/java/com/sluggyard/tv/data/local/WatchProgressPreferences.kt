@@ -471,13 +471,20 @@ class WatchProgressPreferences @Inject constructor(
             // entry when the incoming save has null values — prevents a mid-playback
             // position update from wiping artwork that was saved on first play.
             map[key] = if (existing != null) {
-                progress.copy(
+                val merged = progress.copy(
                     name = progress.name.takeIf { it.isNotBlank() } ?: existing.name,
                     poster = progress.poster ?: existing.poster,
                     backdrop = progress.backdrop ?: existing.backdrop,
                     logo = progress.logo ?: existing.logo,
                     episodeTitle = progress.episodeTitle ?: existing.episodeTitle,
                 )
+                // Early back-out (sub 2%/10s) must not overwrite a longer in-progress resume.
+                when {
+                    merged.isCompleted() -> merged
+                    !merged.isInProgress() && existing.isInProgress() -> existing
+                    !merged.isInProgress() && existing.position > merged.position -> existing
+                    else -> merged
+                }
             } else {
                 progress
             }

@@ -1364,6 +1364,8 @@ private fun AppContent(
                     streams.type,
                     streams.id,
                     configuredDebrid = debridConnection.activeService,
+                    // Movies: skip AIO on Finding only — player Sources still include it.
+                    includeAioStreams = !streams.type.equals("movie", ignoreCase = true),
                 ).collect { groups ->
                     streamGroups = groups
                     // Mark discovery done as soon as every addon left Loading — do not wait for TorBox
@@ -1492,10 +1494,10 @@ private fun AppContent(
         val streams = destination as? RootDestination.Streams
         if (streams?.autoPick == true) return@remember emptyList()
         val remapped = if (!cacheWaitExpired) streamGroups else remapCheckingCacheStates(streamGroups)
-        StreamBadgeApplicator.apply(remapped, streamBadgeSettings.rules)
-            .filterNot {
-                SlugYardCommunitySourcePolicy.isPlayFlixStreamAddon(it.addonId, it.addonName)
-            }
+        // Skip Fusion badge regex on huge dumps in composition — player Sources applies badges
+        // off-main; doing it here on every probe was part of the Sources ANR.
+        val total = remapped.sumOf { (it.state as? com.sluggyard.tv.ui.app.streams.StreamGroupState.Content)?.streams?.size ?: 0 }
+        if (total > 80) remapped else StreamBadgeApplicator.apply(remapped, streamBadgeSettings.rules)
     }
 
     fun resolveStreamCandidate(candidate: StreamCandidate, streams: RootDestination.Streams) {
