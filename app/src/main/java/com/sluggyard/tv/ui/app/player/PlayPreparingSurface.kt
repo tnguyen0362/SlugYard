@@ -19,6 +19,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -51,6 +52,8 @@ fun PlayPreparingSurface(
     title: String,
     statusMessage: String,
     modifier: Modifier = Modifier,
+    /** Stable content id so Coil never shares prepare bitmaps with Home/Details tiles. */
+    contentId: String? = null,
     showProgressSpinner: Boolean = true,
     loadingProgress: Float? = null,
     availability: List<String> = emptyList(),
@@ -62,21 +65,29 @@ fun PlayPreparingSurface(
 ) {
     val context = LocalContext.current
     Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
-        if (!artUrl.isNullOrBlank()) {
-            val enlargedUrl = preferTvBackdropUrl(artUrl).orEmpty()
-            // Isolate prepare-art cache entries from Home card keys so a blocked Play
-            // (full-bleed Spider-Man, etc.) cannot paint into recycled poster tiles.
-            AsyncImage(
-                model = ImageRequest.Builder(context)
-                    .data(enlargedUrl)
-                    .size(Size(1280, 720))
-                    .memoryCacheKey("play-prepare:$enlargedUrl")
-                    .diskCacheKey("play-prepare:$enlargedUrl")
-                    .build(),
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
-            )
+        val landscapeArt = artUrl?.takeIf { it.isNotBlank() }?.let { preferTvBackdropUrl(it) }
+        if (!landscapeArt.isNullOrBlank()) {
+            // Root cause of prepare→Home poster bleed: Coil reused full-bleed prepare decodes
+            // under URL-only keys that catalog tiles also hit (Precision.EXACT still shares by
+            // memoryCacheKey). Namespace by role + content id, and remount when art changes so
+            // Lazy/Nav reuse cannot keep the previous painter.
+            val cacheKey = "play-prepare:${contentId.orEmpty()}:$landscapeArt"
+            key(cacheKey) {
+                val request = remember(cacheKey) {
+                    ImageRequest.Builder(context)
+                        .data(landscapeArt)
+                        .size(Size(1280, 720))
+                        .memoryCacheKey(cacheKey)
+                        .diskCacheKey(cacheKey)
+                        .build()
+                }
+                AsyncImage(
+                    model = request,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
         }
         Box(
             modifier = Modifier
@@ -194,6 +205,12 @@ fun PlayPreparingSurface(
     }
 }
 
-/** Prefer landscape backdrop for full-bleed prepare chrome; fall back to poster. */
-fun playPreparingArtUrl(backdropUrl: String?, posterUrl: String?): String? =
-    backdropUrl?.takeIf { it.isNotBlank() } ?: posterUrl?.takeIf { it.isNotBlank() }
+/**
+ * Prepare / Finding art. Prefer landscape backdrop; fall back to poster so the chrome is
+ * never blank when meta only shipped a poster. Cross-title bleed is prevented by namespaced
+ * Coil keys + contentId remount in [PlayPreparingSurface] — not by blanking the art.
+ */
+fun playPreparingArtUrl(backdropUrl: String?, posterUrl: String?): String? {
+    backdropUrl?.takeIf { it.isNotBlank() }?.let { return it }
+    return posterUrl?.takeIf { it.isNotBlank() }
+}

@@ -26,6 +26,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.channelFlow
@@ -35,6 +37,12 @@ import kotlinx.coroutines.sync.withLock
 import java.net.URI
 
 private const val REWRITE_STREAM_SOURCE_TAG = "StreamSources"
+
+/** First TorBox checkcached batch per addon — enough for auto-pick, not the whole dump. */
+private const val MaxProactiveCacheHashesPerAddon = 40
+
+/** Coalesce TorBox probe → Compose updates; unthrottled emits were janking the Onn mid-scrape. */
+private const val CacheEmitMinIntervalMs = 350L
 
 /** A progressive, per-addon stream result list for the rewritten Streams surface. */
 class StreamsDataSource(
@@ -51,7 +59,9 @@ class StreamsDataSource(
         val addons = registrySnapshot().enabledAddons.filter { addon ->
             AddonResource.STREAM in addon.manifest.resources &&
                 // WatchHub is availability metadata for Details, not a playable torrent source.
-                !addon.isWatchHubSource()
+                !addon.isWatchHubSource() &&
+                // AIOStreams is anime-oriented and its 20s scrape blocks movie Finding on leanback.
+                !(addon.isAioStreamsSource() && type.equals("movie", ignoreCase = true))
         }
         if (BuildConfig.DEBUG) {
             Log.i(
@@ -70,6 +80,31 @@ class StreamsDataSource(
         val cacheStates = mutableMapOf<String, StreamCacheState>()
         val cacheChecksInFlight = mutableSetOf<String>()
         val cacheSemaphore = Semaphore(permits = 2)
+        var lastCacheEmitElapsedMs = 0L
+        var cacheEmitCoalesceJob: Job? = null
+        suspend fun snapshotAndSend() {
+            val snapshot = groupsMutex.withLock { groups.toList() }
+            send(snapshot)
+        }
+        fun scheduleThrottledCacheEmit() {
+            val now = android.os.SystemClock.elapsedRealtime()
+            if (now - lastCacheEmitElapsedMs >= CacheEmitMinIntervalMs) {
+                lastCacheEmitElapsedMs = now
+                cacheEmitCoalesceJob?.cancel()
+                cacheEmitCoalesceJob = null
+                launch { snapshotAndSend() }
+                return
+            }
+            if (cacheEmitCoalesceJob?.isActive == true) return
+            cacheEmitCoalesceJob = launch {
+                val wait = (CacheEmitMinIntervalMs - (android.os.SystemClock.elapsedRealtime() - lastCacheEmitElapsedMs))
+                    .coerceIn(1L, CacheEmitMinIntervalMs)
+                delay(wait)
+                lastCacheEmitElapsedMs = android.os.SystemClock.elapsedRealtime()
+                cacheEmitCoalesceJob = null
+                snapshotAndSend()
+            }
+        }
         val byTask = LinkedHashMap<String, ManagedAddon>()
         val tasks = addons.map { addon ->
             val taskKey = addon.manifest.id
@@ -125,6 +160,26 @@ class StreamsDataSource(
                 is AddonFanoutResult.Success -> {
                     val streams = result.value.map { stream ->
                         val normalized = normalizeAddonStreamSource(stream.directUrl, stream.infoHash)
+                        val presentationBits = listOfNotNull(
+                            stream.title,
+                            stream.sourceName,
+                            stream.description,
+                            stream.filename,
+                        )
+                        val initialCache = StreamCachePolicy.initialState(
+                            isTorrent = normalized.isTorrentOrDebridProxy,
+                            configuredService = configuredDebrid,
+                        )
+                        // Meteor/Torrentio often stamp Instant/⚡ before TorBox checkcached returns.
+                        // Trust that hint so movie auto-pick can early-exit without waiting on probes.
+                        val cacheState = if (
+                            initialCache == StreamCacheState.CHECKING &&
+                            presentationBits.any(::looksAddonMarkedInstant)
+                        ) {
+                            StreamCacheState.CACHED
+                        } else {
+                            initialCache
+                        }
                         StreamCandidate(
                             id = stream.id,
                             title = stream.title.cleanStreamPresentation(),
@@ -134,19 +189,11 @@ class StreamsDataSource(
                             detailLabel = stream.sourceName
                                 ?.cleanStreamPresentation()
                                 ?.takeIf { it != stream.title.cleanStreamPresentation() },
-                            cacheState = StreamCachePolicy.initialState(
-                                isTorrent = normalized.isTorrentOrDebridProxy,
-                                configuredService = configuredDebrid,
-                            ),
+                            cacheState = cacheState,
                             directUrl = normalized.playableDirectUrl,
                             infoHash = normalized.infoHash,
                             fileIndex = stream.fileIndex,
-                            metadataText = listOfNotNull(
-                                stream.title,
-                                stream.sourceName,
-                                stream.description,
-                                stream.filename,
-                            ).joinToString(" "),
+                            metadataText = presentationBits.joinToString(" "),
                             videoSizeBytes = stream.videoSizeBytes
                                 ?: StreamTextSizeParser.sizeBytesFromText(stream.description)
                                 ?: StreamTextSizeParser.sizeBytesFromText(stream.title)
@@ -170,16 +217,22 @@ class StreamsDataSource(
             }
             groupsMutex.withLock {
                 groups[index] = groups[index].copy(state = state)
-                send(groups.toList())
             }
+            // Addon settle is always immediate — only cache probes are coalesced.
+            snapshotAndSend()
             val checker = selectProactiveCacheChecker(configuredDebrid, proactiveCacheCheckers)
             val content = state as? StreamGroupState.Content ?: return@collect
             val hashes = content.streams.mapNotNull { it.infoHash?.trim()?.lowercase()?.takeIf(String::isNotBlank) }.toSet()
             if (checker != null && hashes.isNotEmpty()) {
                 // Cache probes are independent of addon fetches. Keep source discovery
                 // progressive instead of blocking the collector on one provider timeout.
+                // Cap the first probe batch — TorBox checkcached on 200+ hashes was delaying
+                // the first CACHED flags that unlock movie auto-pick (Mario ~2min Finding).
                 val hashesToCheck = groupsMutex.withLock {
-                    hashes.filter { it !in cacheStates && cacheChecksInFlight.add(it) }.toSet()
+                    hashes
+                        .filter { it !in cacheStates && cacheChecksInFlight.add(it) }
+                        .take(MaxProactiveCacheHashesPerAddon)
+                        .toSet()
                 }
                 if (hashesToCheck.isEmpty()) return@collect
                 cacheJobs += launch {
@@ -195,17 +248,28 @@ class StreamsDataSource(
                     groupsMutex.withLock {
                         cacheStates.putAll(states)
                         cacheChecksInFlight.removeAll(hashesToCheck)
+                        var changed = false
                         groups.indices.forEach { groupIndex ->
-                            val current = groups[groupIndex].state as? StreamGroupState.Content ?: return@forEach
-                            groups[groupIndex] = groups[groupIndex].copy(
-                                state = StreamGroupState.Content(current.streams.map { candidate ->
-                                    candidate.infoHash?.trim()?.lowercase()?.let { hash ->
-                                        candidate.copy(cacheState = cacheStates[hash] ?: candidate.cacheState)
-                                    } ?: candidate
-                                }),
-                            )
+                            val current = groups[groupIndex].state as? StreamGroupState.Content
+                                ?: return@forEach
+                            var groupChanged = false
+                            val updated = current.streams.map { candidate ->
+                                val hash = candidate.infoHash?.trim()?.lowercase() ?: return@map candidate
+                                val next = cacheStates[hash] ?: return@map candidate
+                                if (next == candidate.cacheState) candidate
+                                else {
+                                    groupChanged = true
+                                    candidate.copy(cacheState = next)
+                                }
+                            }
+                            if (groupChanged) {
+                                changed = true
+                                groups[groupIndex] = groups[groupIndex].copy(
+                                    state = StreamGroupState.Content(updated),
+                                )
+                            }
                         }
-                        send(groups.toList())
+                        if (changed) scheduleThrottledCacheEmit()
                     }
                 }
             }
@@ -242,6 +306,15 @@ private fun String.cleanStreamPresentation(): String =
         .trim()
         .take(120)
         .ifBlank { "Available stream" }
+
+/** True when Meteor/Torrentio/Comet already labeled the row Instant/⚡/Cached. */
+internal fun looksAddonMarkedInstant(text: String): Boolean {
+    val value = text.lowercase()
+    if (value.isBlank()) return false
+    if ('⚡' in text || "⚡" in value) return true
+    if (Regex("""\[\s*tb""").containsMatchIn(value)) return true
+    return Regex("""\b(?:instant|cached)\b""").containsMatchIn(value)
+}
 
 private fun ManagedAddon.isWatchHubSource(): Boolean {
     val haystack = listOf(manifest.id, manifest.name, manifestUrl, configuredManifestUrl.orEmpty())

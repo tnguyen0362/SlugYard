@@ -6,6 +6,9 @@ import com.sluggyard.tv.data.local.CachedStreamLink
 
 private const val AUTO_PICK_TAG = "SlugYardAutoPick"
 
+/** Leanback boxes choke ranking 200+ streams; auto-play only needs a small cached pool. */
+private const val MaxAutoPickScoreCandidates = 40
+
 /**
  * Rewrite-owned auto-pick boundary. Candidate validation/deduplication stays here; quality,
  * reliability, and content-aware ranking live in [StreamScoringEngine].
@@ -40,8 +43,21 @@ internal fun selectAutoPlayCandidate(
         )
     }
 
-    val ranked = StreamScoringEngine.rankedCandidates(candidates, context)
-    val winner = StreamScoringEngine.choose(candidates, context)
+    // Instant/cached only — scoring NOT_CACHED torrents was burning ~20s on Onn for JJK/Mario.
+    val cachedPool = candidates.filter { it.isAutoPlayEligibleForLog() }
+    val scorePool = if (cachedPool.size <= MaxAutoPickScoreCandidates) {
+        cachedPool
+    } else {
+        // Prefer seeded / higher-res rows before the hard cap so we don't score random first-N.
+        cachedPool
+            .sortedWith(
+                compareByDescending<StreamCandidate> { it.seeders ?: 0 }
+                    .thenByDescending { autoPickQualityHint(it.title) },
+            )
+            .take(MaxAutoPickScoreCandidates)
+    }
+
+    val winner = StreamScoringEngine.choose(scorePool, context)
 
     val groupSummary = groups.joinToString(" | ") { group ->
         val content = (group.state as? StreamGroupState.Content)?.streams.orEmpty()
@@ -49,30 +65,16 @@ internal fun selectAutoPlayCandidate(
         val total = content.size
         "${group.addonName}:$total/${cached}c"
     }
+    val winnerRank = winner?.let { StreamScoringEngine.rank(it, context) }
     Log.i(
         AUTO_PICK_TAG,
         "pick title='${context.title}' type=${context.contentType} " +
             "kind=${StreamScoringEngine.contentKind(context)} " +
             "genres=${context.genres} lang=${context.language} " +
             "preferredSub=${context.preferredSubtitleLanguage} " +
-            "candidates=${candidates.size} eligibleRanked=${ranked.count { it.isAutoPlayEligibleForLog() }} " +
+            "candidates=${candidates.size} cachedPool=${cachedPool.size} scored=${scorePool.size} " +
             "groups=[$groupSummary]",
     )
-    // Cap log spam — dumping dozens of lines per discovery tick froze leanback boxes.
-    ranked.take(6).forEachIndexed { index, candidate ->
-        val rank = StreamScoringEngine.rank(candidate, context)
-        val label = candidate.title.replace('\n', ' ').take(120)
-        val releaseSnippet = candidate.releaseTextForLog().replace('\n', ' ').take(80)
-        Log.i(
-            AUTO_PICK_TAG,
-            "#$index src=${candidate.sourceLabel} cache=${candidate.cacheState} " +
-                "soft=${rank.softsubFit} dual=${rank.dualFit} seeds=${rank.seeders} " +
-                "dec=${rank.decodeFit} q=${rank.quality} sizeFit=${rank.sizeFit} " +
-                "bytes=${candidate.videoSizeBytes ?: -1} " +
-                "title='$label' release='$releaseSnippet'",
-        )
-    }
-    val winnerRank = winner?.let { StreamScoringEngine.rank(it, context) }
     Log.i(
         AUTO_PICK_TAG,
         "winner src=${winner?.sourceLabel} cache=${winner?.cacheState} " +
@@ -139,19 +141,73 @@ internal fun hasPendingCacheChecks(groups: List<StreamGroup>): Boolean =
     }
 
 /**
- * True when auto-play already has a cached/instant winner with real softsub signal (ASS/softsubs).
- * Used to stop anime from idling on AIOStreams Loading when Comet/others already have playable ASS.
+ * Cheap softsub readiness for Finding gates — keyword scan only.
+ * Full [StreamScoringEngine.rank] belongs in the single-flight pick, not every scrape tick.
+ */
+internal fun hasLikelySoftsubCachedHint(groups: List<StreamGroup>): Boolean =
+    groups.asSequence()
+        .flatMap { group -> (group.state as? StreamGroupState.Content)?.streams.orEmpty().asSequence() }
+        .filter { it.isWellFormed() && it.isAutoPlayEligibleForLog() }
+        .any { candidate ->
+            val text = candidate.releaseTextForLog().lowercase()
+            if (Regex("""\braw\b""").containsMatchIn(text)) return@any false
+            Regex("""\b(?:soft\s*subs?|multi\s*subs?|ass|ssa|srt|subbed|subs)\b""")
+                .containsMatchIn(text)
+        }
+
+/**
+ * True when auto-play already has a cached/instant winner with a real softsub signal.
+ *
+ * Default floor is softsubFit >= 2 (any softsub/multi-sub/SRT signal). Preferred-lang
+ * match scores 3–4, but with preferred=en many cached WEB-DL softsubs only score 2
+ * (no explicit "Eng" tag) — requiring 3 left anime idling on AIOStreams for the full
+ * hard ceiling every Play.
+ *
+ * Scans a capped cached pool only — formerly called [StreamScoringEngine.choose] on the
+ * full addon dump every Compose tick, which froze Finding on Onn (200–300 candidates).
  */
 internal fun hasEligibleSoftsubAutoPlay(
     groups: List<StreamGroup>,
     context: StreamScoringEngine.Context,
-    minSoftsubFit: Int = 3,
+    minSoftsubFit: Int = 2,
 ): Boolean {
-    val candidates = groups
-        .flatMap { group -> (group.state as? StreamGroupState.Content)?.streams.orEmpty() }
-        .filter { it.isWellFormed() }
-    val winner = StreamScoringEngine.choose(candidates, context) ?: return false
-    return StreamScoringEngine.rank(winner, context).softsubFit >= minSoftsubFit
+    // Fast path for readiness callers; full rank only when the cheap hint matches.
+    if (!hasLikelySoftsubCachedHint(groups)) return false
+    val cached = groups
+        .asSequence()
+        .flatMap { group -> (group.state as? StreamGroupState.Content)?.streams.orEmpty().asSequence() }
+        .filter { it.isWellFormed() && it.isAutoPlayEligibleForLog() }
+        .sortedWith(
+            compareByDescending<StreamCandidate> { it.seeders ?: 0 }
+                .thenByDescending { autoPickQualityHint(it.title) },
+        )
+        .take(MaxAutoPickScoreCandidates)
+        .toList()
+    if (cached.isEmpty()) return false
+    return cached.any { StreamScoringEngine.rank(it, context).softsubFit >= minSoftsubFit }
+}
+
+/** True when any cached/instant candidate exists. Cheap O(n) — must NOT call
+ * [StreamScoringEngine.choose] (that ranked the full dump on every streamGroups tick). */
+@Suppress("UNUSED_PARAMETER")
+internal fun hasEligibleCachedAutoPlay(
+    groups: List<StreamGroup>,
+    context: StreamScoringEngine.Context,
+): Boolean =
+    groups
+        .asSequence()
+        .flatMap { group -> (group.state as? StreamGroupState.Content)?.streams.orEmpty().asSequence() }
+        .any { it.isWellFormed() && it.isAutoPlayEligibleForLog() }
+
+/** Lightweight title quality hint used only to pick which rows enter the score cap. */
+private fun autoPickQualityHint(title: String): Int {
+    val t = title.lowercase()
+    return when {
+        "2160" in t || "4k" in t || "uhd" in t -> 4
+        "1080" in t || "fhd" in t -> 3
+        "720" in t -> 1
+        else -> 2
+    }
 }
 
 /** Guards against candidates with no actionable source at all (neither a direct URL nor a

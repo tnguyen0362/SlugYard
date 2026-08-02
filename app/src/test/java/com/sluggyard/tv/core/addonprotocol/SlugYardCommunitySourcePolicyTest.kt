@@ -13,7 +13,7 @@ class SlugYardCommunitySourcePolicyTest {
         assertTrue(urls.any { it.contains("watchhub", ignoreCase = true) })
         assertTrue(urls.any { it.contains("torrentio", ignoreCase = true) })
         assertTrue(urls.any { it.contains("mediafusion", ignoreCase = true) })
-        assertTrue(urls.any { it.contains("comet", ignoreCase = true) })
+        assertFalse(urls.any { it.contains("comet", ignoreCase = true) })
         assertTrue(urls.any { it.contains("meteor", ignoreCase = true) })
     }
 
@@ -51,6 +51,7 @@ class SlugYardCommunitySourcePolicyTest {
             urls,
         )
         assertFalse(urls.any(SlugYardCommunitySourcePolicy::isPlayFlixManifest))
+        assertFalse(urls.any { it.contains("comet", ignoreCase = true) })
         assertTrue(SlugYardCommunitySourcePolicy.PLAYFLIX_MANIFEST_URL in SlugYardCommunitySourcePolicy.bootstrapManifestUrls)
     }
 

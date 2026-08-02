@@ -846,6 +846,61 @@ class StreamAutoPickerTest {
         )
     }
 
+    @Test
+    fun softsubEarlyExitAcceptsUnmarkedSoftsubsWhenPreferredLanguageIsSet() {
+        // Preferred=en but release only says Softsubs (no Eng tag) → softsubFit=2.
+        // Requiring >=3 used to keep anime Play waiting on AIOStreams for the hard ceiling.
+        val soft = candidate("soft", cacheState = StreamCacheState.CACHED, infoHash = "soft-hash")
+            .copy(title = "Show.S01E01.1080p.WEB-DL.Softsubs")
+        val context = StreamScoringEngine.Context(
+            title = "Anime Show",
+            contentType = "series",
+            genres = listOf("Anime"),
+            preferredSubtitleLanguage = "en",
+        )
+        assertTrue(hasEligibleSoftsubAutoPlay(groups(soft), context))
+        assertEquals(2, StreamScoringEngine.rank(soft, context).softsubFit)
+    }
+
+    @Test
+    fun softsubEarlyExitRejectsRawWhenPreferredLanguageIsSet() {
+        val raw = candidate("raw", cacheState = StreamCacheState.CACHED, infoHash = "raw-hash")
+            .copy(title = "Show.S01E01.1080p.WEB-DL.RAW")
+        val context = StreamScoringEngine.Context(
+            title = "Anime Show",
+            contentType = "series",
+            genres = listOf("Anime"),
+            preferredSubtitleLanguage = "en",
+        )
+        assertFalse(hasEligibleSoftsubAutoPlay(groups(raw), context))
+    }
+
+    @Test
+    fun cachedReadyIsTrueForAnyCachedTorrentWithoutFullRanking() {
+        val cached = candidate("cached", cacheState = StreamCacheState.CACHED, infoHash = "cached-hash")
+            .copy(title = "Movie.1080p.WEB-DL")
+        val context = StreamScoringEngine.Context(title = "Movie", contentType = "movie")
+        assertTrue(hasEligibleCachedAutoPlay(groups(cached), context))
+        assertFalse(
+            hasEligibleCachedAutoPlay(
+                groups(candidate("uncached", cacheState = StreamCacheState.NOT_CACHED, infoHash = "x")),
+                context,
+            ),
+        )
+    }
+
+    @Test
+    fun autoPickScoresOnlyCachedPoolEvenWhenHundredsOfUncachedExist() {
+        val cached = candidate("cached", cacheState = StreamCacheState.CACHED, infoHash = "cached-hash")
+            .copy(title = "Movie.2160p.WEB-DL", seeders = 10)
+        val uncached = (1..200).map { i ->
+            candidate("u$i", cacheState = StreamCacheState.NOT_CACHED, infoHash = "hash-$i")
+                .copy(title = "Movie.2160p.BluRay", seeders = 9_000)
+        }
+        val context = StreamScoringEngine.Context(title = "Movie", contentType = "movie")
+        assertEquals(cached, selectAutoPlayCandidate(groups(*(listOf(cached) + uncached).toTypedArray()), context))
+    }
+
     private fun groups(vararg candidates: StreamCandidate) = listOf(
         StreamGroup("source", "Source", StreamGroupState.Content(candidates.toList())),
     )

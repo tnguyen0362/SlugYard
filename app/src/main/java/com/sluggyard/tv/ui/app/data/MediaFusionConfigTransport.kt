@@ -78,7 +78,8 @@ class ProviderAddonConfigurator(
                 // Fall back to keyless bootstrap; do not send tokens to a third-party encrypt host.
                 null
             },
-            cometManifestUrl = buildCometManifestUrl(service, apiKey),
+            // Comet no longer provisioned — keep field null so stale installs are dropped.
+            cometManifestUrl = null,
             meteorManifestUrl = buildMeteorManifestUrl(service, apiKey),
             aioStreamsManifestUrl = try {
                 aioStreams?.createManifestUrl(service, apiKey)

@@ -37,15 +37,18 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import coil3.compose.AsyncImage
-import com.sluggyard.tv.ui.design.SlugYardPalette
-import com.sluggyard.tv.ui.design.SlugYardTvMetrics
+import coil3.request.ImageRequest
+import coil3.size.Size
 import com.sluggyard.tv.ui.app.preferLargePosterUrl
 import com.sluggyard.tv.ui.app.preferTvBackdropUrl
+import com.sluggyard.tv.ui.design.SlugYardPalette
+import com.sluggyard.tv.ui.design.SlugYardTvMetrics
 import kotlinx.coroutines.launch
 
 data class DetailsEpisode(
@@ -190,6 +193,7 @@ private fun DetailsHeader(
     onMoreLikeThis: (() -> Unit)? = null,
     moreLikeThisLoading: Boolean = false,
 ) {
+    val context = LocalContext.current
     LaunchedEffect(state.id) {
         contentFocusRequester.requestFocusReliably(retries = 10)
     }
@@ -208,7 +212,15 @@ private fun DetailsHeader(
             .background(SlugYardPalette.Surface),
     ) {
         AsyncImage(
-            model = preferTvBackdropUrl(state.backdropUrl) ?: preferLargePosterUrl(state.posterUrl),
+            model = remember(state.id, state.backdropUrl, state.posterUrl) {
+                val url = preferTvBackdropUrl(state.backdropUrl) ?: preferLargePosterUrl(state.posterUrl)
+                ImageRequest.Builder(context)
+                    .data(url)
+                    .size(Size(1280, 720))
+                    .memoryCacheKey("details-backdrop:${state.id}:$url")
+                    .diskCacheKey("details-backdrop:${state.id}:$url")
+                    .build()
+            },
             contentDescription = null,
             modifier = Modifier.fillMaxSize(),
             contentScale = ContentScale.Crop,

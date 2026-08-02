@@ -38,6 +38,7 @@ class CommunityAddonProvisionerTest {
         assertTrue(gateway.requestedUrls.none { it.contains("example.test") })
         assertTrue(gateway.requestedUrls.contains("https://torrentio.strem.fun/debridoptions=nodownloadlinks%7Ctorbox=key/manifest.json"))
         assertTrue(gateway.requestedUrls.contains("https://meteorfortheweebs.midnightignite.me/configured/manifest.json"))
+        assertTrue(gateway.requestedUrls.none { it.contains("comet", ignoreCase = true) })
         assertTrue(gateway.requestedUrls.none { SlugYardCommunitySourcePolicy.isPlayFlixManifest(it) })
         if (SlugYardCommunitySourcePolicy.aioStreamsRegistryUrl != null) {
             assertTrue(gateway.requestedUrls.any { it.contains("/uuid/enc/manifest.json") })
