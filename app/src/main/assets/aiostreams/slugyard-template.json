@@ -94,7 +94,7 @@
     "excludeUncachedFromServices": [],
     "excludeUncachedFromStreamTypes": [],
     "dynamicAddonFetching": {
-      "enabled": false,
+      "enabled": true,
       "condition": "count(cached(totalStreams))>0 or totalTimeTaken > 5000"
     },
     "groups": {

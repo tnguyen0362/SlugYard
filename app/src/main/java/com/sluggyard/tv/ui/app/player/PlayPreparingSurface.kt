@@ -206,14 +206,11 @@ fun PlayPreparingSurface(
 }
 
 /**
- * Landscape-only prepare art. Never fall back to a portrait poster — upgrading posters via
- * [preferTvBackdropUrl] and painting them full-bleed was the visible "poster bleed" on Finding,
- * and those decodes polluted shared Coil URL space before keys were isolated.
+ * Prepare / Finding art. Prefer landscape backdrop; fall back to poster so the chrome is
+ * never blank when meta only shipped a poster. Cross-title bleed is prevented by namespaced
+ * Coil keys + contentId remount in [PlayPreparingSurface] — not by blanking the art.
  */
 fun playPreparingArtUrl(backdropUrl: String?, posterUrl: String?): String? {
-    val backdrop = backdropUrl?.takeIf { it.isNotBlank() } ?: return null
-    val poster = posterUrl?.takeIf { it.isNotBlank() }
-    // If callers accidentally pass the same portrait URL as both fields, treat as no landscape.
-    if (poster != null && backdrop == poster) return null
-    return backdrop
+    backdropUrl?.takeIf { it.isNotBlank() }?.let { return it }
+    return posterUrl?.takeIf { it.isNotBlank() }
 }

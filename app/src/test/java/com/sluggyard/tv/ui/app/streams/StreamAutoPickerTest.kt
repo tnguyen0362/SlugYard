@@ -875,6 +875,32 @@ class StreamAutoPickerTest {
         assertFalse(hasEligibleSoftsubAutoPlay(groups(raw), context))
     }
 
+    @Test
+    fun cachedReadyIsTrueForAnyCachedTorrentWithoutFullRanking() {
+        val cached = candidate("cached", cacheState = StreamCacheState.CACHED, infoHash = "cached-hash")
+            .copy(title = "Movie.1080p.WEB-DL")
+        val context = StreamScoringEngine.Context(title = "Movie", contentType = "movie")
+        assertTrue(hasEligibleCachedAutoPlay(groups(cached), context))
+        assertFalse(
+            hasEligibleCachedAutoPlay(
+                groups(candidate("uncached", cacheState = StreamCacheState.NOT_CACHED, infoHash = "x")),
+                context,
+            ),
+        )
+    }
+
+    @Test
+    fun autoPickScoresOnlyCachedPoolEvenWhenHundredsOfUncachedExist() {
+        val cached = candidate("cached", cacheState = StreamCacheState.CACHED, infoHash = "cached-hash")
+            .copy(title = "Movie.2160p.WEB-DL", seeders = 10)
+        val uncached = (1..200).map { i ->
+            candidate("u$i", cacheState = StreamCacheState.NOT_CACHED, infoHash = "hash-$i")
+                .copy(title = "Movie.2160p.BluRay", seeders = 9_000)
+        }
+        val context = StreamScoringEngine.Context(title = "Movie", contentType = "movie")
+        assertEquals(cached, selectAutoPlayCandidate(groups(*(listOf(cached) + uncached).toTypedArray()), context))
+    }
+
     private fun groups(vararg candidates: StreamCandidate) = listOf(
         StreamGroup("source", "Source", StreamGroupState.Content(candidates.toList())),
     )

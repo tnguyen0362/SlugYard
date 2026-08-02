@@ -40,8 +40,8 @@ object SlugYardCommunitySourcePolicy {
         add("https://torrentio.strem.fun/manifest.json")
         // Keyless catalog only — never a pre-baked encrypted user path with embedded credentials.
         add(PLAYFLIX_MANIFEST_URL)
-        // Comet cache-first scraper; debrid key injected into configuredManifestUrl on connect.
-        add("https://comet.elfhosted.com/manifest.json")
+        // Comet removed from default pack — duplicate cache scrape vs Meteor/Torrentio was
+        // burning leanback CPU during Finding and after auto-play (Onn frame drops).
         // Meteor cache-first scraper (MidnightIgnite); debrid key injected on connect.
         add("https://meteorfortheweebs.midnightignite.me/manifest.json")
         // AIOStreams (AnimeTosho / SeaDex / Torz) — only when an opted-in host is configured.
