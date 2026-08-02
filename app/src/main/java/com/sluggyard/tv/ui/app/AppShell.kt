@@ -1295,7 +1295,7 @@ private fun AppContent(
     }
     // Key only on the Streams target + debrid — NOT registry.addons. Community provision
     // mutates the addon list while Play is already finding streams; restarting this effect
-    // resets streamDiscoveryComplete=false after the 20s ceiling has already fired once,
+    // resets streamDiscoveryComplete=false after the discovery ceiling has already fired once,
     // which left the UI stuck on "Finding a playable stream…" forever.
     val streamsDiscoveryKey = remember(destination, debridConnection.activeService, debridConnection.configuredServices) {
         val streams = destination as? RootDestination.Streams
@@ -1315,10 +1315,42 @@ private fun AppContent(
         streamMessage = null
         autoPickFinishedFor = null
         autoPickRejectedIds = emptySet()
-        // After install/force-stop the curated stream addons can be missing until provision runs.
-        if (hasActiveDebrid) {
-            runCatching { graph.provisionCommunitySources(true) }
+        // Never block Finding on a full manifest re-provision. Re-fetching Comet/Meteor/AIO
+        // manifests on every Play previously left streamGroups empty until the hard ceiling
+        // (~12–20s) while AddonProvision was still in flight — softsub early-exit could not
+        // fire with zero candidates. Refresh in the background when stream addons already
+        // exist; only await provision on a cold registry (first run / after clear data).
+        val hasStreamAddons = registry.enabledAddons.any { addon ->
+            com.sluggyard.tv.core.addonprotocol.AddonResource.STREAM in addon.manifest.resources &&
+                !SlugYardCommunitySourcePolicy.isWatchHubManifest(addon.manifestUrl)
         }
+        if (hasActiveDebrid) {
+            if (hasStreamAddons) {
+                launch {
+                    val started = android.os.SystemClock.elapsedRealtime()
+                    runCatching { graph.provisionCommunitySources(true) }
+                    android.util.Log.i(
+                        "SlugYardAutoPick",
+                        "background provision finished in " +
+                            "${android.os.SystemClock.elapsedRealtime() - started}ms " +
+                            "title='${streams.title}'",
+                    )
+                }
+            } else {
+                val started = android.os.SystemClock.elapsedRealtime()
+                runCatching { graph.provisionCommunitySources(true) }
+                android.util.Log.i(
+                    "SlugYardAutoPick",
+                    "cold provision finished in " +
+                        "${android.os.SystemClock.elapsedRealtime() - started}ms " +
+                        "title='${streams.title}'",
+                )
+            }
+        }
+        android.util.Log.i(
+            "SlugYardAutoPick",
+            "stream fanout start title='${streams.title}' hasStreamAddons=$hasStreamAddons",
+        )
         graph.streamsDataSource.streamGroups(
             streams.type,
             streams.id,
@@ -1373,7 +1405,13 @@ private fun AppContent(
         val animeWaitOnAio = !softsubReady &&
             isAnimeAutoPlayWait(streams) &&
             streamGroups.any { it.isAioStreamsGroup() && it.state is com.sluggyard.tv.ui.app.streams.StreamGroupState.Loading }
-        if (animeWaitOnAio) return@LaunchedEffect
+        if (animeWaitOnAio) {
+            android.util.Log.i(
+                "SlugYardAutoPick",
+                "grace-wait aio still loading softsubReady=false title='${streams.title}'",
+            )
+            return@LaunchedEffect
+        }
         streamDiscoveryComplete = true
     }
     // Hard ceiling: last-resort unblock if an addon never leaves Loading.
@@ -1382,14 +1420,18 @@ private fun AppContent(
     LaunchedEffect(streamsDiscoveryKey) {
         val streams = destination as? RootDestination.Streams ?: return@LaunchedEffect
         discoveryHardCeilingReached = false
-        delay(20_000)
+        delay(12_000)
         if (destination == streams) {
             streamDiscoveryComplete = true
             discoveryHardCeilingReached = true
+            android.util.Log.i(
+                "SlugYardAutoPick",
+                "discovery hard-ceiling reached title='${streams.title}'",
+            )
         }
     }
-    // Anime fast-path: once any addon already has a cached ASS/softsub auto-play winner,
-    // stop idling on AIOStreams Loading (the old path waited ~20–30s every time).
+    // Anime fast-path: once any addon already has a cached softsub auto-play winner
+    // (softsubFit >= 2), stop idling on AIOStreams Loading.
     LaunchedEffect(streamsDiscoveryKey, streamGroups, playerSettings.subtitleStyle.preferredLanguage) {
         val streams = destination as? RootDestination.Streams ?: return@LaunchedEffect
         if (streamDiscoveryComplete || !isAnimeAutoPlayWait(streams)) return@LaunchedEffect
@@ -1400,6 +1442,10 @@ private fun AppContent(
                 playerSettings.subtitleStyle.preferredLanguage,
             )
         ) {
+            android.util.Log.i(
+                "SlugYardAutoPick",
+                "softsub-ready early exit title='${streams.title}' preferred=${playerSettings.subtitleStyle.preferredLanguage}",
+            )
             streamDiscoveryComplete = true
         }
     }
@@ -1592,12 +1638,22 @@ private fun AppContent(
                     }
                     return@withContext AutoPickOutcome.LastSourceUnavailable
                 }
-                if (streamGroups.any { it.state is com.sluggyard.tv.ui.app.streams.StreamGroupState.Loading } ||
-                    hasPendingCacheChecks(streamGroups)
+                // Last-link miss: do not idle on AIO/Meteor Loading when other addons already
+                // returned playable cached softsubs — fall through to normal auto-pick.
+                val hasAnyCandidates = streamGroups
+                    .flatMap { (it.state as? com.sluggyard.tv.ui.app.streams.StreamGroupState.Content)?.streams.orEmpty() }
+                    .isNotEmpty()
+                if (!hasAnyCandidates &&
+                    (
+                        streamGroups.any { it.state is com.sluggyard.tv.ui.app.streams.StreamGroupState.Loading } ||
+                            hasPendingCacheChecks(streamGroups)
+                        )
                 ) {
                     return@withContext AutoPickOutcome.Wait
                 }
-                return@withContext AutoPickOutcome.LastSourceUnavailable
+                if (!hasAnyCandidates) {
+                    return@withContext AutoPickOutcome.LastSourceUnavailable
+                }
             }
             val candidate = selectAutoPlayCandidate(
                 groups = groupsForPick,
@@ -2223,6 +2279,7 @@ private fun AppContent(
                                 streams.backdropUrl ?: detailsState?.backdropUrl,
                                 streams.posterUrl ?: detailsState?.posterUrl,
                             ),
+                            contentId = streams.id,
                             title = streams.title,
                             statusMessage = streamMessage
                                 ?: if (
@@ -2415,6 +2472,7 @@ private fun BuildingPlayerScreen(
     title: String,
     statusMessage: String?,
     availability: List<String> = emptyList(),
+    contentId: String? = null,
     onBack: () -> Unit,
     onChooseSource: () -> Unit,
 ) {
@@ -2436,6 +2494,7 @@ private fun BuildingPlayerScreen(
     }
     PlayPreparingSurface(
         artUrl = artUrl,
+        contentId = contentId,
         title = title,
         statusMessage = effectiveStatus,
         showChooser = showChooser,

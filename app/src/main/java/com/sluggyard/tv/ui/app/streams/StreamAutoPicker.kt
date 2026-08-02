@@ -139,19 +139,34 @@ internal fun hasPendingCacheChecks(groups: List<StreamGroup>): Boolean =
     }
 
 /**
- * True when auto-play already has a cached/instant winner with real softsub signal (ASS/softsubs).
- * Used to stop anime from idling on AIOStreams Loading when Comet/others already have playable ASS.
+ * True when auto-play already has a cached/instant winner with a real softsub signal.
+ *
+ * Default floor is softsubFit >= 2 (any softsub/multi-sub/SRT signal). Preferred-lang
+ * match scores 3–4, but with preferred=en many cached WEB-DL softsubs only score 2
+ * (no explicit "Eng" tag) — requiring 3 left anime idling on AIOStreams for the full
+ * hard ceiling every Play.
  */
 internal fun hasEligibleSoftsubAutoPlay(
     groups: List<StreamGroup>,
     context: StreamScoringEngine.Context,
-    minSoftsubFit: Int = 3,
+    minSoftsubFit: Int = 2,
 ): Boolean {
     val candidates = groups
         .flatMap { group -> (group.state as? StreamGroupState.Content)?.streams.orEmpty() }
         .filter { it.isWellFormed() }
     val winner = StreamScoringEngine.choose(candidates, context) ?: return false
     return StreamScoringEngine.rank(winner, context).softsubFit >= minSoftsubFit
+}
+
+/** True when auto-play already has any cached/instant candidate (softsub or not). */
+internal fun hasEligibleCachedAutoPlay(
+    groups: List<StreamGroup>,
+    context: StreamScoringEngine.Context,
+): Boolean {
+    val candidates = groups
+        .flatMap { group -> (group.state as? StreamGroupState.Content)?.streams.orEmpty() }
+        .filter { it.isWellFormed() }
+    return StreamScoringEngine.choose(candidates, context) != null
 }
 
 /** Guards against candidates with no actionable source at all (neither a direct URL nor a

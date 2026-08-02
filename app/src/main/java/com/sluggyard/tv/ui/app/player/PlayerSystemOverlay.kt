@@ -44,6 +44,7 @@ private fun PlayerPreparing(state: PlayerUiState, modifier: Modifier) {
     val status = state.loadingMessage?.cleanPlayerStatus() ?: "Preparing stream"
     PlayPreparingSurface(
         artUrl = playPreparingArtUrl(state.backdrop, state.poster),
+        contentId = state.currentVideoId ?: state.contentName ?: state.title,
         title = title,
         statusMessage = status,
         modifier = modifier,

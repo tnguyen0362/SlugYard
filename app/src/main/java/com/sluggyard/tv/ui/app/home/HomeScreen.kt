@@ -52,6 +52,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.key as composeKey
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -1368,30 +1369,32 @@ internal fun PosterCard(
             if (posterUrl != null && !showLandscape) {
                 // Stable by content id + URL; reloadToken remounts after error so fast
                 // LazyRow reuse / cancelled fetches cannot leave a permanently empty tile.
-                var posterReloadToken by remember(poster.id, posterUrl) { mutableIntStateOf(0) }
-                val posterRequest = remember(poster.id, posterUrl, posterDecode, posterReloadToken) {
-                    ImageRequest.Builder(context)
-                        .data(posterUrl)
-                        .size(posterDecode)
-                        .memoryCacheKey("poster:${poster.id}:$posterUrl")
-                        .diskCacheKey("poster:${poster.id}:$posterUrl")
-                        .build()
+                composeKey(poster.id, posterUrl) {
+                    var posterReloadToken by remember(poster.id, posterUrl) { mutableIntStateOf(0) }
+                    val posterRequest = remember(poster.id, posterUrl, posterDecode, posterReloadToken) {
+                        ImageRequest.Builder(context)
+                            .data(posterUrl)
+                            .size(posterDecode)
+                            .memoryCacheKey("poster:${poster.id}:$posterUrl")
+                            .diskCacheKey("poster:${poster.id}:$posterUrl")
+                            .build()
+                    }
+                    AsyncImage(
+                        model = posterRequest,
+                        contentDescription = null,
+                        modifier = Modifier.size(cardWidth, cardHeight).align(Alignment.Center),
+                        contentScale = ContentScale.Crop,
+                        alignment = Alignment.Center,
+                        onError = {
+                            val token = posterReloadToken
+                            if (token >= HomePosterRetryMax) return@AsyncImage
+                            scope.launch {
+                                delay(HomePosterRetryDelayMs)
+                                if (posterReloadToken == token) posterReloadToken = token + 1
+                            }
+                        },
+                    )
                 }
-                AsyncImage(
-                    model = posterRequest,
-                    contentDescription = null,
-                    modifier = Modifier.size(cardWidth, cardHeight).align(Alignment.Center),
-                    contentScale = ContentScale.Crop,
-                    alignment = Alignment.Center,
-                    onError = {
-                        val token = posterReloadToken
-                        if (token >= HomePosterRetryMax) return@AsyncImage
-                        scope.launch {
-                            delay(HomePosterRetryDelayMs)
-                            if (posterReloadToken == token) posterReloadToken = token + 1
-                        }
-                    },
-                )
             } else if (!showLandscape && !poster.backdropUrl.isNullOrBlank() && !expandOnFocus) {
                 // Search / non-expand tiles with backdrop-only art still need a visible frame.
                 val fallbackUrl = remember(poster.id, poster.backdropUrl) {
@@ -1424,26 +1427,30 @@ internal fun PosterCard(
             }
             // Keep the warmed landscape bitmap mounted while unfocused. This avoids a fresh Coil
             // composition and decode when focus moves between adjacent landscape cards.
+            // key(poster.id) forces painter dispose on LazyRow reuse so a previous title's
+            // full-bleed / landscape bitmap cannot paint into the next tile (prepare-art bleed).
             if (expandOnFocus && landscapeUrl != null && loadLandscape) {
-                val landscapeRequest = remember(poster.id, landscapeUrl, landscapeDecode) {
-                    ImageRequest.Builder(context)
-                        .data(landscapeUrl)
-                        .size(landscapeDecode)
-                        .memoryCacheKey("card-backdrop:${poster.id}:$landscapeUrl")
-                        .diskCacheKey("card-backdrop:${poster.id}:$landscapeUrl")
-                        .build()
+                composeKey(poster.id, landscapeUrl) {
+                    val landscapeRequest = remember(poster.id, landscapeUrl, landscapeDecode) {
+                        ImageRequest.Builder(context)
+                            .data(landscapeUrl)
+                            .size(landscapeDecode)
+                            .memoryCacheKey("card-backdrop:${poster.id}:$landscapeUrl")
+                            .diskCacheKey("card-backdrop:${poster.id}:$landscapeUrl")
+                            .build()
+                    }
+                    AsyncImage(
+                        model = landscapeRequest,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .alpha(if (focused && landscapePainted) 1f else 0f),
+                        contentScale = ContentScale.Crop,
+                        alignment = Alignment.Center,
+                        onSuccess = { landscapePainted = true },
+                        onError = { landscapePainted = false },
+                    )
                 }
-                AsyncImage(
-                    model = landscapeRequest,
-                    contentDescription = null,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .alpha(if (focused && landscapePainted) 1f else 0f),
-                    contentScale = ContentScale.Crop,
-                    alignment = Alignment.Center,
-                    onSuccess = { landscapePainted = true },
-                    onError = { landscapePainted = false },
-                )
             }
             if (showLandscape) {
                 // Top chrome: rating (IMDb/TMDB) left, genres right.

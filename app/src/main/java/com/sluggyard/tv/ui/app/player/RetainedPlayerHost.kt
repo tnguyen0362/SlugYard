@@ -773,6 +773,7 @@ fun RetainedPlayerHost(
             }
             PlayPreparingSurface(
                 artUrl = episodeHandoffArtUrl,
+                contentId = secondaryState.episodeSourceId ?: contentId,
                 title = episodeHandoffTitle.ifBlank { title },
                 statusMessage = "Finding a playable stream...",
                 showChooser = false,

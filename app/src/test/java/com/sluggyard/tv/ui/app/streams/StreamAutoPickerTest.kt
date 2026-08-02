@@ -846,6 +846,35 @@ class StreamAutoPickerTest {
         )
     }
 
+    @Test
+    fun softsubEarlyExitAcceptsUnmarkedSoftsubsWhenPreferredLanguageIsSet() {
+        // Preferred=en but release only says Softsubs (no Eng tag) → softsubFit=2.
+        // Requiring >=3 used to keep anime Play waiting on AIOStreams for the hard ceiling.
+        val soft = candidate("soft", cacheState = StreamCacheState.CACHED, infoHash = "soft-hash")
+            .copy(title = "Show.S01E01.1080p.WEB-DL.Softsubs")
+        val context = StreamScoringEngine.Context(
+            title = "Anime Show",
+            contentType = "series",
+            genres = listOf("Anime"),
+            preferredSubtitleLanguage = "en",
+        )
+        assertTrue(hasEligibleSoftsubAutoPlay(groups(soft), context))
+        assertEquals(2, StreamScoringEngine.rank(soft, context).softsubFit)
+    }
+
+    @Test
+    fun softsubEarlyExitRejectsRawWhenPreferredLanguageIsSet() {
+        val raw = candidate("raw", cacheState = StreamCacheState.CACHED, infoHash = "raw-hash")
+            .copy(title = "Show.S01E01.1080p.WEB-DL.RAW")
+        val context = StreamScoringEngine.Context(
+            title = "Anime Show",
+            contentType = "series",
+            genres = listOf("Anime"),
+            preferredSubtitleLanguage = "en",
+        )
+        assertFalse(hasEligibleSoftsubAutoPlay(groups(raw), context))
+    }
+
     private fun groups(vararg candidates: StreamCandidate) = listOf(
         StreamGroup("source", "Source", StreamGroupState.Content(candidates.toList())),
     )
