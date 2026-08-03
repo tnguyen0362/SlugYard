@@ -115,6 +115,9 @@ internal fun PlayerRuntimeController.preparePlaybackBeforeStart(
                     position = positionMs,
                     duration = existing?.duration?.takeIf { it > 0L } ?: 0L,
                     lastWatched = System.currentTimeMillis(),
+                    // Keep Trakt percent if present so resolveResumePosition can re-map onto
+                    // the real stream duration once known.
+                    progressPercent = existing?.progressPercent,
                 )
             }
         }

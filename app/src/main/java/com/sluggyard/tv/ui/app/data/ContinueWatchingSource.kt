@@ -15,9 +15,11 @@ fun useTraktContinueWatching(
 /**
  * Maps repository/Trakt [WatchProgress] into rewrite Home checkpoints.
  *
- * Trakt playback often has percent without absolute position/duration. Keep absolute ms when
- * present; otherwise stash [remoteProgressFraction] so the rail can render progress while
- * resume stays at 0 and the player resolves percent from [WatchProgressRepository].
+ * Keep true absolute ms when present. For Trakt percent-only rows, do not freeze
+ * percent×Trakt-duration into [positionMs] (that length often differs from the stream
+ * and would bypass [WatchProgress.resolveResumePosition]). Stash
+ * [remoteProgressFraction] so the rail paints while the player re-resolves percent
+ * against the real duration; [AppShell] resume also falls back to local rewrite ms.
  */
 fun WatchProgress.toContinueWatchingCheckpoint(): PlaybackCheckpoint {
     val isSeries = season != null || episode != null ||
@@ -26,6 +28,7 @@ fun WatchProgress.toContinueWatchingCheckpoint(): PlaybackCheckpoint {
         contentType.equals("show", ignoreCase = true)
     val parentId = contentId.takeIf { isSeries && it.isNotBlank() }
     val episodeContentId = videoId.trim().takeIf { isSeries && it.isNotBlank() && it != contentId }
+    val absolutePositionMs = position.coerceAtLeast(0L)
     return PlaybackCheckpoint(
         contentId = episodeContentId ?: contentId,
         contentType = if (isSeries) "series" else contentType.ifBlank { "movie" },
@@ -34,7 +37,7 @@ fun WatchProgress.toContinueWatchingCheckpoint(): PlaybackCheckpoint {
         addonId = null,
         parentId = parentId,
         parentType = "series".takeIf { isSeries },
-        positionMs = position.coerceAtLeast(0L),
+        positionMs = absolutePositionMs,
         durationMs = duration.coerceAtLeast(0L),
         updatedAtEpochMs = lastWatched.coerceAtLeast(0L),
         season = season,
@@ -43,6 +46,6 @@ fun WatchProgress.toContinueWatchingCheckpoint(): PlaybackCheckpoint {
         // Never force 0.0 from a missing percent — that hides real position-only progress.
         remoteProgressFraction = progressPercent
             ?.let { (it / 100.0).coerceIn(0.0, 1.0) }
-            ?.takeIf { position <= 0L || duration <= 0L },
+            ?.takeIf { absolutePositionMs <= 0L || duration <= 0L },
     )
 }

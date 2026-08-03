@@ -623,13 +623,16 @@ private suspend fun PlayerRuntimeController.loadProgressFromStore(
 /** Applies pending resume progress to the active player (MPV or ExoPlayer). */
 private fun PlayerRuntimeController.applyResumeToActivePlayer() {
     val progress = pendingResumeProgress ?: return
-    val target = progress.position.coerceAtLeast(0L)
+    val durationHint = progress.duration.coerceAtLeast(0L)
+    val target = progress.resolveResumePosition(durationHint)
     if (target <= 0L) {
+        // Percent-only without a usable duration — keep pending for duration-aware seek paths.
+        if (progress.progressPercent != null && durationHint <= 0L) return
         pendingResumeProgress = null
         return
     }
     if (isUsingMpvEngine()) {
-        mpvView?.let { applyPendingMpvSeekIfNeeded(it, target, progress.duration.coerceAtLeast(0L)) }
+        mpvView?.let { applyPendingMpvSeekIfNeeded(it, target, durationHint) }
     } else {
         val player = _exoPlayer ?: return
         if (player.isCommandAvailable(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM)) {
@@ -745,8 +748,13 @@ private fun PlayerRuntimeController.tryFetchImdbSkipIntervals(
 /** Seeks the active player to the saved resume position (if any), then clears it. */
 internal fun PlayerRuntimeController.tryApplyPendingResumeProgress(player: Player) {
     val progress = pendingResumeProgress ?: return
-    val target = progress.position.coerceAtLeast(0L)
+    val durationHint = player.duration.takeIf { it > 0L } ?: progress.duration
+    val target = progress.resolveResumePosition(durationHint.coerceAtLeast(0L))
     if (target <= 0L) {
+        // Percent-only without duration yet — keep pending for MPV/Exo once length is known.
+        if (progress.progressPercent != null && (progress.duration <= 0L && durationHint <= 0L)) {
+            return
+        }
         pendingResumeProgress = null
         return
     }
@@ -765,9 +773,8 @@ internal fun PlayerRuntimeController.tryApplyPendingResumeProgress(player: Playe
  */
 internal fun PlayerRuntimeController.resolvePendingInitialResumePosition(): Long {
     val progress = pendingResumeProgress ?: return 0L
-    val position = progress.position
-    if (position <= 0L) return 0L
-    return position
+    // Prefer absolute ms; fall back to percent×duration (Trakt-style) when position is 0.
+    return progress.resolveResumePosition(progress.duration.coerceAtLeast(0L))
 }
 
 /** Drops pending resume progress and matching UI pending-seek state. */

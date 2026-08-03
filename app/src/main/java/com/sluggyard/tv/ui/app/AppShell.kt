@@ -798,20 +798,32 @@ private fun AppContent(
     }
 
     fun resumeFor(contentId: String, season: Int? = null, episode: Int? = null): Long {
-        val matchedCw = continueWatchingCheckpoints.firstOrNull {
-            (it.contentId == contentId || it.parentId == contentId) &&
-                it.season == season &&
-                it.episode == episode
+        fun matches(c: com.sluggyard.tv.ui.app.data.PlaybackCheckpoint): Boolean =
+            (c.contentId == contentId || c.parentId == contentId) &&
+                c.season == season &&
+                c.episode == episode
+
+        val matchedCw = continueWatchingCheckpoints.firstOrNull(::matches)
+        matchedCw?.positionMs?.takeIf { it > 0L }?.let { return it }
+
+        // Local rewrite checkpoints hold absolute ms even when Trakt only has a percent rail bar.
+        // Always prefer a real local position over starting at 0:00.
+        val localMs = playbackCheckpoints
+            .firstOrNull(::matches)
+            ?.positionMs
+            ?.takeIf { it > 0L }
+            ?: playbackCheckpoints.firstOrNull {
+                it.contentId == contentId && it.season == season && it.episode == episode
+            }?.positionMs?.takeIf { it > 0L }
+        if (localMs != null) return localMs
+
+        // Percent-only CW (Trakt): estimate ms when duration is known.
+        val frac = matchedCw?.progressFraction
+        val duration = matchedCw?.durationMs ?: 0L
+        if (frac != null && frac > 0.0 && duration > 0L) {
+            return (frac * duration).toLong().coerceIn(0L, duration)
         }
-        if (matchedCw != null) {
-            // Trakt percent-only rows often have positionMs=0; keep 0 so the player resolves
-            // from WatchProgressRepository instead of blending in a SlugYard local checkpoint.
-            return matchedCw.positionMs.takeIf { it > 0L } ?: 0L
-        }
-        if (useTraktCw) return 0L
-        return playbackCheckpoints.firstOrNull {
-            it.contentId == contentId && it.season == season && it.episode == episode
-        }?.positionMs ?: 0L
+        return 0L
     }
 
     fun openRoot(next: RootDestination) {
