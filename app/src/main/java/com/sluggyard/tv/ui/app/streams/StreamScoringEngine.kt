@@ -99,28 +99,22 @@ internal object StreamScoringEngine {
         // multi-file season packs (Judas/Anime Time Dual+Multi-Subs) so episode file-select
         // can pick SxxExx out of the pack. Resolve failure still rejects and tries the next.
         val sizedPool = instantPool.filter { it.isSaneAutoPlaySize(context) }
-        // With a subtitle preference, prefer language-safe releases:
-        // - If any candidate advertises the preferred language, auto-play only among those.
-        // - Else drop releases that advertise a conflicting subtitle language (PT-only when
-        //   preferred=en). Anime refuses rather than auto-starting conflicting packs;
-        //   mainstream may fall back to unmarked remuxes so Play still works.
+        // With a subtitle preference, build a preference ladder — never wrong-language ASS:
+        // 1) Releases that advertise the preferred language (Eng ASS → Eng SRT/PGS → Eng soft)
+        // 2) Else neutral multi/unmarked softsubs that do not advertise another language
+        // 3) Never auto-start packs that only advertise a conflicting language (PL/ES/…)
         val preferred = normalizePreferredSubtitle(context.preferredSubtitleLanguage)
         val languageSafePool = if (preferred != null) {
-            val mentioningPreferred = sizedPool.filter { candidate ->
+            val nonConflicting = sizedPool.filter { candidate ->
+                !hasConflictingSubtitleLanguage(candidate.releaseText().lowercase(), preferred)
+            }
+            val mentioningPreferred = nonConflicting.filter { candidate ->
                 textMentionsLanguage(candidate.releaseText().lowercase(), preferred)
             }
             when {
                 mentioningPreferred.isNotEmpty() -> mentioningPreferred
-                else -> {
-                    val nonConflicting = sizedPool.filter { candidate ->
-                        !hasConflictingSubtitleLanguage(candidate.releaseText().lowercase(), preferred)
-                    }
-                    when {
-                        nonConflicting.isNotEmpty() -> nonConflicting
-                        classify(context) == ContentKind.ANIME -> emptyList()
-                        else -> sizedPool
-                    }
-                }
+                nonConflicting.isNotEmpty() -> nonConflicting
+                else -> emptyList()
             }
         } else {
             sizedPool
@@ -196,12 +190,13 @@ internal object StreamScoringEngine {
     private data class TrackSignals(val softsubFit: Int, val dualFit: Int)
 
     /**
-     * SoftsubFit (higher better):
-     * 4 preferred-lang + ASS/SSA, or known ASS-tier fansub group (SubsPlease, …)
-     * 3 preferred-lang match (e.g. Eng Sub / Eng SRT when preferred is en)
-     * 2 softsub / multi-subs without an explicit preferred-lang tag
-     * 1 none / conflicting language (Spanish ASS / A&C when preferred is en)
-     * 0 RAW / hardsub
+     * SoftsubFit (higher better) — preferred-language ladder, not a per-locale bandage:
+     * 5 preferred-lang + ASS/SSA (or known ASS-tier Eng fansub with preferred set)
+     * 4 preferred-lang + PGS/SUP (image softsubs still beat any wrong language)
+     * 3 preferred-lang + SRT/VTT / plain softsub / Multi-Subs tag match
+     * 2 softsub without preferred-lang tag (neutral multi / unmarked ASS-tier groups)
+     * 1 no softsub signal (dub-only, opaque)
+     * 0 RAW / hardsub / conflicting subtitle language (Polish/Spanish ASS never outrank Eng SRT)
      *
      * DualFit (anime only; always 0 for K/J drama):
      * 1 has Dual-Audio / Multi-Audio
@@ -218,8 +213,9 @@ internal object StreamScoringEngine {
         val multiSubs = MULTI_SUBS_REGEX.containsMatchIn(text)
         val explicitSub = EXPLICIT_SUB_REGEX.containsMatchIn(text) || textHasBracketLanguageTag(text)
         val assFormat = ASS_SOFTSUB_FORMAT.containsMatchIn(text) || knownAssTierGroup
+        val pgsFormat = PGS_SOFTSUB_FORMAT.containsMatchIn(text)
         val srtFormat = SRT_SOFTSUB_FORMAT.containsMatchIn(text)
-        val hasSoftSignal = softsub || multiSubs || explicitSub || assFormat || srtFormat
+        val hasSoftSignal = softsub || multiSubs || explicitSub || assFormat || pgsFormat || srtFormat
         val dualAudio = DUAL_AUDIO_REGEX.containsMatchIn(text)
         val hardsub = HARD_SUB_REGEX.containsMatchIn(text)
         val raw = RAW_REGEX.containsMatchIn(text)
@@ -228,17 +224,20 @@ internal object StreamScoringEngine {
 
         val softsubFit = when {
             raw || (hardsub && !hasSoftSignal) -> 0
-            conflictingLang -> 1
-            // AnimeTosho-style Eng ASS must beat Eng SRT / plain "English Subs" when both
-            // match the preference — SRT is often dialogue-only dumps with no styling.
-            // Known fansub groups (SubsPlease, Erai-raws, …) ship ASS without saying "ASS".
-            hasSoftSignal && hasPreferred && assFormat -> 4
-            hasSoftSignal && hasPreferred -> 3
-            hasSoftSignal && preferred == null && assFormat -> 4
-            // Preferred lang set but unmarked (SubsPlease with preferred=en): still ASS-tier.
-            hasSoftSignal && knownAssTierGroup -> 4
-            hasSoftSignal && preferred == null && (multiSubs || softsub || srtFormat) -> 3
-            hasSoftSignal -> 2
+            // Wrong-language ASS/SRT never beats preferred Eng SRT/PGS (score 0, out of auto-play).
+            conflictingLang -> 0
+            // Preferred language: ASS > PGS > SRT/plain soft — fall through within that ladder.
+            hasPreferred && hasSoftSignal && assFormat -> 5
+            hasPreferred && hasSoftSignal && pgsFormat -> 4
+            hasPreferred && hasSoftSignal -> 3
+            // Preferred set: known Eng fansub groups (SubsPlease…) ship ASS without saying Eng.
+            preferred != null && knownAssTierGroup && hasSoftSignal -> 5
+            // Preferred set: multi/soft without a lang tag — below any preferred-lang format.
+            preferred != null && hasSoftSignal -> 2
+            // No preference: keep ASS-tier ahead of plain softsubs.
+            preferred == null && hasSoftSignal && assFormat -> 4
+            preferred == null && hasSoftSignal && pgsFormat -> 3
+            preferred == null && hasSoftSignal -> 3
             else -> 1
         }
 
@@ -391,6 +390,9 @@ internal object StreamScoringEngine {
             "ja", "jpn", "japanese" -> listOf("ja", "jpn", "japanese", "jp")
             "ko", "kor", "korean" -> listOf("ko", "kor", "korean", "kr")
             "zh", "chi", "zho", "chinese" -> listOf("zh", "chi", "zho", "chinese", "mandarin", "cantonese")
+            "pl", "pol", "polish" -> listOf("pl", "pol", "polish", "polski", "napisy")
+            "nl", "dut", "dutch" -> listOf("nl", "dut", "dutch", "nederlands")
+            "tr", "tur", "turkish" -> listOf("tr", "tur", "turkish", "turkce", "türkçe")
             else -> listOf(preferred, base).distinct()
         }
     }
@@ -566,6 +568,17 @@ internal object StreamScoringEngine {
             "hi" -> listOf("hindi")
             "ko" -> listOf("korean")
             "zh" -> listOf("chinese", "mandarin", "cantonese")
+            // FrixySubs / Polish WEB-DL packs: "[Napisy PL]", "Polski", "PL Subs"
+            "pl" -> listOf("polish", "polski", "napisy", "pl", "pol")
+            "nl" -> listOf("dutch", "nederlands", "nl")
+            "tr" -> listOf("turkish", "turkce", "türkçe")
+            "uk" -> listOf("ukrainian")
+            "cs" -> listOf("czech", "cesky", "česky")
+            "sv" -> listOf("swedish", "svenska")
+            "th" -> listOf("thai")
+            "vi" -> listOf("vietnamese", "viet")
+            "id" -> listOf("indonesian", "bahasa")
+            "ms" -> listOf("malay", "melayu")
             else -> return false
         }
         return aliases.any { alias ->
@@ -653,6 +666,8 @@ internal object StreamScoringEngine {
     private val SOFTSUB_KEYWORD = Regex("\\b(softsub|soft.?subs?|ass|ssa)\\b")
     /** Styled softsub container — higher softsubFit than SRT/VTT when language matches. */
     private val ASS_SOFTSUB_FORMAT = Regex("\\b(ass|ssa)\\b")
+    /** Image-based softsubs (bluray PGS) — still preferred over any wrong-language ASS. */
+    private val PGS_SOFTSUB_FORMAT = Regex("\\b(pgs|sup|hdmv[ ._-]?pgs|presentation\\s*graphic)\\b")
     /** Plain softsub dumps — still softsubs, but lose to ASS when language is equal. */
     private val SRT_SOFTSUB_FORMAT = Regex("\\b(srt|subrip|vtt|webvtt)\\b")
     private val SEASON_PACK_MARKER = Regex(
@@ -663,6 +678,8 @@ internal object StreamScoringEngine {
     )
     private val SUBTITLE_CONFLICT_LANGUAGE_BASES = listOf(
         "en", "es", "pt", "fr", "de", "it", "ru", "ar", "hi", "ko", "zh", "ja",
+        // Non-Romance packs that used to score as generic softsub (softsubFit=2) and beat Eng.
+        "pl", "nl", "tr", "uk", "cs", "sv", "th", "vi", "id", "ms",
     )
     private val RESOLUTION_UHD = Regex("\\b(2160p|4k|uhd)\\b")
     private val RESOLUTION_1080 = Regex("\\b1080p\\b")

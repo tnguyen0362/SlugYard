@@ -74,13 +74,17 @@ data class WatchProgress(
 
     fun resolveResumePosition(actualDuration: Long): Long {
         if (actualDuration <= 0) return position.coerceAtLeast(0L)
-        if (duration > 0 && position > 0) {
-            return position.coerceIn(0L, actualDuration)
-        }
+        // Prefer explicit percent (Trakt) so we re-map onto this stream's real length.
         progressPercent?.let { explicitPercent ->
             val fraction = (explicitPercent / 100f).coerceIn(0f, 1f)
             return (actualDuration * fraction).toLong()
         }
-        return position.coerceAtLeast(0L)
+        if (duration > 0L && position > 0L) {
+            // Scale absolute checkpoint onto this file when remux/release length drifts.
+            return ((position.toDouble() / duration.toDouble()) * actualDuration)
+                .toLong()
+                .coerceIn(0L, actualDuration)
+        }
+        return position.coerceAtLeast(0L).coerceIn(0L, actualDuration)
     }
 }

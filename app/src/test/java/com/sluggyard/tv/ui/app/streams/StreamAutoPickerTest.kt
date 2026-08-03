@@ -235,7 +235,7 @@ class StreamAutoPickerTest {
             preferredSubtitleLanguage = "en",
         )
 
-        assertEquals(4, StreamScoringEngine.rank(ass, context).softsubFit)
+        assertEquals(5, StreamScoringEngine.rank(ass, context).softsubFit)
         assertEquals(3, StreamScoringEngine.rank(srt, context).softsubFit)
         assertEquals(ass, selectAutoPlayCandidate(groups(srt, ass), context))
     }
@@ -272,7 +272,7 @@ class StreamAutoPickerTest {
         )
 
         assertEquals(soft, selectAutoPlayCandidate(groups(raw, soft), context))
-        assertEquals(4, StreamScoringEngine.rank(soft, context).softsubFit)
+        assertEquals(5, StreamScoringEngine.rank(soft, context).softsubFit)
     }
 
     @Test
@@ -348,7 +348,7 @@ class StreamAutoPickerTest {
             genres = listOf("Animation", "Action"),
             preferredSubtitleLanguage = "en",
         )
-        assertEquals(1, StreamScoringEngine.rank(ac, context).softsubFit)
+        assertEquals(0, StreamScoringEngine.rank(ac, context).softsubFit)
         assertNull(selectAutoPlayCandidate(groups(ac), context))
     }
 
@@ -394,6 +394,113 @@ class StreamAutoPickerTest {
             StreamScoringEngine.rank(english, context).softsubFit >
                 StreamScoringEngine.rank(spanish, context).softsubFit,
         )
+    }
+
+    @Test
+    fun preferredEnglishRejectsPolishNapisyFrixyPackWhenEnglishCachedExists() {
+        // Device repro 2026-08-03: auto-pick launched FrixySubs "[Napisy PL]" over Eng softsubs.
+        val polish = candidate("pl", cacheState = StreamCacheState.CACHED, infoHash = "pl-hash")
+            .copy(
+                title = "[FrixySubs] Tenbin - S01E02 [1080p CR WEB-DL H.264 AAC] [Napisy PL]",
+                videoSizeBytes = 400L * 1024 * 1024,
+                seeders = 200,
+            )
+        val english = candidate("en", cacheState = StreamCacheState.CACHED, infoHash = "en-hash")
+            .copy(
+                title = "Oh.Boy.Was.I.Wrong.About.Her.S01E02.1080p.CR.WEB-DL.JPN.AAC2.0.H.264.MSubs-ToonsHub",
+                videoSizeBytes = 400L * 1024 * 1024,
+                seeders = 15,
+            )
+        val context = StreamScoringEngine.Context(
+            title = "Oh Boy, Was I Wrong About Her",
+            contentType = "series",
+            genres = listOf("Animation", "Comedy"),
+            language = "ja",
+            preferredSubtitleLanguage = "en",
+        )
+        assertEquals(english, selectAutoPlayCandidate(groups(polish, english), context))
+        assertEquals(0, StreamScoringEngine.rank(polish, context).softsubFit)
+    }
+
+    @Test
+    fun preferredLanguageSrtBeatsWrongLanguageAssRegardlessOfLocale() {
+        // Prefer Eng SRT over Spanish/Polish ASS when no Eng ASS exists — not a PL-only bandage.
+        val polishAss = candidate("pl", cacheState = StreamCacheState.CACHED, infoHash = "pl-hash")
+            .copy(
+                title = "[FrixySubs] Show S01E01 [1080p] SoftSub ASS [Napisy PL]",
+                videoSizeBytes = 500L * 1024 * 1024,
+                seeders = 300,
+            )
+        val spanishAss = candidate("es", cacheState = StreamCacheState.CACHED, infoHash = "es-hash")
+            .copy(
+                title = "[A&C] Show S01E01 1080p Multi-Sub ASS",
+                videoSizeBytes = 500L * 1024 * 1024,
+                seeders = 250,
+            )
+        val engSrt = candidate("en-srt", cacheState = StreamCacheState.CACHED, infoHash = "en-srt-hash")
+            .copy(
+                title = "Show.S01E01.1080p.WEB-DL.English.SRT",
+                videoSizeBytes = 400L * 1024 * 1024,
+                seeders = 10,
+            )
+        val engPgs = candidate("en-pgs", cacheState = StreamCacheState.CACHED, infoHash = "en-pgs-hash")
+            .copy(
+                title = "Show.S01E01.1080p.BluRay.English.PGS",
+                videoSizeBytes = 450L * 1024 * 1024,
+                seeders = 12,
+            )
+        val context = StreamScoringEngine.Context(
+            title = "Show",
+            contentType = "series",
+            genres = listOf("Animation"),
+            preferredSubtitleLanguage = "en",
+        )
+        assertEquals(engSrt, selectAutoPlayCandidate(groups(polishAss, spanishAss, engSrt), context))
+        assertEquals(engPgs, selectAutoPlayCandidate(groups(polishAss, spanishAss, engPgs), context))
+        // Preferred ASS still beats preferred SRT within the ladder.
+        val engAss = candidate("en-ass", cacheState = StreamCacheState.CACHED, infoHash = "en-ass-hash")
+            .copy(
+                title = "Show.S01E01.1080p.English.Softsub.ASS",
+                videoSizeBytes = 400L * 1024 * 1024,
+                seeders = 5,
+            )
+        assertEquals(engAss, selectAutoPlayCandidate(groups(engSrt, engAss, polishAss), context))
+        assertTrue(StreamScoringEngine.rank(engAss, context).softsubFit > StreamScoringEngine.rank(engSrt, context).softsubFit)
+        assertTrue(StreamScoringEngine.rank(engPgs, context).softsubFit > StreamScoringEngine.rank(engSrt, context).softsubFit)
+        assertTrue(StreamScoringEngine.rank(engSrt, context).softsubFit > StreamScoringEngine.rank(polishAss, context).softsubFit)
+    }
+
+    @Test
+    fun preferredEnglishDoesNotAutoPlayWrongLanguageOnlyPacksForMainstreamEither() {
+        val spanish = candidate("es", cacheState = StreamCacheState.CACHED, infoHash = "es-hash")
+            .copy(
+                title = "Movie.2024.1080p.BluRay.Spanish.ASS",
+                videoSizeBytes = 8L * 1024 * 1024 * 1024,
+                seeders = 100,
+            )
+        val context = StreamScoringEngine.Context(
+            title = "Movie",
+            contentType = "movie",
+            preferredSubtitleLanguage = "en",
+        )
+        assertNull(selectAutoPlayCandidate(groups(spanish), context))
+    }
+
+    @Test
+    fun preferredEnglishDoesNotAutoPlayPolishOnlyWhenNoEnglishCached() {
+        val polish = candidate("pl", cacheState = StreamCacheState.CACHED, infoHash = "pl-hash")
+            .copy(
+                title = "[FrixySubs] Show - S01E02 [1080p] [Napisy PL]",
+                videoSizeBytes = 400L * 1024 * 1024,
+                seeders = 80,
+            )
+        val context = StreamScoringEngine.Context(
+            title = "Show",
+            contentType = "series",
+            genres = listOf("Animation"),
+            preferredSubtitleLanguage = "en",
+        )
+        assertNull(selectAutoPlayCandidate(groups(polish), context))
     }
 
     @Test
