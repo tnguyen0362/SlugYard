@@ -34,6 +34,47 @@ data class TorboxCloudItem(
     val downloadState: String?,
 )
 
+data class TorboxTorrentSnapshot(
+    val id: Int,
+    val files: List<TorboxFile>,
+    val downloadState: String?,
+    val progress: Double?,
+) {
+    val isReady: Boolean
+        get() {
+            if (files.isEmpty()) return false
+            val state = downloadState?.lowercase().orEmpty()
+            if (state in TERMINAL_FAIL_STATES) return false
+            if (state.isBlank()) return true
+            return state in READY_STATES
+        }
+
+    val isFailed: Boolean
+        get() = downloadState?.lowercase().orEmpty() in TERMINAL_FAIL_STATES
+
+    companion object {
+        private val READY_STATES = setOf(
+            "cached",
+            "completed",
+            "complete",
+            "downloaded",
+            "finished",
+            "ready",
+            "seeding",
+            "uploading",
+        )
+        private val TERMINAL_FAIL_STATES = setOf(
+            "error",
+            "failed",
+            "dead",
+            "magnet_error",
+            "virus",
+            "stalled (no seeds)",
+            "stalled",
+        )
+    }
+}
+
 sealed interface TorboxResult<out T> {
     data class Success<T>(val value: T) : TorboxResult<T>
     data class HttpFailure(val statusCode: Int) : TorboxResult<Nothing>
@@ -62,20 +103,35 @@ class TorboxTransport(
         }
     }
 
-    suspend fun createCachedTorrent(apiKey: String, infoHash: String): TorboxResult<Int> {
+    suspend fun createCachedTorrent(apiKey: String, infoHash: String): TorboxResult<Int> =
+        createTorrent(apiKey, infoHash, onlyIfCached = true)
+
+    /**
+     * Queues a magnet on TorBox. When [onlyIfCached] is false, TorBox will start a real download
+     * for uncached hashes (needed for Sources / auto-play fallback of Download rows).
+     */
+    suspend fun createTorrent(
+        apiKey: String,
+        infoHash: String,
+        onlyIfCached: Boolean,
+    ): TorboxResult<Int> {
         val normalized = infoHash.trim()
         if (normalized.isBlank()) return TorboxResult.InvalidResponse
         val body = MultipartBody.Builder()
             .setType(MultipartBody.FORM)
             .addFormDataPart("magnet", "magnet:?xt=urn:btih:$normalized")
-            .addFormDataPart("add_only_if_cached", "true")
+            .addFormDataPart("add_only_if_cached", onlyIfCached.toString())
             .addFormDataPart("allow_zip", "false")
             .build()
         return post(apiKey, "v1/api/torrents/createtorrent", body).flatMap(TorboxResponseDecoder::torrentId)
     }
 
     suspend fun torrentFiles(apiKey: String, torrentId: Int): TorboxResult<List<TorboxFile>> =
-        get(apiKey, "v1/api/torrents/mylist?id=$torrentId&bypass_cache=true").flatMap(TorboxResponseDecoder::files)
+        torrentSnapshot(apiKey, torrentId).map { it.files }
+
+    suspend fun torrentSnapshot(apiKey: String, torrentId: Int): TorboxResult<TorboxTorrentSnapshot> =
+        get(apiKey, "v1/api/torrents/mylist?id=$torrentId&bypass_cache=true")
+            .flatMap { payload -> TorboxResponseDecoder.torrentSnapshot(payload, torrentId) }
 
     suspend fun listCloudTorrents(apiKey: String): TorboxResult<List<TorboxCloudItem>> =
         get(apiKey, "v1/api/torrents/mylist").flatMap(TorboxResponseDecoder::cloudItems)
@@ -151,6 +207,9 @@ internal object TorboxResponseDecoder {
     }
 
     fun torrentId(payload: JsonObject): TorboxResult<Int> {
+        if ((payload["success"] as? JsonPrimitive)?.contentOrNull == "false") {
+            return TorboxResult.InvalidResponse
+        }
         val data = payload["data"] as? JsonObject ?: return TorboxResult.InvalidResponse
         val id = (data["torrent_id"] as? JsonPrimitive)?.intOrNull
             ?: (data["id"] as? JsonPrimitive)?.intOrNull
@@ -158,23 +217,46 @@ internal object TorboxResponseDecoder {
         return TorboxResult.Success(id)
     }
 
-    fun files(payload: JsonObject): TorboxResult<List<TorboxFile>> {
-        val data = payload["data"] as? JsonObject ?: return TorboxResult.InvalidResponse
-        val files = data["files"] as? JsonArray ?: return TorboxResult.InvalidResponse
-        return TorboxResult.Success(files.mapNotNull { raw ->
+    fun torrentSnapshot(payload: JsonObject, fallbackId: Int): TorboxResult<TorboxTorrentSnapshot> {
+        val data = when (val raw = payload["data"]) {
+            is JsonObject -> raw
+            is JsonArray -> raw.firstOrNull() as? JsonObject
+            else -> null
+        } ?: return TorboxResult.InvalidResponse
+        val id = (data["id"] as? JsonPrimitive)?.intOrNull ?: fallbackId
+        val filesArray = data["files"] as? JsonArray ?: JsonArray(emptyList())
+        val files = filesArray.mapNotNull { raw ->
             val file = raw as? JsonObject ?: return@mapNotNull null
-            val id = (file["id"] as? JsonPrimitive)?.intOrNull ?: return@mapNotNull null
+            val fileId = (file["id"] as? JsonPrimitive)?.intOrNull ?: return@mapNotNull null
             val name = listOf("short_name", "name", "absolute_path")
                 .firstNotNullOfOrNull { key -> (file[key] as? JsonPrimitive)?.contentOrNull?.takeIf(String::isNotBlank) }
                 ?: return@mapNotNull null
             TorboxFile(
-                id = id,
+                id = fileId,
                 name = name.substringAfterLast('/'),
-                mimeType = (file["mimetype"] as? JsonPrimitive)?.contentOrNull,
+                mimeType = (file["mimetype"] as? JsonPrimitive)?.contentOrNull
+                    ?: (file["mime_type"] as? JsonPrimitive)?.contentOrNull,
                 sizeBytes = (file["size"] as? JsonPrimitive)?.contentOrNull?.toLongOrNull(),
             )
-        })
+        }
+        val state = listOf("download_state", "state", "status")
+            .firstNotNullOfOrNull { key -> (data[key] as? JsonPrimitive)?.contentOrNull?.takeIf(String::isNotBlank) }
+        val progress = listOf("progress", "download_progress")
+            .firstNotNullOfOrNull { key ->
+                (data[key] as? JsonPrimitive)?.contentOrNull?.toDoubleOrNull()
+            }
+        return TorboxResult.Success(
+            TorboxTorrentSnapshot(
+                id = id,
+                files = files,
+                downloadState = state,
+                progress = progress,
+            ),
+        )
     }
+
+    fun files(payload: JsonObject): TorboxResult<List<TorboxFile>> =
+        torrentSnapshot(payload, fallbackId = -1).map { it.files }
 
     fun cloudItems(payload: JsonObject): TorboxResult<List<TorboxCloudItem>> {
         val data = payload["data"] as? JsonArray ?: return TorboxResult.InvalidResponse

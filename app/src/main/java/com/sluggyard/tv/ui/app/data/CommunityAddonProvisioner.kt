@@ -54,8 +54,9 @@ class CommunityAddonProvisioner(
     }
 
     /**
-     * Installs a single allowlisted community manifest (e.g. PlayFlix from Community addons).
-     * Optional PlayFlix is preserved across later provision passes.
+     * Installs a single allowlisted community manifest.
+     * Entries in [SlugYardCommunitySourcePolicy.optionalCommunityManifestUrls] (if any)
+     * are preserved across later provision passes.
      */
     suspend fun installAllowlisted(
         registryUrl: String,
@@ -119,18 +120,11 @@ class CommunityAddonProvisioner(
         }
     }
 
+    /** Use upstream branding (MediaFusion, Torrentio, …) — PlayFlix is the app name only. */
     private fun displayAwareManifest(
-        registryUrl: String,
+        @Suppress("UNUSED_PARAMETER") registryUrl: String,
         manifest: com.sluggyard.tv.core.addonprotocol.AddonManifestContract,
-    ) = if (SlugYardCommunitySourcePolicy.isPlayFlixManifest(registryUrl)) {
-        manifest.copy(
-            name = SlugYardCommunitySourcePolicy.PLAYFLIX_DISPLAY_NAME,
-            version = SlugYardCommunitySourcePolicy.PLAYFLIX_DISPLAY_VERSION,
-            description = SlugYardCommunitySourcePolicy.PLAYFLIX_DISPLAY_DESCRIPTION,
-        )
-    } else {
-        manifest
-    }
+    ) = manifest
 
     private suspend fun provisionLocked(
         configured: ConfiguredAddonUrls?,

@@ -5,10 +5,13 @@ import com.sluggyard.tv.BuildConfig
 /**
  * Fixed backend manifest allowlist for the locked-down SlugYard product.
  *
- * Provider-specific manifest URLs are generated only for the two allowlisted content sources.
+ * Provider-specific manifest URLs are generated only for the allowlisted content sources.
  * Torrent hashes returned by those sources are still resolved locally through the active
  * rewrite-owned provider transport. Torrentio stays provisioned even during a transient upstream
  * outage; endpoint availability is handled by the bounded transport, not by removing a source.
+ *
+ * PlayFlix is the **app** product name — not a separate Stremio stream pack. Content scrapers are
+ * Torrentio, MediaFusion, Meteor, and optionally AIOStreams (real upstream names/logos).
  */
 object SlugYardCommunitySourcePolicy {
     /** Present only when AIOSTREAMS_BASE_URL is set; keyless stub is never used for streams. */
@@ -17,19 +20,22 @@ object SlugYardCommunitySourcePolicy {
             ?.let { "$it/stremio/manifest.json" }
 
     /**
-     * Bundled PlayFlix community addon (MediaFusion host). Allowlisted for manual install from
-     * Community addons, but never part of the default/auto-provisioned set.
+     * Bundled MediaFusion host (MidnightIgnite). Same default pack as Torrentio/Meteor; keep
+     * the historical constant name for callers/migrations.
      */
     const val PLAYFLIX_MANIFEST_URL =
         "https://mediafusionfortheweebs.midnightignite.me/manifest.json"
 
-    /** User-visible name for the bundled community addon (formerly Purefire / MediaFusion). */
-    const val PLAYFLIX_DISPLAY_NAME = "PlayFlix"
+    /** @deprecated Prefer real upstream [ManagedAddon.manifest] branding (MediaFusion). */
+    @Deprecated("PlayFlix is the app, not a stream pack name")
+    const val PLAYFLIX_DISPLAY_NAME = "MediaFusion"
 
-    /** Product-facing version shown in Community addons (not the upstream MediaFusion build). */
+    /** @deprecated Use upstream manifest.version. */
+    @Deprecated("PlayFlix is the app, not a stream pack name")
     const val PLAYFLIX_DISPLAY_VERSION = "1.1.0"
 
-    /** Product-facing blurb — never surface MediaFusion branding in Settings. */
+    /** @deprecated Use upstream manifest.description. */
+    @Deprecated("PlayFlix is the app, not a stream pack name")
     const val PLAYFLIX_DISPLAY_DESCRIPTION = "Third-party scrape"
 
     val bootstrapManifestUrls: List<String> = buildList {
@@ -63,48 +69,43 @@ object SlugYardCommunitySourcePolicy {
             isContentSourceManifest(url)
         }
 
-    /** Optional community addons shown under Community; never auto-installed. */
-    val optionalCommunityManifestUrls: List<String> = listOf(PLAYFLIX_MANIFEST_URL)
+    /**
+     * Optional Community catalog entries (manual install only). Empty — MediaFusion is a default
+     * pack scraper, not a separate "PlayFlix" community addon.
+     */
+    val optionalCommunityManifestUrls: List<String> = emptyList()
 
     fun isWatchHubManifest(url: String): Boolean =
         "watchhub" in url.lowercase()
 
+    /** True for the bundled MediaFusion host URL (legacy name: PlayFlix manifest). */
     fun isPlayFlixManifest(url: String): Boolean {
         val normalized = url.trim().trimEnd('/').lowercase()
-        val playflix = PLAYFLIX_MANIFEST_URL.trimEnd('/').lowercase()
-        return normalized == playflix ||
-            normalized == playflix.removeSuffix("/manifest.json") ||
+        val mediaFusion = PLAYFLIX_MANIFEST_URL.trimEnd('/').lowercase()
+        return normalized == mediaFusion ||
+            normalized == mediaFusion.removeSuffix("/manifest.json") ||
             (normalized.contains("mediafusionfortheweebs.midnightignite.me") &&
                 !normalized.contains("meteor", ignoreCase = true))
     }
 
-    /** True when a Sources group comes from the bundled PlayFlix / Purefire host. */
-    fun isPlayFlixStreamAddon(addonId: String, addonName: String): Boolean {
-        if (addonName.equals(PLAYFLIX_DISPLAY_NAME, ignoreCase = true)) return true
-        val haystack = "$addonId $addonName".lowercase()
-        if ("playflix" in haystack || "purefire" in haystack) return true
-        return haystack.contains("mediafusionfortheweebs.midnightignite.me") &&
-            !haystack.contains("meteor")
-    }
+    /**
+     * Formerly used to strip MediaFusion from auto-pick. Always false — it is a real pack
+     * scraper like Torrentio/Meteor, not a separate "PlayFlix" source.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    fun isPlayFlixStreamAddon(addonId: String, addonName: String): Boolean = false
 
-    fun isOptionalCommunityManifest(url: String): Boolean = isPlayFlixManifest(url)
+    /** No optional community packs in the locked-down default set. */
+    @Suppress("UNUSED_PARAMETER")
+    fun isOptionalCommunityManifest(url: String): Boolean = false
 
-    fun addonDisplayName(addon: ManagedAddon): String =
-        if (isPlayFlixManifest(addon.manifestUrl)) PLAYFLIX_DISPLAY_NAME else addon.manifest.name
+    fun addonDisplayName(addon: ManagedAddon): String = addon.manifest.name
 
     fun addonDisplayVersion(addon: ManagedAddon): String? =
-        if (isPlayFlixManifest(addon.manifestUrl)) {
-            PLAYFLIX_DISPLAY_VERSION
-        } else {
-            addon.manifest.version?.takeIf { it.isNotBlank() }
-        }
+        addon.manifest.version?.takeIf { it.isNotBlank() }
 
     fun addonDisplayDescription(addon: ManagedAddon): String =
-        if (isPlayFlixManifest(addon.manifestUrl)) {
-            PLAYFLIX_DISPLAY_DESCRIPTION
-        } else {
-            addon.manifest.description?.takeIf { it.isNotBlank() } ?: "Stremio-compatible addon"
-        }
+        addon.manifest.description?.takeIf { it.isNotBlank() } ?: "Stremio-compatible addon"
 
     fun isContentSourceManifest(url: String): Boolean {
         val normalized = url.lowercase()
@@ -135,23 +136,23 @@ object SlugYardCommunitySourcePolicy {
         !isContentSourceManifest(url)
 
     /**
-     * Stream scrapers / torrent providers that should stay out of Addons Settings lists.
-     * PlayFlix is a community catalog/stream pack and is not treated as scraper chrome here.
+     * Stream scrapers / torrent providers that should stay out of Addons Settings lists
+     * (same bucket as Torrentio / Meteor / MediaFusion / AIO).
      */
     fun isStreamScraperManifest(url: String): Boolean {
-        if (isPlayFlixManifest(url) || isWatchHubManifest(url)) return false
+        if (isWatchHubManifest(url)) return false
         val normalized = url.lowercase()
         return "torrentio" in normalized ||
             "comet" in normalized ||
             "meteor" in normalized ||
             isAioStreamsManifest(url) ||
-            ("mediafusion" in normalized)
+            "mediafusion" in normalized ||
+            isPlayFlixManifest(url)
     }
 
-    /** Catalog / meta / subtitle / PlayFlix entries shown in Settings → Addons. */
+    /** Catalog / meta / subtitle infrastructure; scrapers are hidden. */
     fun isUserFacingSettingsAddon(addon: ManagedAddon): Boolean {
         if (isStreamScraperManifest(addon.manifestUrl)) return false
-        if (isPlayFlixManifest(addon.manifestUrl)) return true
         if (isInfrastructureManifest(addon.manifestUrl)) return true
         val resources = addon.manifest.resources
         return AddonResource.CATALOG in resources ||
@@ -162,11 +163,9 @@ object SlugYardCommunitySourcePolicy {
     /**
      * Manifests to fetch for a provision pass.
      * Without debrid, skip torrent content sources so Play falls through to WatchHub cleanly.
-     * PlayFlix (optional community) is never auto-provisioned — install from Community addons.
      */
     fun provisionManifestUrls(debridConfigured: Boolean): List<String> =
-        (if (debridConfigured) bootstrapManifestUrls else infrastructureManifestUrls)
-            .filterNot(::isOptionalCommunityManifest)
+        if (debridConfigured) bootstrapManifestUrls else infrastructureManifestUrls
 
     fun isCommunityPackInstalled(addons: List<ManagedAddon>): Boolean =
         addons.any {

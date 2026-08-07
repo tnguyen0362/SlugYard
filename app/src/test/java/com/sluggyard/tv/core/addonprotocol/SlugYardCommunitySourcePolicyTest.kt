@@ -38,25 +38,19 @@ class SlugYardCommunitySourcePolicyTest {
         assertFalse(urls.any { it.contains("comet", ignoreCase = true) })
         assertFalse(urls.any { it.contains("meteor", ignoreCase = true) })
         assertFalse(urls.any { SlugYardCommunitySourcePolicy.isAioStreamsManifest(it) })
-        assertFalse(urls.any(SlugYardCommunitySourcePolicy::isOptionalCommunityManifest))
     }
 
     @Test
-    fun `with debrid provisions bootstrap allowlist except optional PlayFlix`() {
+    fun `with debrid provisions full bootstrap including MediaFusion`() {
         val urls = SlugYardCommunitySourcePolicy.provisionManifestUrls(debridConfigured = true)
-        assertEquals(
-            SlugYardCommunitySourcePolicy.bootstrapManifestUrls.filterNot(
-                SlugYardCommunitySourcePolicy::isOptionalCommunityManifest,
-            ),
-            urls,
-        )
-        assertFalse(urls.any(SlugYardCommunitySourcePolicy::isPlayFlixManifest))
+        assertEquals(SlugYardCommunitySourcePolicy.bootstrapManifestUrls, urls)
+        assertTrue(urls.any { it.contains("mediafusion", ignoreCase = true) })
         assertFalse(urls.any { it.contains("comet", ignoreCase = true) })
-        assertTrue(SlugYardCommunitySourcePolicy.PLAYFLIX_MANIFEST_URL in SlugYardCommunitySourcePolicy.bootstrapManifestUrls)
+        assertTrue(SlugYardCommunitySourcePolicy.PLAYFLIX_MANIFEST_URL in urls)
     }
 
     @Test
-    fun `playflix display name overrides mediafusion branding`() {
+    fun `mediafusion keeps upstream display branding not app name`() {
         val addon = ManagedAddon(
             manifestUrl = SlugYardCommunitySourcePolicy.PLAYFLIX_MANIFEST_URL,
             manifest = AddonManifestContract(
@@ -66,11 +60,13 @@ class SlugYardCommunitySourcePolicyTest {
                 description = "MediaFusion — universal torrent addon",
             ),
         )
-        assertEquals(SlugYardCommunitySourcePolicy.PLAYFLIX_DISPLAY_NAME, SlugYardCommunitySourcePolicy.addonDisplayName(addon))
-        assertEquals(SlugYardCommunitySourcePolicy.PLAYFLIX_DISPLAY_VERSION, (SlugYardCommunitySourcePolicy.addonDisplayVersion(addon)))
-        assertEquals(SlugYardCommunitySourcePolicy.PLAYFLIX_DISPLAY_DESCRIPTION, SlugYardCommunitySourcePolicy.addonDisplayDescription(addon))
-        assertEquals("1.1.0", SlugYardCommunitySourcePolicy.PLAYFLIX_DISPLAY_VERSION)
-        assertEquals("Third-party scrape", SlugYardCommunitySourcePolicy.PLAYFLIX_DISPLAY_DESCRIPTION)
+        assertEquals("MediaFusion", SlugYardCommunitySourcePolicy.addonDisplayName(addon))
+        assertEquals("6.1.1", SlugYardCommunitySourcePolicy.addonDisplayVersion(addon))
+        assertEquals(
+            "MediaFusion — universal torrent addon",
+            SlugYardCommunitySourcePolicy.addonDisplayDescription(addon),
+        )
+        assertFalse(SlugYardCommunitySourcePolicy.isPlayFlixStreamAddon(addon.manifest.id, addon.manifest.name))
     }
 
     @Test
@@ -96,7 +92,7 @@ class SlugYardCommunitySourcePolicyTest {
     }
 
     @Test
-    fun `settings addon list hides scrapers but keeps playflix and infrastructure`() {
+    fun `settings addon list hides scrapers including mediafusion`() {
         val cinemeta = ManagedAddon(
             manifestUrl = "https://v3-cinemeta.strem.io/manifest.json",
             manifest = AddonManifestContract(
@@ -113,7 +109,7 @@ class SlugYardCommunitySourcePolicyTest {
                 resources = setOf(AddonResource.STREAM),
             ),
         )
-        val playflix = ManagedAddon(
+        val mediaFusion = ManagedAddon(
             manifestUrl = SlugYardCommunitySourcePolicy.PLAYFLIX_MANIFEST_URL,
             manifest = AddonManifestContract(
                 id = "mediafusion",
@@ -123,10 +119,11 @@ class SlugYardCommunitySourcePolicyTest {
         )
 
         assertTrue(SlugYardCommunitySourcePolicy.isUserFacingSettingsAddon(cinemeta))
-        assertTrue(SlugYardCommunitySourcePolicy.isUserFacingSettingsAddon(playflix))
+        assertFalse(SlugYardCommunitySourcePolicy.isUserFacingSettingsAddon(mediaFusion))
         assertFalse(SlugYardCommunitySourcePolicy.isUserFacingSettingsAddon(torrentio))
         assertTrue(SlugYardCommunitySourcePolicy.isStreamScraperManifest(torrentio.manifestUrl))
-        assertFalse(SlugYardCommunitySourcePolicy.isStreamScraperManifest(playflix.manifestUrl))
+        assertTrue(SlugYardCommunitySourcePolicy.isStreamScraperManifest(mediaFusion.manifestUrl))
+        assertTrue(SlugYardCommunitySourcePolicy.optionalCommunityManifestUrls.isEmpty())
     }
 
     @Test

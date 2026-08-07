@@ -124,7 +124,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Keep this greater than the previous SlugYard debug build so Android TV
         // can install the public beta as an in-place update.
-        versionCode = 1039
+        versionCode = 1040
         versionName = "0.1.0-beta"
 
         buildConfigField("String", "PARENTAL_GUIDE_API_URL", "\"${localProperties.getProperty("PARENTAL_GUIDE_API_URL", "")}\"")

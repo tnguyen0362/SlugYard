@@ -153,6 +153,7 @@ fun RetainedPlayerHost(
         mutableStateOf(PlayerSecondaryState(title = title, contentType = contentType))
     }
     var secondaryJob by remember(contentId, season, episode) { mutableStateOf<Job?>(null) }
+    var sourceResolveJob by remember(contentId, season, episode) { mutableStateOf<Job?>(null) }
     var episodeHandoffPreparing by remember { mutableStateOf(false) }
     var episodeHandoffTitle by remember { mutableStateOf("") }
     var episodeHandoffArtUrl by remember { mutableStateOf<String?>(null) }
@@ -209,6 +210,7 @@ fun RetainedPlayerHost(
             panel = panel,
             sourceGroups = if (forceRefresh) emptyList() else secondaryState.sourceGroups,
             sourceLoading = true,
+            resolvingSource = false,
             sourceError = null,
             selectedSourceAddon = if (forceRefresh) null else secondaryState.selectedSourceAddon,
             failedSourceIds = if (forceRefresh) emptySet() else secondaryState.failedSourceIds,
@@ -392,13 +394,15 @@ fun RetainedPlayerHost(
                         language = viewModel.contentLanguage(),
                         preferredSubtitleLanguage = playerState.subtitleStyle.preferredLanguage,
                     ),
+                    // Full collect finished above — probes settled; allow debrid download fallback.
+                    allowUncachedFallback = true,
                 )
                 if (candidate == null) {
                     episodeHandoffPreparing = false
                     secondaryState = secondaryState.copy(
                         panel = PlayerSecondaryPanel.EPISODES,
                         sourceLoading = false,
-                        sourceError = "No cached playable source was found for this episode.",
+                        sourceError = "No playable source was found for this episode.",
                     )
                     return@launch
                 }
@@ -418,73 +422,118 @@ fun RetainedPlayerHost(
     }
 
     selectSource = { candidate, forceDebridForTorrent ->
-        secondaryState = secondaryState.copy(sourceLoading = true, sourceError = null)
-        scope.launch {
-            when (val result = manualResolution.prepare(
-                candidate.toManualSelection(
-                    season = secondaryState.episodeSourceSeason ?: season,
-                    episode = secondaryState.episodeSourceEpisode ?: episode,
-                    forceDebridForTorrent = forceDebridForTorrent,
-                ),
-                configuredDebrid(),
-            )) {
-                is ManualResolutionResult.Ready -> {
-                    val switchingEpisode = secondaryState.episodeSourceId != null
-                    val handoff = PlaybackHandoff(
-                        source = result.source,
-                        contentId = secondaryState.episodeSourceId ?: contentId,
-                        contentType = if (switchingEpisode) "series" else contentType,
-                        title = title,
-                        season = secondaryState.episodeSourceSeason ?: season,
-                        episode = secondaryState.episodeSourceEpisode ?: episode,
-                        episodeTitle = secondaryState.episodeSourceEpisodeTitle ?: activeContext.episodeTitle,
-                        addonId = addonId,
-                        parentId = parentId,
-                        parentType = parentType,
-                        resumePositionMs = if (switchingEpisode) 0L else latestTimeline.currentPosition,
-                    )
-                    activeContext = activeContext.copy(
-                        contentId = handoff.contentId,
-                        contentType = handoff.contentType,
-                        season = handoff.season,
-                        episode = handoff.episode,
-                        episodeTitle = handoff.episodeTitle,
-                    )
-                    // Reset the checkpoint throttle baseline so the new source can save
-                    // checkpoints from its own start position. Without this, a same-episode
-                    // source switch inherits the old source's lastSavedPositionMs, and the
-                    // distance-gate blocks all checkpoint writes for the new source until
-                    // the user scrubs past the old baseline.
-                    lastSavedPositionMs = 0L
-                    // Fire handoff first so PlayerSystemOverlay can show Building player
-                    // on the same art. Clearing preparing before that flashed the old
-                    // Lottie/black loading gap between Finding stream and Building player.
-                    viewModel.onEvent(PlayerEvent.OnPlaybackSourceSelected(handoff))
-                    secondaryState = secondaryState.copy(
-                        panel = PlayerSecondaryPanel.HIDDEN,
-                        sourceLoading = false,
-                        sourceError = null,
+        // Cancel only prior resolve work — secondaryJob owns episode/source loads that call us.
+        sourceResolveJob?.cancel()
+        secondaryState = secondaryState.copy(
+            sourceLoading = true,
+            resolvingSource = true,
+            sourceError = null,
+        )
+        sourceResolveJob = scope.launch {
+            try {
+                android.util.Log.i(
+                    "SlugYardManualResolve",
+                    "player prepare id=${candidate.id} forceDebrid=$forceDebridForTorrent " +
+                        "cache=${candidate.cacheState} src=${candidate.sourceLabel}",
+                )
+                val result = withTimeoutOrNull(45_000L) {
+                    manualResolution.prepare(
+                        candidate.toManualSelection(
+                            season = secondaryState.episodeSourceSeason ?: season,
+                            episode = secondaryState.episodeSourceEpisode ?: episode,
+                            // Manual Sources always force debrid for torrents so proxy URLs cannot
+                            // short-circuit prepare without actually resolving.
+                            forceDebridForTorrent = forceDebridForTorrent || !candidate.infoHash.isNullOrBlank(),
+                        ),
+                        configuredDebrid(),
                     )
                 }
-                is ManualResolutionResult.Unavailable -> {
-                    val restoreEpisodes = episodeHandoffPreparing
+                if (result == null) {
                     episodeHandoffPreparing = false
                     secondaryState = secondaryState.copy(
-                        panel = if (restoreEpisodes) PlayerSecondaryPanel.EPISODES else secondaryState.panel,
                         sourceLoading = false,
-                        sourceError = result.message,
+                        resolvingSource = false,
+                        sourceError = "Source resolve timed out. Choose another source.",
                         failedSourceIds = secondaryState.failedSourceIds + candidate.id,
                     )
+                    return@launch
                 }
-                is ManualResolutionResult.Failed -> {
-                    val restoreEpisodes = episodeHandoffPreparing
-                    episodeHandoffPreparing = false
-                    secondaryState = secondaryState.copy(
-                        panel = if (restoreEpisodes) PlayerSecondaryPanel.EPISODES else secondaryState.panel,
-                        sourceLoading = false,
-                        sourceError = result.message,
-                        failedSourceIds = secondaryState.failedSourceIds + candidate.id,
-                    )
+                when (result) {
+                    is ManualResolutionResult.Ready -> {
+                        val switchingEpisode = secondaryState.episodeSourceId != null
+                        val handoff = PlaybackHandoff(
+                            source = result.source,
+                            contentId = secondaryState.episodeSourceId ?: contentId,
+                            contentType = if (switchingEpisode) "series" else contentType,
+                            title = title,
+                            season = secondaryState.episodeSourceSeason ?: season,
+                            episode = secondaryState.episodeSourceEpisode ?: episode,
+                            episodeTitle = secondaryState.episodeSourceEpisodeTitle ?: activeContext.episodeTitle,
+                            addonId = addonId,
+                            parentId = parentId,
+                            parentType = parentType,
+                            resumePositionMs = if (switchingEpisode) 0L else latestTimeline.currentPosition,
+                        )
+                        activeContext = activeContext.copy(
+                            contentId = handoff.contentId,
+                            contentType = handoff.contentType,
+                            season = handoff.season,
+                            episode = handoff.episode,
+                            episodeTitle = handoff.episodeTitle,
+                        )
+                        // Reset the checkpoint throttle baseline so the new source can save
+                        // checkpoints from its own start position. Without this, a same-episode
+                        // source switch inherits the old source's lastSavedPositionMs, and the
+                        // distance-gate blocks all checkpoint writes for the new source until
+                        // the user scrubs past the old baseline.
+                        lastSavedPositionMs = 0L
+                        // Fire handoff first so PlayerSystemOverlay can show Building player
+                        // on the same art. Clearing preparing before that flashed the old
+                        // Lottie/black loading gap between Finding stream and Building player.
+                        viewModel.onEvent(PlayerEvent.OnPlaybackSourceSelected(handoff))
+                        secondaryState = secondaryState.copy(
+                            panel = PlayerSecondaryPanel.HIDDEN,
+                            sourceLoading = false,
+                            resolvingSource = false,
+                            sourceError = null,
+                        )
+                    }
+                    is ManualResolutionResult.Unavailable -> {
+                        val restoreEpisodes = episodeHandoffPreparing
+                        episodeHandoffPreparing = false
+                        secondaryState = secondaryState.copy(
+                            panel = if (restoreEpisodes) PlayerSecondaryPanel.EPISODES else secondaryState.panel,
+                            sourceLoading = false,
+                            resolvingSource = false,
+                            sourceError = result.message,
+                            failedSourceIds = secondaryState.failedSourceIds + candidate.id,
+                        )
+                    }
+                    is ManualResolutionResult.Failed -> {
+                        val restoreEpisodes = episodeHandoffPreparing
+                        episodeHandoffPreparing = false
+                        secondaryState = secondaryState.copy(
+                            panel = if (restoreEpisodes) PlayerSecondaryPanel.EPISODES else secondaryState.panel,
+                            sourceLoading = false,
+                            resolvingSource = false,
+                            sourceError = result.message,
+                            failedSourceIds = secondaryState.failedSourceIds + candidate.id,
+                        )
+                    }
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                episodeHandoffPreparing = false
+                secondaryState = secondaryState.copy(
+                    sourceLoading = false,
+                    resolvingSource = false,
+                    sourceError = failure.message ?: "Source could not be resolved",
+                    failedSourceIds = secondaryState.failedSourceIds + candidate.id,
+                )
+            } finally {
+                if (sourceResolveJob === coroutineContext[Job]) {
+                    sourceResolveJob = null
                 }
             }
         }
@@ -530,6 +579,7 @@ fun RetainedPlayerHost(
                         language = viewModel.contentLanguage(),
                         preferredSubtitleLanguage = playerState.subtitleStyle.preferredLanguage,
                     ),
+                    allowUncachedFallback = true,
                 ) ?: run {
                     episodeHandoffPreparing = false
                     openSources()
@@ -725,7 +775,9 @@ fun RetainedPlayerHost(
                         )
                     },
                     onSelectSourceAddon = { addon -> secondaryState = secondaryState.copy(selectedSourceAddon = addon) },
-                    onSelectSource = { candidate -> selectSource(candidate, false) },
+                    onSelectSource = { candidate ->
+                        selectSource(candidate, !candidate.infoHash.isNullOrBlank())
+                    },
                     onBackToEpisodes = {
                         secondaryJob?.cancel()
                         openEpisodes()

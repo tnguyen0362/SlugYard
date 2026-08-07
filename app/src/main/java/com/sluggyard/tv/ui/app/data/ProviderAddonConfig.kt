@@ -17,7 +17,7 @@ internal const val CometManifestUrl = "$CometManifestHost/manifest.json"
 internal const val MeteorManifestHost = "https://meteorfortheweebs.midnightignite.me"
 internal const val MeteorManifestUrl = "$MeteorManifestHost/manifest.json"
 internal const val MediaFusionManifestHost = "https://mediafusionfortheweebs.midnightignite.me"
-/** Keyless catalog bootstrap — never embeds a debrid token. PlayFlix UI name; URL unchanged. */
+/** Keyless MediaFusion catalog bootstrap — never embeds a debrid token. */
 internal const val MediaFusionBootstrapManifestUrl =
     com.sluggyard.tv.core.addonprotocol.SlugYardCommunitySourcePolicy.PLAYFLIX_MANIFEST_URL
 
@@ -41,10 +41,9 @@ internal fun buildTorrentioManifestUrl(service: DebridService, apiKey: String): 
     val normalized = apiKey.trim()
     require(normalized.isNotBlank()) { "A Debrid API key is required to configure Torrentio" }
     val encoded = URLEncoder.encode(normalized, StandardCharsets.UTF_8.name()).replace("+", "%20")
-    // nodownloadlinks = cache/instant only — skips "download to debrid" torrents so Play/Sources
-    // return fewer, faster results (Torrentio configure: "Don't show download to Debrid links").
+    // Include Download (uncached) rows: TorBox Instant pools are often empty for niche
+    // episodes, and Sources / uncached auto-play now force local debrid resolve.
     return "${TorrentioManifestUrl.removeSuffix("/manifest.json")}/" +
-        "debridoptions=nodownloadlinks%7C" +
         "${torrentioProviderKey(service)}=$encoded/manifest.json"
 }
 

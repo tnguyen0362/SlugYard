@@ -30,6 +30,29 @@ class TorboxResponseDecoderTest {
     }
 
     @Test
+    fun `torrent snapshot reports ready when download completed with files`() {
+        val result = TorboxResponseDecoder.torrentSnapshot(
+            payload(
+                """{"data":{"id":11,"download_state":"completed","files":[{"id":1,"name":"ep.mkv","size":10}]}}""",
+            ),
+            fallbackId = 11,
+        )
+        val snap = (result as TorboxResult.Success).value
+        assertEquals(11, snap.id)
+        assertTrue(snap.isReady)
+        assertEquals(1, snap.files.size)
+    }
+
+    @Test
+    fun `torrent id rejects success false envelopes`() {
+        assertTrue(
+            TorboxResponseDecoder.torrentId(
+                payload("""{"success":false,"error":"CACHED_TORRENT_REQUIRED","data":null}"""),
+            ) is TorboxResult.InvalidResponse,
+        )
+    }
+
+    @Test
     fun `cloud list decoder maps torrent rows`() {
         val result = TorboxResponseDecoder.cloudItems(
             payload(

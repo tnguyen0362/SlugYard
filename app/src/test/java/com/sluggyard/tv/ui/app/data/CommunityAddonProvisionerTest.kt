@@ -23,7 +23,7 @@ class CommunityAddonProvisionerTest {
 
         val report = CommunityAddonProvisioner(gateway, registry).provision(
             configured = ConfiguredAddonUrls(
-                torrentioManifestUrl = "https://torrentio.strem.fun/debridoptions=nodownloadlinks%7Ctorbox=key/manifest.json",
+                torrentioManifestUrl = "https://torrentio.strem.fun/torbox=key/manifest.json",
                 mediaFusionManifestUrl = "https://mediafusion.example/configured/manifest.json",
                 cometManifestUrl = "https://comet.elfhosted.com/configured/manifest.json",
                 meteorManifestUrl = "https://meteorfortheweebs.midnightignite.me/configured/manifest.json",
@@ -36,7 +36,7 @@ class CommunityAddonProvisionerTest {
 
         assertEquals(SlugYardCommunitySourcePolicy.provisionManifestUrls(true).size, gateway.requestedUrls.size)
         assertTrue(gateway.requestedUrls.none { it.contains("example.test") })
-        assertTrue(gateway.requestedUrls.contains("https://torrentio.strem.fun/debridoptions=nodownloadlinks%7Ctorbox=key/manifest.json"))
+        assertTrue(gateway.requestedUrls.contains("https://torrentio.strem.fun/torbox=key/manifest.json"))
         assertTrue(gateway.requestedUrls.contains("https://meteorfortheweebs.midnightignite.me/configured/manifest.json"))
         assertTrue(gateway.requestedUrls.none { it.contains("comet", ignoreCase = true) })
         assertTrue(gateway.requestedUrls.none { SlugYardCommunitySourcePolicy.isPlayFlixManifest(it) })
@@ -90,7 +90,7 @@ class CommunityAddonProvisionerTest {
 
         val report = CommunityAddonProvisioner(gateway, registry).provision(
             configured = ConfiguredAddonUrls(
-                torrentioManifestUrl = "https://torrentio.strem.fun/debridoptions=nodownloadlinks%7Ctorbox=key/manifest.json",
+                torrentioManifestUrl = "https://torrentio.strem.fun/torbox=key/manifest.json",
                 mediaFusionManifestUrl = "https://mediafusion.example/configured/manifest.json",
                 cometManifestUrl = "https://comet.elfhosted.com/configured/manifest.json",
                 meteorManifestUrl = "https://meteorfortheweebs.midnightignite.me/configured/manifest.json",

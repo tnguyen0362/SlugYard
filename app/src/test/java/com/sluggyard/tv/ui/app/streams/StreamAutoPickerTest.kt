@@ -58,10 +58,152 @@ class StreamAutoPickerTest {
     }
 
     @Test
-    fun unknownTorrentIsNotAutoSelected() {
-        // Uncached / probe-unknown torrents stay in Sources for manual pick only.
+    fun unknownTorrentIsNotAutoSelectedByDefault() {
+        // Until probes settle, leave uncached torrents out of Finding.
         val unknown = candidate("unknown", cacheState = StreamCacheState.UNKNOWN, infoHash = "unknown-hash")
+            .copy(title = "Show.S01E01.1080p.WEB-DL.English.Softsubs", seeders = 50)
         assertNull(selectAutoPlayCandidate(groups(unknown)))
+    }
+
+    @Test
+    fun uncachedTorrentIsSelectedWhenFallbackAllowedAndNoInstantExists() {
+        val notCached = candidate("not-cached", cacheState = StreamCacheState.NOT_CACHED, infoHash = "dl-hash")
+            .copy(
+                title = "Oh.Boy.S01E03.1080p.CR.WEB-DL.English.Softsubs",
+                videoSizeBytes = 400L * 1024 * 1024,
+                seeders = 40,
+            )
+        val context = StreamScoringEngine.Context(
+            title = "Oh Boy",
+            contentType = "series",
+            genres = listOf("Animation"),
+            preferredSubtitleLanguage = "en",
+        )
+        assertEquals(
+            notCached,
+            selectAutoPlayCandidate(groups(notCached), context, allowUncachedFallback = true),
+        )
+    }
+
+    @Test
+    fun cachedStillPreferredOverUncachedWhenBothPresent() {
+        val cached = candidate("cached", cacheState = StreamCacheState.CACHED, infoHash = "cached-hash")
+            .copy(
+                title = "Show.S01E03.1080p.English.Softsubs",
+                videoSizeBytes = 350L * 1024 * 1024,
+                seeders = 5,
+            )
+        val uncached = candidate("uncached", cacheState = StreamCacheState.NOT_CACHED, infoHash = "uncached-hash")
+            .copy(
+                title = "Show.S01E03.2160p.English.Softsubs",
+                videoSizeBytes = 1_200L * 1024 * 1024,
+                seeders = 200,
+            )
+        val context = StreamScoringEngine.Context(
+            title = "Show",
+            contentType = "series",
+            genres = listOf("Animation"),
+            preferredSubtitleLanguage = "en",
+        )
+        // Equal Dual/soft tracking: Instant still wins as a track-tie break (not a hard gate).
+        assertEquals(
+            cached,
+            selectAutoPlayCandidate(groups(uncached, cached), context, allowUncachedFallback = true),
+        )
+    }
+
+    @Test
+    fun animeUncachedDualSoftBeatsInstantEnglishPgsMono() {
+        // SeaDex-style Dual Multi uncached must beat Instant Eng-PGS remux — Instant is not the goal.
+        val instantPgs = candidate("pgs", cacheState = StreamCacheState.CACHED, infoHash = "pgs-hash")
+            .copy(
+                title = "Demon.Slayer.S01E01.1080p.BluRay.x265.English.PGS",
+                videoSizeBytes = 1_500L * 1024 * 1024,
+                seeders = 500,
+            )
+        val seadexDual = candidate("seadex", cacheState = StreamCacheState.NOT_CACHED, infoHash = "seadex-hash")
+            .copy(
+                title = "[Vodes] Demon Slayer - 01 [BD 1080p Dual-Audio Multi-Subs][HEVC]",
+                videoSizeBytes = 800L * 1024 * 1024,
+                seeders = 40,
+            )
+        val context = StreamScoringEngine.Context(
+            title = "Demon Slayer",
+            contentType = "series",
+            genres = listOf("Animation", "Anime"),
+            preferredSubtitleLanguage = "en",
+            language = "ja",
+        )
+        assertEquals(
+            seadexDual,
+            selectAutoPlayCandidate(groups(instantPgs, seadexDual), context, allowUncachedFallback = true),
+        )
+    }
+
+    @Test
+    fun animeInstantEnglishPgsAloneWaitsDuringFinding() {
+        // Finding must not lock Instant Eng-PGS mono — leave room for Dual softpacks after probe.
+        val instantPgs = candidate("pgs", cacheState = StreamCacheState.CACHED, infoHash = "pgs-hash")
+            .copy(
+                title = "Show.S01E01.1080p.BluRay.English.PGS",
+                videoSizeBytes = 900L * 1024 * 1024,
+                seeders = 200,
+            )
+        val context = StreamScoringEngine.Context(
+            title = "Show",
+            contentType = "series",
+            genres = listOf("Animation"),
+            preferredSubtitleLanguage = "en",
+        )
+        assertNull(selectAutoPlayCandidate(groups(instantPgs), context, allowUncachedFallback = false))
+        // After probes settle with nothing better, that remux is still playable.
+        assertEquals(
+            instantPgs,
+            selectAutoPlayCandidate(groups(instantPgs), context, allowUncachedFallback = true),
+        )
+    }
+
+    @Test
+    fun animeInstantAssStartsDuringFinding() {
+        val ass = candidate("ass", cacheState = StreamCacheState.CACHED, infoHash = "ass-hash")
+            .copy(
+                title = "Show.S01E01.1080p.WEB-DL.English.Softsub.ASS",
+                videoSizeBytes = 400L * 1024 * 1024,
+                seeders = 30,
+            )
+        val context = StreamScoringEngine.Context(
+            title = "Show",
+            contentType = "series",
+            genres = listOf("Animation"),
+            preferredSubtitleLanguage = "en",
+        )
+        assertEquals(ass, selectAutoPlayCandidate(groups(ass), context))
+    }
+
+    @Test
+    fun animeInstantDualSoftStartsDuringFinding() {
+        val dualSoft = candidate("dual", cacheState = StreamCacheState.CACHED, infoHash = "dual-hash")
+            .copy(
+                title = "[Judas] Show - 01 [BD 1080p][HEVC][Dual-Audio][Multi-Subs]",
+                videoSizeBytes = 400L * 1024 * 1024,
+                seeders = 30,
+            )
+        val context = StreamScoringEngine.Context(
+            title = "Show",
+            contentType = "series",
+            genres = listOf("Animation"),
+            preferredSubtitleLanguage = "en",
+        )
+        assertEquals(dualSoft, selectAutoPlayCandidate(groups(dualSoft), context))
+    }
+
+    @Test
+    fun checkingAndNotCachedCandidatesAreNotAutoSelected() {
+        val checking = candidate("checking", cacheState = StreamCacheState.CHECKING, infoHash = "checking-hash")
+        val notCached = candidate("not-cached", cacheState = StreamCacheState.NOT_CACHED, infoHash = "not-cached-hash")
+
+        assertNull(selectAutoPlayCandidate(groups(checking, notCached)))
+        assertTrue(hasPendingCacheChecks(groups(checking, notCached)))
     }
 
     @Test
@@ -114,15 +256,6 @@ class StreamAutoPickerTest {
     }
 
     @Test
-    fun checkingAndNotCachedCandidatesAreNotAutoSelected() {
-        val checking = candidate("checking", cacheState = StreamCacheState.CHECKING, infoHash = "checking-hash")
-        val notCached = candidate("not-cached", cacheState = StreamCacheState.NOT_CACHED, infoHash = "not-cached-hash")
-
-        assertNull(selectAutoPlayCandidate(groups(checking, notCached)))
-        assertTrue(hasPendingCacheChecks(groups(checking, notCached)))
-    }
-
-    @Test
     fun terminalCacheStatesDoNotKeepAutoPickWaiting() {
         val cached = candidate("cached", cacheState = StreamCacheState.CACHED, infoHash = "cached-hash")
         val notCached = candidate("not-cached", cacheState = StreamCacheState.NOT_CACHED, infoHash = "not-cached-hash")
@@ -152,8 +285,10 @@ class StreamAutoPickerTest {
         )
 
         assertTrue(
-            StreamScoringEngine.score(normal, context) >
-                StreamScoringEngine.score(huge, context),
+            StreamScoringEngine.rank(normal, context) >
+                StreamScoringEngine.rank(huge, context) ||
+                StreamScoringEngine.choose(listOf(huge, normal), context) == normal,
+            "opaque giant should lose size gate/rank to a normal encode",
         )
         assertEquals(normal, selectAutoPlayCandidate(groups(huge, normal), context))
     }
@@ -456,7 +591,13 @@ class StreamAutoPickerTest {
             preferredSubtitleLanguage = "en",
         )
         assertEquals(engSrt, selectAutoPlayCandidate(groups(polishAss, spanishAss, engSrt), context))
-        assertEquals(engPgs, selectAutoPlayCandidate(groups(polishAss, spanishAss, engPgs), context))
+        // Eng-PGS mono is delayed during Instant-only Finding (wait for dual soft); allowed after
+        // probes with fallback when nothing better exists.
+        assertNull(selectAutoPlayCandidate(groups(polishAss, spanishAss, engPgs), context))
+        assertEquals(
+            engPgs,
+            selectAutoPlayCandidate(groups(polishAss, spanishAss, engPgs), context, allowUncachedFallback = true),
+        )
         // Preferred ASS still beats preferred SRT within the ladder.
         val engAss = candidate("en-ass", cacheState = StreamCacheState.CACHED, infoHash = "en-ass-hash")
             .copy(

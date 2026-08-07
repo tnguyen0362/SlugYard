@@ -341,9 +341,17 @@ private fun PlayerRuntimeController.applyMpvTrackSnapshot(snapshot: MpvTrackSnap
 
     // PreferAss may set sid while track-list selection flags are still empty. Re-read after
     // apply; if still none selected but an ASS track exists, select it so UI index matches paint.
-    if (effectiveSnapshot.subtitleTracks.none { it.isSelected && !it.isExternal } &&
-        shouldPreferAssSubtitles() &&
-        !subtitleDisabledByPersistedPreference
+    // Never run this heal after the user picked Off / addon / another track — that is what made
+    // "click different subtitle does nothing" on MPV anime (preferAss immediately re-forced sid=1).
+    val anySubtitleSelected = effectiveSnapshot.subtitleTracks.any { it.isSelected }
+    val addonSubtitleSelected = _uiState.value.selectedAddonSubtitle != null
+    if (!anySubtitleSelected &&
+        !addonSubtitleSelected &&
+        !subtitleDisabledByPersistedPreference &&
+        rememberedTrackPreference?.subtitle !is PlayerRuntimeController.RememberedSubtitleSelection.Disabled &&
+        rememberedTrackPreference?.subtitle !is PlayerRuntimeController.RememberedSubtitleSelection.Addon &&
+        !autoSubtitleSelected &&
+        shouldPreferAssSubtitles()
     ) {
         val assCandidates = effectiveSnapshot.subtitleTracks.filter { track ->
             if (track.isExternal) return@filter false
@@ -463,6 +471,10 @@ private fun PlayerRuntimeController.applyMpvTrackSnapshot(snapshot: MpvTrackSnap
     applyPersistedTrackPreference(
         audioTracks = audioTracks,
         subtitleTracks = internalSubtitleTracks
+    )
+    maybeRememberObservedReleaseTracks(
+        audioTracks = audioTracks,
+        subtitleTracks = internalSubtitleTracks,
     )
     logSwitchTrace(
         stage = "mpv-snapshot-after-restore",

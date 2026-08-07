@@ -96,7 +96,7 @@ class AddonRegistryStore(
             .mapNotNull { addon -> addon.configuredManifestUrl?.let { addon.manifestUrl to it } }
             .toMap()
         // Keep prior configured URLs for retained manifests that failed to refresh this pass.
-        // Also keep PlayFlix configured URL when the optional addon stays installed.
+        // Also preserve any optional Community configured URL when such packs exist.
         val preservedOptionalConfigured = runtimeConfiguredUrls.value
             .filterKeys(SlugYardCommunitySourcePolicy::isOptionalCommunityManifest)
         runtimeConfiguredUrls.value = runtimeConfiguredUrls.value

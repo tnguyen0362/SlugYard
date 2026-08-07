@@ -21,6 +21,12 @@ internal fun selectAutoPlayCandidate(
     ),
     excludedCandidateIds: Set<String> = emptySet(),
     preferLastPlayed: CachedStreamLink? = null,
+    /**
+     * After TorBox probes settle with zero Instant hits, allow a forced-debrid
+     * start of the best NOT_CACHED / UNKNOWN release instead of sending the user
+     * to an empty cached Sources state.
+     */
+    allowUncachedFallback: Boolean = false,
 ): StreamCandidate? {
     val candidates = groups
         .flatMap { group -> (group.state as? StreamGroupState.Content)?.streams.orEmpty() }
@@ -29,11 +35,18 @@ internal fun selectAutoPlayCandidate(
         .distinctBy { it.dedupeKey() }
 
     preferLastPlayed?.let { cached ->
-        val match = candidates.firstOrNull { it.matchesLastPlayed(cached) && it.isAutoPlayEligibleForLog() }
+        val match = candidates.firstOrNull { candidate ->
+            candidate.matchesLastPlayed(cached) &&
+                (
+                    candidate.isAutoPlayEligibleForLog() ||
+                        (allowUncachedFallback && candidate.isUncachedFallbackEligibleForLog())
+                    )
+        }
         if (match != null) {
             Log.i(
                 AUTO_PICK_TAG,
-                "preferLastPlayed hit src=${match.sourceLabel} hash=${cached.infoHash} file=${cached.filename}",
+                "preferLastPlayed hit src=${match.sourceLabel} cache=${match.cacheState} " +
+                    "hash=${cached.infoHash} file=${cached.filename}",
             )
             return match
         }
@@ -43,21 +56,51 @@ internal fun selectAutoPlayCandidate(
         )
     }
 
-    // Instant/cached only — scoring NOT_CACHED torrents was burning ~20s on Onn for JJK/Mario.
+    // Mainstream: Instant-only until probes settle. Anime: once uncached fallback is open, score
+    // Instant + download-start rows together so Dual/ASS can beat Instant Eng-PGS mono.
+    val kind = StreamScoringEngine.contentKind(context)
     val cachedPool = candidates.filter { it.isAutoPlayEligibleForLog() }
-    val scorePool = if (cachedPool.size <= MaxAutoPickScoreCandidates) {
-        cachedPool
+    val uncachedPool = candidates.filter { it.isUncachedFallbackEligibleForLog() }
+    val rankingPool = when {
+        kind == StreamScoringEngine.ContentKind.ANIME && allowUncachedFallback -> {
+            val combined = (cachedPool + uncachedPool).distinctBy { it.dedupeKey() }
+            if (combined.isNotEmpty()) combined else emptyList()
+        }
+        cachedPool.isNotEmpty() -> cachedPool
+        allowUncachedFallback -> uncachedPool
+        else -> emptyList()
+    }
+    val scorePool = if (rankingPool.size <= MaxAutoPickScoreCandidates) {
+        rankingPool
     } else {
-        // Prefer seeded / higher-res rows before the hard cap so we don't score random first-N.
-        cachedPool
-            .sortedWith(
-                compareByDescending<StreamCandidate> { it.seeders ?: 0 }
-                    .thenByDescending { autoPickQualityHint(it.title) },
-            )
-            .take(MaxAutoPickScoreCandidates)
+        // Cap without melting leanback: never score 200+ rows.
+        // Anime: dual/soft/curator/memory before seeders so Eng-PGS Instant doesn't crowd out
+        // SeaDex duals. Mainstream: seeder + res (survivability / popularity).
+        when (kind) {
+            StreamScoringEngine.ContentKind.ANIME ->
+                rankingPool
+                    .sortedWith(animeScorePoolAdmissionOrder(context))
+                    .take(MaxAutoPickScoreCandidates)
+            else ->
+                rankingPool
+                    .sortedWith(
+                        compareByDescending<StreamCandidate> { it.seeders ?: 0 }
+                            .thenByDescending { autoPickQualityHint(it.title) },
+                    )
+                    .take(MaxAutoPickScoreCandidates)
+        }
     }
 
-    val winner = StreamScoringEngine.choose(scorePool, context)
+    val winner = StreamScoringEngine.choose(
+        scorePool,
+        context,
+        // Mainstream: if Instant exists, stay Instant-only (old gate).
+        // Anime: Instant is ranked after dual/soft — open uncached when the shell says so.
+        allowUncachedFallback = when (kind) {
+            StreamScoringEngine.ContentKind.ANIME -> allowUncachedFallback
+            else -> allowUncachedFallback && cachedPool.isEmpty()
+        },
+    )
 
     val groupSummary = groups.joinToString(" | ") { group ->
         val content = (group.state as? StreamGroupState.Content)?.streams.orEmpty()
@@ -72,13 +115,15 @@ internal fun selectAutoPlayCandidate(
             "kind=${StreamScoringEngine.contentKind(context)} " +
             "genres=${context.genres} lang=${context.language} " +
             "preferredSub=${context.preferredSubtitleLanguage} " +
-            "candidates=${candidates.size} cachedPool=${cachedPool.size} scored=${scorePool.size} " +
+            "candidates=${candidates.size} cachedPool=${cachedPool.size} " +
+            "uncachedFallback=$allowUncachedFallback scored=${scorePool.size} " +
             "groups=[$groupSummary]",
     )
     Log.i(
         AUTO_PICK_TAG,
         "winner src=${winner?.sourceLabel} cache=${winner?.cacheState} " +
             "soft=${winnerRank?.softsubFit} dual=${winnerRank?.dualFit} seeds=${winnerRank?.seeders} " +
+            "curator=${winnerRank?.curatorFit} observed=${winnerRank?.usedObservedTracks} " +
             "title='${winner?.title?.replace('\n', ' ')?.take(160)}' " +
             "release='${winner?.releaseTextForLog()?.replace('\n', ' ')?.take(80)}'",
     )
@@ -131,6 +176,13 @@ private fun StreamCandidate.isAutoPlayEligibleForLog(): Boolean {
             cacheState == StreamCacheState.NOT_APPLICABLE
     }
     return !directUrl.isNullOrBlank()
+}
+
+/** Torrent not Instant in TorBox but startable via debrid download. */
+private fun StreamCandidate.isUncachedFallbackEligibleForLog(): Boolean {
+    val hash = infoHash?.trim().orEmpty()
+    if (hash.isBlank()) return !directUrl.isNullOrBlank()
+    return cacheState == StreamCacheState.NOT_CACHED || cacheState == StreamCacheState.UNKNOWN
 }
 
 internal fun hasPendingCacheChecks(groups: List<StreamGroup>): Boolean =
@@ -210,6 +262,48 @@ private fun autoPickQualityHint(title: String): Int {
         "720" in t -> 1
         else -> 2
     }
+}
+
+/**
+ * Cheap admission sort for the anime score cap — keyword + memory only, never full [StreamScoringEngine.rank]
+ * (that path used to freeze Finding on Onn when applied to whole dumps every tick).
+ *
+ * Order: observed dual/ASS memory → Dual-Audio token → softsub tokens → SeaDex curator →
+ * Instant → seeders (survivability) → res.
+ */
+private fun animeScorePoolAdmissionOrder(
+    context: StreamScoringEngine.Context,
+): Comparator<StreamCandidate> {
+    val dualHint = Regex("""\b(dual.?audio|multi.?audio)\b""", RegexOption.IGNORE_CASE)
+    val softHint = Regex(
+        """\b(?:soft\s*subs?|multi\s*subs?|ass|ssa|srt|subbed|subs|pgs)\b""",
+        RegexOption.IGNORE_CASE,
+    )
+    fun releaseBlob(c: StreamCandidate): String =
+        listOf(c.filename.orEmpty(), c.title, c.detailLabel.orEmpty(), c.streamDescription.orEmpty())
+            .joinToString(" ")
+            .lowercase()
+
+    fun memoryBoost(c: StreamCandidate): Int {
+        val hash = c.infoHash?.trim()?.lowercase().orEmpty()
+        if (hash.isEmpty()) return 0
+        val obs = context.observedTracksByHash[hash] ?: return 0
+        var b = 2
+        if (obs.dualAudio) b += 4
+        if (obs.hasAss) b += 2
+        if (obs.hasSoftsubTrack) b += 1
+        return b
+    }
+
+    return compareByDescending<StreamCandidate> { memoryBoost(it) }
+        .thenByDescending { dualHint.containsMatchIn(releaseBlob(it)) }
+        .thenByDescending { softHint.containsMatchIn(releaseBlob(it)) }
+        .thenByDescending { it.isCuratedSeaDexSource() }
+        .thenByDescending {
+            it.cacheState == StreamCacheState.CACHED || it.cacheState == StreamCacheState.NOT_APPLICABLE
+        }
+        .thenByDescending { it.seeders ?: 0 }
+        .thenByDescending { autoPickQualityHint(it.title) }
 }
 
 /** Guards against candidates with no actionable source at all (neither a direct URL nor a

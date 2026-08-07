@@ -1232,7 +1232,7 @@ private fun PlayerRuntimeController.handleSelectSubtitleTrack(index: Int) {
     pendingAudioSelectionAfterSubtitleRefresh = null
     resetSubtitleAutoSyncState()
     rememberInternalSubtitleSelection(index)
-    selectSubtitleTrack(index)
+    selectSubtitleTrack(index, pinUserSelection = true)
     _uiState.update {
         it.copy(
             showSubtitleOverlay = true,
@@ -1240,6 +1240,7 @@ private fun PlayerRuntimeController.handleSelectSubtitleTrack(index: Int) {
             showSubtitleTimingDialog = false,
             showSubtitleDelayOverlay = false,
             showControls = true,
+            selectedSubtitleTrackIndex = index,
             selectedAddonSubtitle = null
         )
     }
