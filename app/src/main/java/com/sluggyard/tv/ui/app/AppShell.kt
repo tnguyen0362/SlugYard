@@ -207,6 +207,7 @@ class AppGraph(
     tmdbHomeDataSource: TmdbHomeDataSource? = null,
     val tmdbService: com.sluggyard.tv.core.tmdb.TmdbService? = null,
     val streamLinkCache: com.sluggyard.tv.data.local.StreamLinkCacheDataStore? = null,
+    val releaseTrackMemory: com.sluggyard.tv.data.local.ReleaseTrackMemoryDataStore? = null,
     val resolveMetaContentId: suspend (type: String, id: String) -> String = { _, id -> id },
     val digitalReleaseLookup: DigitalReleaseLookup? = null,
     val profiles: ProfileStore = ProfileStore(dataStore),
@@ -559,6 +560,11 @@ fun AppShell(
                     sessionBootKey = sessionBootKey,
                     onLaunchRetainedPlayer = { source, title, type, id, posterUrl, backdropUrl, season, episode, addonId, parentId, parentType, resumePositionMs, contentGenres, contentLanguage ->
                         runCatching {
+                            android.util.Log.e(
+                                "SlugYardManualResolve",
+                                "navigate player id=$id type=$type season=$season episode=$episode " +
+                                    "urlLen=${source.url.length} sourceId=${source.sourceId}",
+                            )
                             navController.navigate(
                                 PlayerRoute.create(
                                     graph.stagePlaybackSource(source),
@@ -578,7 +584,7 @@ fun AppShell(
                                 ),
                             )
                         }.onFailure { failure ->
-                            android.util.Log.e("AppShell", "Failed to open player", failure)
+                            android.util.Log.e("SlugYardManualResolve", "Failed to open player", failure)
                         }
                     },
                     modifier = Modifier.fillMaxSize(),
@@ -756,6 +762,8 @@ private fun AppContent(
     var detailsActionNotice by remember { mutableStateOf<String?>(null) }
     var streamGroups by remember { mutableStateOf<List<StreamGroup>>(emptyList()) }
     var streamDiscoveryComplete by remember { mutableStateOf(false) }
+    /** IMDb (or original) id used for scraper fanout — last-link cache keys must match this. */
+    var streamScrapeContentId by remember { mutableStateOf<String?>(null) }
     var streamMessage by remember { mutableStateOf<String?>(null) }
     var autoPickFinishedFor by remember { mutableStateOf<String?>(null) }
     var autoPickRejectedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
@@ -1331,6 +1339,7 @@ private fun AppContent(
         val streams = destination as? RootDestination.Streams ?: return@LaunchedEffect
         streamGroups = emptyList()
         streamDiscoveryComplete = false
+        streamScrapeContentId = null
         streamMessage = null
         autoPickFinishedFor = null
         autoPickRejectedIds = emptySet()
@@ -1366,18 +1375,43 @@ private fun AppContent(
                 )
             }
         }
+        // Scrapers expect IMDb tt… ids. TMDB Home Play hands off tmdb:{n}; Torrentio/Meteor
+        // return 0 streams for that (MediaFusion may still work). DigitalRelease already
+        // resolved IMDb in logs while fanout still scraped the tmdb id.
+        val streamContentId = try {
+            withTimeout(2_000L) {
+                graph.resolveMetaContentId(streams.type, streams.id)
+            }
+        } catch (_: TimeoutCancellationException) {
+            android.util.Log.w(
+                "SlugYardAutoPick",
+                "stream id resolve timed out id=${streams.id} — scrape as-is",
+            )
+            streams.id
+        } catch (_: Exception) {
+            streams.id
+        }
+        if (streamContentId != streams.id) {
+            android.util.Log.i(
+                "SlugYardAutoPick",
+                "stream id resolve ${streams.id} → $streamContentId title='${streams.title}'",
+            )
+        }
+        streamScrapeContentId = streamContentId
         android.util.Log.i(
             "SlugYardAutoPick",
-            "stream fanout start title='${streams.title}' hasStreamAddons=$hasStreamAddons",
+            "stream fanout start title='${streams.title}' id=$streamContentId " +
+                "hasStreamAddons=$hasStreamAddons includeAio=true",
         )
         coroutineScope {
             val fanoutJob = launch {
                 graph.streamsDataSource.streamGroups(
                     streams.type,
-                    streams.id,
+                    streamContentId,
                     configuredDebrid = debridConnection.activeService,
-                    // Movies: skip AIO on Finding only — player Sources still include it.
-                    includeAioStreams = !streams.type.equals("movie", ignoreCase = true),
+                    // AIO back for movies — anime scrapers + cache packs matter for dual titles
+                    // like Infinity Castle too; movie-only skip left Finding thinner than Sources.
+                    includeAioStreams = true,
                 ).collect { groups ->
                     streamGroups = groups
                     // Mark discovery done as soon as every addon left Loading — do not wait for TorBox
@@ -1391,16 +1425,16 @@ private fun AppContent(
                 }
                 streamDiscoveryComplete = true
             }
-            // Stop TorBox probe spam + Compose churn once Play has a resolve in flight.
+            // Stop TorBox probe spam + Compose churn only once a real resolve is in flight.
+            // Do NOT cancel on autoPickFinishedFor / empty Finding — that killed scrapes ~0.3s
+            // after a partial empty fanout and left Choose Source thin.
             if (streams.autoPick) {
                 launch {
-                    snapshotFlow {
-                        resolvingCandidateId != null || autoPickFinishedFor == streams.id
-                    }.first { it }
+                    snapshotFlow { resolvingCandidateId != null }.first { it }
                     fanoutJob.cancel()
                     android.util.Log.i(
                         "SlugYardAutoPick",
-                        "fanout cancelled after pick/resolve title='${streams.title}'",
+                        "fanout cancelled after resolve start title='${streams.title}'",
                     )
                 }
             }
@@ -1513,14 +1547,21 @@ private fun AppContent(
     }
 
     fun resolveStreamCandidate(candidate: StreamCandidate, streams: RootDestination.Streams) {
-        if (resolvingCandidateId != null) return
         // Auto-pick: stop after a few failed resolves so debrid timeouts cannot look like an
         // infinite "Finding a playable stream…" spinner.
         if (streams.autoPick && autoPickRejectedIds.size >= MaxAutoPickResolveAttempts) {
             autoPickFinishedFor = streams.id
             if (streamMessage.isNullOrBlank()) {
-                streamMessage = "No cached playable stream was found. Open Sources and pick an Instant/Cached option."
+                streamMessage = "No playable stream was found. Open Sources and pick a source."
             }
+            return
+        }
+        // Manual Choose Source: cancel any in-flight auto-pick resolve. Leaving resolvingCandidateId
+        // set made OK/clicks silent no-ops until the previous TorBox timeout finished.
+        if (!streams.autoPick) {
+            streamResolutionJob?.cancel()
+            streamResolutionJob = null
+        } else if (resolvingCandidateId != null) {
             return
         }
         resolvingCandidateId = candidate.id
@@ -1528,23 +1569,54 @@ private fun AppContent(
         if (streams.autoPick) {
             autoPickFinishedFor = streams.id
             streamMessage = null
+        } else {
+            streamMessage = "Resolving source…"
         }
         streamResolutionJob = scope.launch {
             try {
-                // Auto-pick must fail fast across candidates — 45s × 3 was the Mario ~2min Finding.
-                val resolveTimeoutMs = if (streams.autoPick) 12_000L else 45_000L
+                // Instant/Cached: fail fast. Uncached TorBox downloads need longer to attach.
+                val isUncachedTorrent = !candidate.infoHash.isNullOrBlank() &&
+                    candidate.cacheState != com.sluggyard.tv.core.streamresolution.StreamCacheState.CACHED &&
+                    candidate.cacheState != com.sluggyard.tv.core.streamresolution.StreamCacheState.NOT_APPLICABLE
+                val resolveTimeoutMs = when {
+                    !streams.autoPick -> 45_000L
+                    isUncachedTorrent -> 45_000L
+                    else -> 12_000L
+                }
+                android.util.Log.e(
+                    "SlugYardManualResolve",
+                    "prepare start id=${candidate.id} auto=${streams.autoPick} cache=${candidate.cacheState} " +
+                        "src=${candidate.sourceLabel} hash=${!candidate.infoHash.isNullOrBlank()} " +
+                        "url=${!candidate.directUrl.isNullOrBlank()} debrid=${debridConnection.activeService}",
+                )
                 when (val result = withTimeout(resolveTimeoutMs) {
                     graph.manualResolution.prepare(
                         candidate.toManualSelection(
                             season = streams.season,
                             episode = streams.episode,
-                            forceDebridForTorrent = streams.autoPick && !candidate.infoHash.isNullOrBlank(),
+                            // Always force debrid for torrents — addon "direct" proxy URLs often
+                            // fail mid-play; TorBox/RD must own hash resolve for manual and auto.
+                            forceDebridForTorrent = !candidate.infoHash.isNullOrBlank(),
                         ),
-                        configuredService = debridConnection.activeService,
+                        configuredService = debridConnection.activeService
+                            ?: debridConnection.configuredServices.firstOrNull(),
                     )
                 }) {
                     is ManualResolutionResult.Ready -> {
-                        if (routeStack.lastOrNull() != streams) return@launch
+                        android.util.Log.e(
+                            "SlugYardManualResolve",
+                            "prepare READY id=${candidate.id} urlLen=${result.source.url.length}",
+                        )
+                        // Destination may flip autoPick false while resolve runs — match by stream id.
+                        val stillOnStreams =
+                            (routeStack.lastOrNull() as? RootDestination.Streams)?.id == streams.id
+                        if (!stillOnStreams) {
+                            android.util.Log.e(
+                                "SlugYardManualResolve",
+                                "prepare READY but left Streams route — abort handoff id=${candidate.id}",
+                            )
+                            return@launch
+                        }
                         streamMessage = null
                         // Launch the retained player BEFORE rewriting the route stack. Changing
                         // stack first briefly reveals Details under Streams and flashes ~0.5s of
@@ -1571,6 +1643,10 @@ private fun AppContent(
                         onRouteStackChange(exitStack)
                     }
                     is ManualResolutionResult.Unavailable -> {
+                        android.util.Log.e(
+                            "SlugYardManualResolve",
+                            "prepare UNAVAILABLE id=${candidate.id} msg=${result.message}",
+                        )
                         streamMessage = result.message
                         if (streams.autoPick) {
                             autoPickRejectedIds = autoPickRejectedIds + candidate.id
@@ -1578,6 +1654,10 @@ private fun AppContent(
                         }
                     }
                     is ManualResolutionResult.Failed -> {
+                        android.util.Log.e(
+                            "SlugYardManualResolve",
+                            "prepare FAILED id=${candidate.id} msg=${result.message}",
+                        )
                         streamMessage = result.message
                         if (streams.autoPick) {
                             autoPickRejectedIds = autoPickRejectedIds + candidate.id
@@ -1586,6 +1666,7 @@ private fun AppContent(
                     }
                 }
             } catch (_: TimeoutCancellationException) {
+                android.util.Log.e("SlugYardManualResolve", "prepare TIMEOUT id=${candidate.id}")
                 streamMessage = if (streams.autoPick) {
                     "Stream resolve timed out. Trying another Instant/Cached source…"
                 } else {
@@ -1596,8 +1677,10 @@ private fun AppContent(
                     autoPickFinishedFor = null
                 }
             } catch (cancelled: CancellationException) {
+                android.util.Log.e("SlugYardManualResolve", "prepare CANCELLED id=${candidate.id}")
                 throw cancelled
             } catch (failure: Exception) {
+                android.util.Log.e("SlugYardManualResolve", "prepare ERROR id=${candidate.id}", failure)
                 streamMessage = failure.message?.takeIf { it.isNotBlank() }
                     ?: "The selected stream could not be resolved. Choose another source."
                 if (streams.autoPick) {
@@ -1605,8 +1688,12 @@ private fun AppContent(
                     autoPickFinishedFor = null
                 }
             } finally {
-                resolvingCandidateId = null
-                streamResolutionJob = null
+                if (resolvingCandidateId == candidate.id) {
+                    resolvingCandidateId = null
+                }
+                if (streamResolutionJob === coroutineContext[Job]) {
+                    streamResolutionJob = null
+                }
             }
         }
     }
@@ -1656,18 +1743,25 @@ private fun AppContent(
                 !cacheWaitExpired &&
                 !hasCachedAlready &&
                 hasPendingCacheChecks(streamGroups)
+            val hasStreamListings = streamGroups.any { group ->
+                (group.state as? com.sluggyard.tv.ui.app.streams.StreamGroupState.Content)
+                    ?.streams
+                    ?.isNotEmpty() == true
+            }
             val ready = streamDiscoveryComplete &&
                 !aioBlocking &&
                 !waitingCacheProbes &&
                 autoPickFinishedFor != streams.id &&
                 resolvingCandidateId == null &&
                 autoPickRejectedIds.size < MaxAutoPickResolveAttempts
-            // Token must NOT include candidate counts — AIO 0→79 was cancelling Play.
+            // Token must NOT include full candidate counts — AIO 0→79 was cancelling Play.
+            // Binary rows/empty is enough so a half-second empty complete re-enters when scrapes land.
             val token = when {
                 !ready -> "wait"
                 softsubReady || cachedReady -> "go-soft:${autoPickRejectedIds.size}"
                 discoveryHardCeilingReached -> "go-ceiling:${autoPickRejectedIds.size}"
-                else -> "go:${streamDiscoveryComplete}:${autoPickRejectedIds.size}:${cacheWaitExpired}"
+                else -> "go:${streamDiscoveryComplete}:${autoPickRejectedIds.size}:${cacheWaitExpired}:" +
+                    if (hasStreamListings) "rows" else "empty"
             }
             AutoPickReadySnap(
                 token = token,
@@ -1694,19 +1788,37 @@ private fun AppContent(
                     ?.filter { it.isNotEmpty() }
                     .orEmpty()
                     .ifEmpty { detailsState?.genres.orEmpty() }
-                val scoringContext = StreamScoringEngine.Context(
-                    title = streams.title,
-                    contentType = streams.type,
-                    genres = genreList,
-                    language = streams.contentLanguage ?: detailsState?.contentLanguage,
-                    preferredSubtitleLanguage = playerSettings.subtitleStyle.preferredLanguage,
-                )
-                    val pickOutcome = withContext(Dispatchers.Default) {
-                    // Re-snapshot groups inside the worker so a Wait retry sees fresh cache flags.
+                val pickOutcome = withContext(Dispatchers.Default) {
+                    // Track memory + pick off main — DataStore/IO must not hitch Finding on leanback.
                     val groupsForAttempt = streamGroups
-                        .filterNot {
-                            SlugYardCommunitySourcePolicy.isPlayFlixStreamAddon(it.addonId, it.addonName)
+                    val memoryHashes = groupsForAttempt
+                        .flatMap { (it.state as? com.sluggyard.tv.ui.app.streams.StreamGroupState.Content)?.streams.orEmpty() }
+                        .mapNotNull { it.infoHash?.trim()?.takeIf(String::isNotEmpty) }
+                        .distinct()
+                        .take(80)
+                    val observedByHash = try {
+                        if (memoryHashes.isEmpty()) {
+                            emptyMap()
+                        } else {
+                            graph.releaseTrackMemory?.getForHashes(memoryHashes).orEmpty()
                         }
+                    } catch (_: Exception) {
+                        emptyMap()
+                    }
+                    if (observedByHash.isNotEmpty()) {
+                        android.util.Log.i(
+                            "SlugYardAutoPick",
+                            "track-memory hits=${observedByHash.size} for ${memoryHashes.size} hashes",
+                        )
+                    }
+                    val scoringContext = StreamScoringEngine.Context(
+                        title = streams.title,
+                        contentType = streams.type,
+                        genres = genreList,
+                        language = streams.contentLanguage ?: detailsState?.contentLanguage,
+                        preferredSubtitleLanguage = playerSettings.subtitleStyle.preferredLanguage,
+                        observedTracksByHash = observedByHash,
+                    )
                     val releaseLookupId = runCatching {
                         graph.resolveMetaContentId(streams.type, streams.id)
                     }.getOrDefault(streams.id)
@@ -1735,7 +1847,8 @@ private fun AppContent(
                     // Skip last-played when we already have softsub/cached — probing it was the
                     // Wait path that sat through DigitalRelease with no pick/winner logs.
                     if (!snap.softsubReady && !snap.cachedReady) {
-                        val contentKey = "${streams.type.lowercase()}|${streams.id}"
+                        val scrapeId = streamScrapeContentId ?: streams.id
+                        val contentKey = "${streams.type.lowercase()}|$scrapeId"
                         val cacheHours = playerSettings.streamReuseLastLinkCacheHours.coerceIn(1, 168)
                         val lastPlayed = runCatching {
                             graph.streamLinkCache?.getValid(
@@ -1761,14 +1874,36 @@ private fun AppContent(
                             }
                         }
                     }
+                    val allowUncached = discoveryHardCeilingReached ||
+                        cacheWaitExpired ||
+                        streamDiscoveryComplete
                     val candidate = selectAutoPlayCandidate(
                         groups = groupsForAttempt,
                         context = scoringContext.copy(digitalReleaseStatus = digitalReleaseStatus),
                         excludedCandidateIds = snap.rejected,
                         preferLastPlayed = null,
+                        allowUncachedFallback = allowUncached,
                     )
                     if (candidate != null) return@withContext AutoPickOutcome.Play(candidate)
-                    if (discoveryHardCeilingReached || snap.softsubReady || snap.cachedReady) {
+                    // Empty partial fanout often "completes" in ~0.3s with 0/0 scrapers — keep
+                    // Finding until the hard ceiling, not a terminal none + Hulu message.
+                    val listingCount = groupsForAttempt.sumOf { group ->
+                        (group.state as? com.sluggyard.tv.ui.app.streams.StreamGroupState.Content)
+                            ?.streams?.size ?: 0
+                    }
+                    if (listingCount == 0 && !discoveryHardCeilingReached) {
+                        return@withContext AutoPickOutcome.Wait
+                    }
+                    // Rows present but still TorBox CHECKING only — none are Instant/uncached-eligible.
+                    // Don't terminal-None in the short cache window (still Finding, not Hulu dump).
+                    if (
+                        !discoveryHardCeilingReached &&
+                        !cacheWaitExpired &&
+                        hasPendingCacheChecks(groupsForAttempt)
+                    ) {
+                        return@withContext AutoPickOutcome.Wait
+                    }
+                    if (allowUncached || discoveryHardCeilingReached) {
                         return@withContext AutoPickOutcome.NoneAvailable
                     }
                     AutoPickOutcome.Wait
@@ -1782,26 +1917,63 @@ private fun AppContent(
                     delay(200)
                     // Force another pass by falling through only if still on this Streams dest.
                     if (destination == streams && resolvingCandidateId == null && autoPickFinishedFor != streams.id) {
-                        val retryGroups = streamGroups.filterNot {
-                            SlugYardCommunitySourcePolicy.isPlayFlixStreamAddon(it.addonId, it.addonName)
-                        }
+                        val retryGroups = streamGroups
+                        val allowUncached = discoveryHardCeilingReached ||
+                            cacheWaitExpired ||
+                            streamDiscoveryComplete
                         val retryOutcome = withContext(Dispatchers.Default) {
+                            val memoryHashes = retryGroups
+                                .flatMap { (it.state as? com.sluggyard.tv.ui.app.streams.StreamGroupState.Content)?.streams.orEmpty() }
+                                .mapNotNull { it.infoHash?.trim()?.takeIf(String::isNotEmpty) }
+                                .distinct()
+                                .take(80)
+                            val observedByHash = try {
+                                if (memoryHashes.isEmpty()) {
+                                    emptyMap()
+                                } else {
+                                    graph.releaseTrackMemory?.getForHashes(memoryHashes).orEmpty()
+                                }
+                            } catch (_: Exception) {
+                                emptyMap()
+                            }
+                            val scoringContext = StreamScoringEngine.Context(
+                                title = streams.title,
+                                contentType = streams.type,
+                                genres = genreList,
+                                language = streams.contentLanguage ?: detailsState?.contentLanguage,
+                                preferredSubtitleLanguage = playerSettings.subtitleStyle.preferredLanguage,
+                                observedTracksByHash = observedByHash,
+                            )
                             val candidate = selectAutoPlayCandidate(
                                 groups = retryGroups,
                                 context = scoringContext,
                                 excludedCandidateIds = autoPickRejectedIds,
                                 preferLastPlayed = null,
+                                allowUncachedFallback = allowUncached,
                             )
-                            if (candidate != null) AutoPickOutcome.Play(candidate)
-                            else if (discoveryHardCeilingReached) AutoPickOutcome.NoneAvailable
-                            else AutoPickOutcome.Wait
+                            if (candidate != null) {
+                                AutoPickOutcome.Play(candidate)
+                            } else {
+                                val listingCount = retryGroups.sumOf { group ->
+                                    (group.state as? com.sluggyard.tv.ui.app.streams.StreamGroupState.Content)
+                                        ?.streams?.size ?: 0
+                                }
+                                when {
+                                    listingCount == 0 && !discoveryHardCeilingReached -> AutoPickOutcome.Wait
+                                    !discoveryHardCeilingReached &&
+                                        !cacheWaitExpired &&
+                                        hasPendingCacheChecks(retryGroups) -> AutoPickOutcome.Wait
+                                    allowUncached || discoveryHardCeilingReached -> AutoPickOutcome.NoneAvailable
+                                    else -> AutoPickOutcome.Wait
+                                }
+                            }
                         }
                         withContext(NonCancellable) {
                             when (retryOutcome) {
                                 is AutoPickOutcome.Play -> resolveStreamCandidate(retryOutcome.candidate, streams)
                                 AutoPickOutcome.NoneAvailable -> {
                                     autoPickFinishedFor = streams.id
-                                    streamMessage = "No cached playable stream was found. Open Sources and pick an Instant/Cached option."
+                                    streamMessage = "No playable stream was found. Open Sources and pick a source."
                                 }
                                 else -> Unit
                             }
@@ -1825,9 +1997,9 @@ private fun AppContent(
                         AutoPickOutcome.NoneAvailable -> {
                             autoPickFinishedFor = streams.id
                             streamMessage = if (detailsState?.availability?.isNotEmpty() == true) {
-                                "No cached playable stream. Watch on: ${detailsState?.availability?.joinToString(", ")}"
+                                "No playable stream. Watch on: ${detailsState?.availability?.joinToString(", ")}"
                             } else {
-                                "No cached playable stream was found. Open Sources and pick an Instant/Cached option."
+                                "No playable stream was found. Open Sources and pick a source."
                             }
                         }
                         is AutoPickOutcome.Play -> resolveStreamCandidate(pickOutcome.candidate, streams)
@@ -2426,16 +2598,46 @@ private fun AppContent(
                                 },
                             availability = detailsState?.availability.orEmpty(),
                             onBack = exitStreams,
-                            onChooseSource = { replaceCurrent(streams.copy(autoPick = false)) },
+                            onChooseSource = {
+                                // Drop any hanging auto-pick resolve so Sources taps aren't
+                                // blocked by resolvingCandidateId until the TorBox timeout ends.
+                                streamResolutionJob?.cancel()
+                                streamResolutionJob = null
+                                resolvingCandidateId = null
+                                autoPickFinishedFor = streams.id
+                                streamMessage = null
+                                android.util.Log.i(
+                                    "SlugYardManualResolve",
+                                    "choose_source title='${streams.title}' groups=${streamGroups.size} " +
+                                        "candidates=${streamGroups.sumOf { (it.state as? com.sluggyard.tv.ui.app.streams.StreamGroupState.Content)?.streams?.size ?: 0 }}",
+                                )
+                                replaceCurrent(streams.copy(autoPick = false))
+                            },
                         )
                     } else {
                         Column(modifier = Modifier.fillMaxSize()) {
-                            streamMessage?.let { message ->
+                            val resolveFeedback = streamMessage
+                                ?: if (resolvingCandidateId != null) "Resolving source…" else null
+                            resolveFeedback?.let { message ->
                                 Text(
                                     message,
-                                    modifier = Modifier.padding(horizontal = SlugYardTvMetrics.ScreenHorizontalInset, vertical = 8.dp),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = SlugYardPalette.Danger,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(
+                                            if (resolvingCandidateId != null) {
+                                                Color(0xFF2A2410)
+                                            } else {
+                                                Color(0xFF3A1515)
+                                            },
+                                        )
+                                        .padding(horizontal = SlugYardTvMetrics.ScreenHorizontalInset, vertical = 14.dp),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = if (resolvingCandidateId != null) {
+                                        SlugYardPalette.Accent
+                                    } else {
+                                        SlugYardPalette.Danger
+                                    },
+                                    fontWeight = FontWeight.SemiBold,
                                 )
                             }
                              StreamsScreen(
@@ -2614,11 +2816,14 @@ private fun BuildingPlayerScreen(
     val chooseSourceFocusRequester = remember { FocusRequester() }
     val effectiveStatus = statusMessage
         ?: "Finding a playable stream..."
+    // While auto-pick is still searching, only Back is shown. Choose Source appears after a
+    // terminal status (no stream / timeout / not released) — intentional, not a bug.
     val showChooser = effectiveStatus.isNotBlank() &&
         !effectiveStatus.contains("Finding a playable stream", ignoreCase = true) &&
         !effectiveStatus.contains("Building", ignoreCase = true) &&
         !effectiveStatus.contains("Buffering", ignoreCase = true) &&
-        !effectiveStatus.contains("Preparing", ignoreCase = true)
+        !effectiveStatus.contains("Preparing", ignoreCase = true) &&
+        !effectiveStatus.contains("Resolving source", ignoreCase = true)
     LaunchedEffect(showChooser) {
         runCatching {
             if (showChooser) chooseSourceFocusRequester.requestFocus()

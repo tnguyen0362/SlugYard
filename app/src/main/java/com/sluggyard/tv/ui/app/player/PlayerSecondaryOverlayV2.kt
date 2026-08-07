@@ -34,10 +34,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -78,6 +85,8 @@ data class PlayerSecondaryState(
     val panel: PlayerSecondaryPanel = PlayerSecondaryPanel.HIDDEN,
     val sourceGroups: List<StreamGroup> = emptyList(),
     val sourceLoading: Boolean = false,
+    /** True only while a tapped stream is being prepared for playback. */
+    val resolvingSource: Boolean = false,
     val sourceError: String? = null,
     val selectedSourceAddon: String? = null,
     val failedSourceIds: Set<String> = emptySet(),
@@ -290,6 +299,12 @@ private fun ColumnScope.SourceContent(
     }
     var seededInitialFocus by remember(state.panel) { mutableStateOf(false) }
     val listState = rememberLazyListState()
+    // Keep feedback visible while candidates remain listed (prepare can take ~45s on TorBox).
+    if (state.sourceError != null) {
+        Text(state.sourceError, color = SlugYardPalette.Danger)
+    } else if (state.resolvingSource) {
+        Text("Resolving source…", color = SlugYardPalette.OnCanvasMuted)
+    }
     if (candidates.isNotEmpty()) {
         LazyColumn(
             state = listState,
@@ -391,16 +406,46 @@ private fun StreamCandidateButton(
     focusRequester: FocusRequester?,
     onPlaced: (() -> Unit)? = null,
 ) {
-    var focused by remember(candidate.id) { mutableStateOf(false) }
+    val interaction = remember(candidate.id) { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
     val shape = RoundedCornerShape(8.dp)
     val detailLine = StreamPresentation.detailLine(candidate)
     val cacheLabel = StreamPresentation.cacheLabel(candidate.cacheState)
+    var lastActivateAt by remember { mutableStateOf(0L) }
+    fun fire() {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - lastActivateAt < 400L) return
+        lastActivateAt = now
+        android.util.Log.i(
+            "SlugYardManualResolve",
+            "player_row_select id=${candidate.id} src=${candidate.sourceLabel}",
+        )
+        onClick()
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 64.dp)
             .then(focusRequester?.let(Modifier::focusRequester) ?: Modifier)
-            .onFocusChanged { focused = it.isFocused }
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+                onClick = { fire() },
+            )
+            .onKeyEvent { event ->
+                // Fire on KeyDown — same leanback fix as StreamsScreen rows.
+                val isSelect = event.key == Key.DirectionCenter ||
+                    event.key == Key.Enter ||
+                    event.key == Key.NumPadEnter
+                when {
+                    isSelect && event.type == KeyEventType.KeyDown -> {
+                        fire()
+                        true
+                    }
+                    isSelect -> true
+                    else -> false
+                }
+            }
             .background(
                 if (focused) SlugYardPalette.SurfaceElevated else SlugYardPalette.Surface,
                 shape,
@@ -412,8 +457,6 @@ private fun StreamCandidateButton(
                     Modifier
                 },
             )
-            // clickable already installs a focus target — do not add a second .focusable().
-            .clickable(onClick = onClick)
             .onGloballyPositioned { onPlaced?.invoke() }
             .semantics {
                 contentDescription = listOfNotNull(candidate.title, detailLine, cacheLabel)

@@ -1,12 +1,14 @@
 package com.sluggyard.tv.ui.app.streams
 
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.focusable
+import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -14,33 +16,39 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.sluggyard.tv.core.streamresolution.StreamCacheState
 import com.sluggyard.tv.domain.model.StreamBadge
-import com.sluggyard.tv.ui.components.StreamBadgeChips
-import com.sluggyard.tv.ui.design.SlugYardPalette
-import com.sluggyard.tv.ui.design.SlugYardTvMetrics
 import com.sluggyard.tv.ui.app.ButtonStyle
 import com.sluggyard.tv.ui.app.TvButton
 import com.sluggyard.tv.ui.app.requestFocusReliably
+import com.sluggyard.tv.ui.components.StreamBadgeChips
+import com.sluggyard.tv.ui.design.SlugYardPalette
+import com.sluggyard.tv.ui.design.SlugYardTvMetrics
 
 data class StreamCandidate(
     val id: String,
@@ -79,7 +87,7 @@ data class StreamGroup(
 private sealed interface StreamListItem {
     val key: String
 
-    data class Header(val title: String) : StreamListItem {
+    data class AddonHeader(val title: String) : StreamListItem {
         override val key: String = "header:$title"
     }
 
@@ -102,95 +110,123 @@ fun StreamsScreen(
     modifier: Modifier = Modifier,
 ) {
     BackHandler(enabled = true, onBack = onBack)
+    val context = LocalContext.current
     val backFocusRequester = remember { FocusRequester() }
-    val listItems = buildList<StreamListItem> {
-        add(StreamListItem.Header(title))
-        groups.forEach { group ->
-            add(StreamListItem.Header(group.addonName))
-            when (val state = group.state) {
-                StreamGroupState.Loading -> add(StreamListItem.Status("Searching this source...", SlugYardPalette.OnCanvasMuted))
-                StreamGroupState.Empty -> add(StreamListItem.Status("No streams returned", SlugYardPalette.OnCanvasMuted))
-                is StreamGroupState.Error -> add(StreamListItem.Status(state.message, SlugYardPalette.Danger))
-                is StreamGroupState.Content -> state.streams.forEach { stream ->
-                    add(StreamListItem.Candidate(stream))
+    val localFirstFocusRequester = remember { FocusRequester() }
+    val firstCandidateFocusRequester = contentFocusRequester ?: localFirstFocusRequester
+    val listState = rememberLazyListState()
+    var seededInitialFocus by remember(title) { mutableStateOf(false) }
+
+    val listItems = remember(groups) {
+        buildList {
+            groups.forEach { group ->
+                add(StreamListItem.AddonHeader(group.addonName))
+                when (val state = group.state) {
+                    StreamGroupState.Loading ->
+                        add(StreamListItem.Status("Searching this source...",SlugYardPalette.OnCanvasMuted))
+                    StreamGroupState.Empty ->
+                        add(StreamListItem.Status("No streams returned", SlugYardPalette.OnCanvasMuted))
+                    is StreamGroupState.Error ->
+                        add(StreamListItem.Status(state.message, SlugYardPalette.Danger))
+                    is StreamGroupState.Content ->
+                        state.streams.forEach { stream -> add(StreamListItem.Candidate(stream)) }
                 }
             }
         }
     }
-    val firstStreamId = firstStreamId(groups)
-    val candidateIds = listItems.filterIsInstance<StreamListItem.Candidate>().map { it.stream.id }
-    val candidateFocusRequesters = remember(candidateIds, contentFocusRequester) {
-        candidateIds.mapIndexed { index, _ ->
-            if (index == 0) contentFocusRequester ?: FocusRequester() else FocusRequester()
+    val firstCandidateIndex = listItems.indexOfFirst { it is StreamListItem.Candidate }
+    val hasCandidates = firstCandidateIndex >= 0
+
+    LaunchedEffect(hasCandidates, seededInitialFocus) {
+        if (seededInitialFocus) return@LaunchedEffect
+        if (hasCandidates) {
+            if (firstCandidateFocusRequester.requestFocusReliably(retries = 8)) {
+                seededInitialFocus = true
+                runCatching { listState.scrollToItem(firstCandidateIndex.coerceAtLeast(0)) }
+            }
+        } else if (backFocusRequester.requestFocusReliably(retries = 8)) {
+            seededInitialFocus = true
         }
     }
-    LaunchedEffect(contentFocusRequester, firstStreamId, candidateIds) {
-        when {
-            firstStreamId != null && contentFocusRequester != null ->
-                contentFocusRequester.requestFocusReliably(retries = 8)
-            firstStreamId != null ->
-                candidateFocusRequesters.firstOrNull()?.requestFocusReliably(retries = 8)
-            else ->
-                backFocusRequester.requestFocusReliably(retries = 8)
-        }
-    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
             .background(SlugYardPalette.Canvas)
-            .verticalScroll(rememberScrollState())
             .padding(
                 horizontal = SlugYardTvMetrics.ScreenHorizontalInset,
                 vertical = SlugYardTvMetrics.ScreenVerticalInset,
             ),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        var candidateIndex = 0
-        listItems.forEach { item ->
-            when (item) {
-                is StreamListItem.Header -> {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "Choose a stream",
+                style = MaterialTheme.typography.headlineLarge,
+                modifier = Modifier.weight(1f).padding(top = 8.dp),
+            )
+            TvButton(
+                label = "Back",
+                onClick = onBack,
+                style = ButtonStyle.Secondary,
+                focusRequester = backFocusRequester,
+            )
+        }
+        Text(
+            title,
+            style = MaterialTheme.typography.bodyLarge,
+            color = SlugYardPalette.OnCanvasMuted,
+            modifier = Modifier.padding(bottom = 12.dp),
+        )
+        LazyColumn(
+            state = listState,
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .focusGroup(),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            itemsIndexed(
+                items = listItems,
+                key = { index, item -> "${item.key}#$index" },
+            ) { index, item ->
+                when (item) {
+                    is StreamListItem.AddonHeader -> {
                         Text(
-                            text = if (item.key == "header:$title") "Choose a stream" else item.title,
-                            style = if (item.key == "header:$title") MaterialTheme.typography.headlineLarge else MaterialTheme.typography.titleLarge,
-                            modifier = Modifier.weight(1f).padding(top = if (item.key == "header:$title") 8.dp else 22.dp),
+                            text = item.title,
+                            style = MaterialTheme.typography.titleLarge,
+                            modifier = Modifier.padding(top = 10.dp),
                         )
-                        if (item.key == "header:$title") {
-                            TvButton(
-                                label = "Back",
-                                onClick = onBack,
-                                style = ButtonStyle.Secondary,
-                                focusRequester = backFocusRequester,
-                            )
-                        }
                     }
-                    if (item.key == "header:$title") {
-                        Text(title, style = MaterialTheme.typography.bodyLarge, color = SlugYardPalette.OnCanvasMuted)
+                    is StreamListItem.Status -> StreamStatusCard(item.message, item.color)
+                    is StreamListItem.Candidate -> {
+                        // Identical pattern to CloudManager rows (known-working TV clicks).
+                        StreamCandidateRow(
+                            stream = item.stream,
+                            focusRequester = if (index == firstCandidateIndex) {
+                                firstCandidateFocusRequester
+                            } else {
+                                null
+                            },
+                            onClick = {
+                                // Log.e survives release minify (Log.i is stripped by optimize rules).
+                                android.util.Log.e(
+                                    "SlugYardManualResolve",
+                                    "CLICK id=${item.stream.id} src=${item.stream.sourceLabel} " +
+                                        "cache=${item.stream.cacheState} hash=${!item.stream.infoHash.isNullOrBlank()}",
+                                )
+                                Toast.makeText(context, "Resolving source…", Toast.LENGTH_SHORT).show()
+                                onStreamSelected(item.stream)
+                            },
+                        )
                     }
                 }
-                is StreamListItem.Status -> StreamStatusCard(item.message, item.color)
-                is StreamListItem.Candidate -> StreamCandidateRow(
-                    stream = item.stream,
-                    onClick = { onStreamSelected(item.stream) },
-                    focusRequester = candidateFocusRequesters[candidateIndex],
-                    upFocusRequester = if (candidateIndex == 0) backFocusRequester else candidateFocusRequesters.getOrNull(candidateIndex - 1),
-                    downFocusRequester = candidateFocusRequesters.getOrNull(candidateIndex + 1),
-                )
             }
-            if (item is StreamListItem.Candidate) candidateIndex++
         }
     }
 }
-
-private fun firstStreamId(groups: List<StreamGroup>): String? = groups
-    .asSequence()
-    .mapNotNull { it.state as? StreamGroupState.Content }
-    .flatMap { it.streams.asSequence() }
-    .firstOrNull()
-    ?.id
 
 @Composable
 private fun StreamStatusCard(message: String, color: Color) {
@@ -206,37 +242,47 @@ private fun StreamStatusCard(message: String, color: Color) {
     )
 }
 
+/**
+ * Match CloudManager file rows exactly: clickable owns focus, no stacked focusable(),
+ * no custom Key handlers that can swallow DPAD_CENTER.
+ */
 @Composable
 private fun StreamCandidateRow(
     stream: StreamCandidate,
     onClick: () -> Unit,
     focusRequester: FocusRequester? = null,
-    upFocusRequester: FocusRequester? = null,
-    downFocusRequester: FocusRequester? = null,
 ) {
-    val focusState = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    val interaction = remember(stream.id) { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
     val shape = RoundedCornerShape(SlugYardTvMetrics.ButtonCornerRadius)
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(shape)
             .then(focusRequester?.let { Modifier.focusRequester(it) } ?: Modifier)
-            .focusProperties {
-                upFocusRequester?.let { up = it }
-                downFocusRequester?.let { down = it }
-            }
-            .onFocusChanged { focusState.value = it.isFocused }
-            .scale(if (focusState.value) SlugYardTvMetrics.FocusScale else 1f)
-            .background(if (focusState.value) Color.White.copy(alpha = 0.10f) else SlugYardPalette.Surface)
+            .clip(shape)
+            .background(if (focused) Color.White.copy(alpha = 0.10f) else SlugYardPalette.Surface)
             .then(
-                if (focusState.value) {
+                if (focused) {
                     Modifier.border(SlugYardTvMetrics.FocusRingWidth, SlugYardPalette.FocusRing, shape)
                 } else {
                     Modifier
                 },
             )
-            .clickable(onClick = onClick)
-            .focusable()
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+                onClick = onClick,
+            )
+            .semantics {
+                contentDescription = buildString {
+                    append(stream.title)
+                    StreamPresentation.detailLine(stream).takeIf { it.isNotBlank() }?.let {
+                        append(". ").append(it)
+                    }
+                    append(". ").append(StreamPresentation.cacheLabel(stream.cacheState) ?: "Source")
+                }
+                role = Role.Button
+            }
             .padding(horizontal = 18.dp, vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -255,7 +301,7 @@ private fun StreamCandidateRow(
                     badges = stream.badges,
                     fileSizeBytes = stream.videoSizeBytes,
                     showFileSizeBadge = stream.videoSizeBytes != null,
-                    focused = focusState.value,
+                    focused = focused,
                 )
             }
         }
@@ -278,11 +324,11 @@ private fun CacheBadge(state: StreamCacheState) {
             label,
             modifier = Modifier
                 .clip(RoundedCornerShape(4.dp))
-                .background(color.copy(alpha = 0.16f))
-                .padding(horizontal = 8.dp, vertical = 5.dp),
+                .background(color.copy(alpha = 0.18f))
+                .padding(horizontal = 10.dp, vertical = 4.dp),
             style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.Medium,
             color = color,
+            fontWeight = FontWeight.SemiBold,
         )
     }
 }

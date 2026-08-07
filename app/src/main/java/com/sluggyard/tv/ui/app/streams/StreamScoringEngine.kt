@@ -6,13 +6,15 @@ import com.sluggyard.tv.core.streamresolution.StreamCacheState
 /**
  * Rewrite stream auto-pick.
  *
- * 1. Hard gates — eligible + cached/direct only (uncached stays in Sources)
+ * 1. Hard gates — eligible candidates only (720p / DV 8.6 / size / digital-release)
  * 2. Soft rank by content kind:
- *    - Anime: softsubs → Dual-Audio → seeders → decode → quality → size
+ *    - Anime: Dual+soft → softsub format → Instant as **tie-break only** → seeds/decode/qual/size
  *    - K/J drama: softsubs → seeders → quality → size (Dual-Audio ignored)
- *    - Movies / mainstream: softsub language → seeders → quality → size
+ *    - Movies / mainstream: softsub language → seeders → quality → size (Instant-first pool)
  *
  * Preferred subtitle language is never English-hardcoded.
+ * Anime deliberately does **not** hard-gate Instant: an Instant Eng-PGS mono remux must not
+ * beat a Dual-Audio softsub seaDex / Judas pack just because TorBox already has it.
  */
 internal object StreamScoringEngine {
     enum class ContentKind { MAINSTREAM, ANIME, K_DRAMA, J_DRAMA, LIVE }
@@ -32,28 +34,48 @@ internal object StreamScoringEngine {
          * auto-play refuses CAM/TS/SCR/trailer junk. Null / UNKNOWN fails open.
          */
         val digitalReleaseStatus: DigitalReleasePolicy.Status? = null,
+        /**
+         * Play-once inventory by lowercase infoHash. Overlay on title heuristics — free
+         * second-screen signal after the user has opened that release once.
+         */
+        val observedTracksByHash: Map<String, ObservedReleaseTracks> = emptyMap(),
     )
 
     /**
-     * Lexicographic rank among candidates already inside the same cache tier.
+     * Lexicographic rank among candidates already past hard gates.
      * Compare order depends on [kind].
      */
     data class Rank(
         val kind: ContentKind,
         val softsubFit: Int,
         val dualFit: Int,
+        /** Instant/direct=2, UNKNOWN=1, NOT_CACHED=0 — anime only uses this *after* tracks. */
+        val cacheFit: Int,
+        /** SeaDex / releases.moe curated row — soft anime preference only after track fit. */
+        val curatorFit: Int,
         val seeders: Int,
         val decodeFit: Int,
         val quality: Int,
         val sizeFit: Int,
+        /** True when softsub/dual came from observed memory rather than title alone. */
+        val usedObservedTracks: Boolean = false,
     ) : Comparable<Rank> {
+        /**
+         * Dual only counts when the release also has a softsub signal — Dual-only Kametsu
+         * packs must not outrank real softsubs.
+         */
+        val effectiveDualFit: Int get() = if (softsubFit >= 2) dualFit else 0
+
         override fun compareTo(other: Rank): Int = when (kind) {
-            // Anime: subs first, then dual, then seeders.
+            // Anime: Dual+soft first (the point of the scorer), then sub format, Instant last
+            // among track ties so Instant Eng-PGS mono loses to uncached Dual multi-soft.
             ContentKind.ANIME -> compareValuesBy(
                 this,
                 other,
+                { it.effectiveDualFit },
                 { it.softsubFit },
-                { it.dualFit },
+                { it.curatorFit },
+                { it.cacheFit },
                 { it.seeders },
                 { it.decodeFit },
                 { it.quality },
@@ -85,36 +107,64 @@ internal object StreamScoringEngine {
         val trackFit: Int get() = softsubFit * 10 + dualFit
     }
 
-    fun choose(candidates: List<StreamCandidate>, context: Context): StreamCandidate? {
+    fun choose(
+        candidates: List<StreamCandidate>,
+        context: Context,
+        /**
+         * When no Instant/Cached row survives filters, allow TorBox download starts
+         * (NOT_CACHED / UNKNOWN). Prefer leaving this false until cache probes settle
+         * so Finding does not race into a slow uncached resolve.
+         *
+         * Anime: when true, Instant and uncached are scored **together** (tracks > Instant).
+         */
+        allowUncachedFallback: Boolean = false,
+    ): StreamCandidate? {
+        val kind = classify(context)
         val playable = candidates
             .filterNot { it.isExcludedResolution() }
-            .filter { it.isAutoPlayEligible() }
+            .filter { it.isAutoPlayEligible(allowUncachedFallback) }
         if (playable.isEmpty()) return null
 
         val safePool = playable.filterNot { it.isKnownUnsupportedDolbyVision() }.ifEmpty { playable }
-        // Auto-Play is instant/cached only. Uncached torrents stay in Sources for manual pick —
-        // never auto-start a debrid download from ranking.
         val instantPool = safePool.filter { it.isInstantOrCachedAutoPlay() }
+        // Mainstream: Instant hard gate. Anime: Instant is a rank key only — when uncached
+        // fallback is open, Dual+ASS uncached is allowed to beat Instant Eng-PGS mono.
+        val cachePool = when {
+            kind == ContentKind.ANIME && allowUncachedFallback -> {
+                val combined = safePool.filter {
+                    it.isInstantOrCachedAutoPlay() || it.isUncachedDebridAutoPlayEligible()
+                }
+                combined.ifEmpty { emptyList() }
+            }
+            instantPool.isNotEmpty() -> instantPool
+            allowUncachedFallback -> safePool.filter { it.isUncachedDebridAutoPlayEligible() }
+            else -> emptyList()
+        }
         // Size gate: reject opaque huge torrents that hang TorBox/MPV, but allow named
         // multi-file season packs (Judas/Anime Time Dual+Multi-Subs) so episode file-select
         // can pick SxxExx out of the pack. Resolve failure still rejects and tries the next.
-        val sizedPool = instantPool.filter { it.isSaneAutoPlaySize(context) }
-        // With a subtitle preference, build a preference ladder — never wrong-language ASS:
-        // 1) Releases that advertise the preferred language (Eng ASS → Eng SRT/PGS → Eng soft)
-        // 2) Else neutral multi/unmarked softsubs that do not advertise another language
-        // 3) Never auto-start packs that only advertise a conflicting language (PL/ES/…)
+        val sizedPool = cachePool.filter { it.isSaneAutoPlaySize(context) }
+        // With a subtitle preference, never auto-start wrong-language packs (PL/ES-only).
+        // Anime: keep neutral Dual/Multi soft packs even when they omit "English" — the old
+        // "must mention preferred" shrink preferred Eng-tagged PGS remuxes over SeaDex duals.
+        // Mainstream: still prefer rows that mention preferred lang when any exist.
         val preferred = normalizePreferredSubtitle(context.preferredSubtitleLanguage)
         val languageSafePool = if (preferred != null) {
             val nonConflicting = sizedPool.filter { candidate ->
                 !hasConflictingSubtitleLanguage(candidate.releaseText().lowercase(), preferred)
             }
-            val mentioningPreferred = nonConflicting.filter { candidate ->
-                textMentionsLanguage(candidate.releaseText().lowercase(), preferred)
-            }
-            when {
-                mentioningPreferred.isNotEmpty() -> mentioningPreferred
-                nonConflicting.isNotEmpty() -> nonConflicting
-                else -> emptyList()
+            when (kind) {
+                ContentKind.ANIME -> nonConflicting
+                else -> {
+                    val mentioningPreferred = nonConflicting.filter { candidate ->
+                        textMentionsLanguage(candidate.releaseText().lowercase(), preferred)
+                    }
+                    when {
+                        mentioningPreferred.isNotEmpty() -> mentioningPreferred
+                        nonConflicting.isNotEmpty() -> nonConflicting
+                        else -> emptyList()
+                    }
+                }
             }
         } else {
             sizedPool
@@ -126,7 +176,31 @@ internal object StreamScoringEngine {
                 candidate.releaseText(),
             )
         }
-        return playPool.maxWithOrNull(rankComparator(context))
+        val winner = playPool.maxWithOrNull(rankComparator(context)) ?: return null
+        // During Finding (Instant-only), refuse mono PGS remuxes for anime so Dual/ASS can
+        // still land — not softsubFit==4 (that also blocked Instant ASS when preferred=null).
+        if (
+            kind == ContentKind.ANIME &&
+            !allowUncachedFallback &&
+            !isAcceptableAnimeInstantAutoStart(winner, rank(winner, context))
+        ) {
+            return null
+        }
+        return winner
+    }
+
+    /**
+     * Instant-only Finding may start dual softpacks and ASS immediately. Wait only on
+     * **PGS mono** (Demon Slayer Instant chrome trap).
+     */
+    private fun isAcceptableAnimeInstantAutoStart(
+        candidate: StreamCandidate,
+        rank: Rank,
+    ): Boolean {
+        if (rank.effectiveDualFit >= 1) return true
+        val text = candidate.releaseText().lowercase()
+        if (PGS_SOFTSUB_FORMAT.containsMatchIn(text) && rank.dualFit == 0) return false
+        return true
     }
 
     fun rankedCandidates(
@@ -149,15 +223,18 @@ internal object StreamScoringEngine {
         val animeEpisode = kind == ContentKind.ANIME && episodeLike
         // Softsub/dual signals must come from the release name — not addon chrome
         // ("MediaFusion | Midnight 🧲 ⏳ 720p") or dump metadata that false-triggers "sub"/"en".
-        val tracks = trackSignals(releaseText, context, kind)
+        val tracks = trackSignals(releaseText, context, kind, candidate)
         return Rank(
             kind = kind,
             softsubFit = tracks.softsubFit,
             dualFit = tracks.dualFit,
+            cacheFit = cacheFit(candidate),
+            curatorFit = if (kind == ContentKind.ANIME && candidate.isCuratedSeaDexSource()) 1 else 0,
             seeders = seederFit(candidate),
             decodeFit = decodeFit(text, animeEpisode),
             quality = qualityFit(text, animeEpisode, context.digitalReleaseStatus),
             sizeFit = sizeFit(candidate, context, episodeLike),
+            usedObservedTracks = tracks.usedObserved,
         )
     }
 
@@ -169,12 +246,26 @@ internal object StreamScoringEngine {
         val r = rank(candidate, context)
         return when (r.kind) {
             ContentKind.ANIME ->
-                r.softsubFit * 1_000_000 + r.dualFit * 100_000 + r.seeders * 1_000 +
-                    r.decodeFit * 100 + r.quality * 10 + r.sizeFit
+                r.effectiveDualFit * 10_000_000 + r.softsubFit * 1_000_000 + r.curatorFit * 200_000 +
+                    r.cacheFit * 100_000 + r.seeders * 1_000 + r.decodeFit * 100 +
+                    r.quality * 10 + r.sizeFit
             ContentKind.K_DRAMA, ContentKind.J_DRAMA ->
                 r.softsubFit * 1_000_000 + r.seeders * 1_000 + r.quality * 10 + r.sizeFit
             ContentKind.MAINSTREAM, ContentKind.LIVE ->
                 r.softsubFit * 1_000_000 + r.seeders * 1_000 + r.quality * 10 + r.sizeFit
+        }
+    }
+
+    private fun cacheFit(candidate: StreamCandidate): Int {
+        val hash = candidate.infoHash?.trim().orEmpty()
+        if (hash.isBlank()) {
+            // Direct playable URL — treat like Instant.
+            return if (!candidate.directUrl.isNullOrBlank()) 2 else 0
+        }
+        return when (candidate.cacheState) {
+            StreamCacheState.CACHED, StreamCacheState.NOT_APPLICABLE -> 2
+            StreamCacheState.UNKNOWN -> 1
+            StreamCacheState.NOT_CACHED, StreamCacheState.CHECKING -> 0
         }
     }
 
@@ -187,7 +278,11 @@ internal object StreamScoringEngine {
         compareBy<StreamCandidate> { rank(it, context) }
             .thenBy { it.id }
 
-    private data class TrackSignals(val softsubFit: Int, val dualFit: Int)
+    private data class TrackSignals(
+        val softsubFit: Int,
+        val dualFit: Int,
+        val usedObserved: Boolean = false,
+    )
 
     /**
      * SoftsubFit (higher better) — preferred-language ladder, not a per-locale bandage:
@@ -202,11 +297,20 @@ internal object StreamScoringEngine {
      * 1 has Dual-Audio / Multi-Audio
      * 0 otherwise
      *
+     * When [ObservedReleaseTracks] exist for this infoHash, softsub/dual take max(title, observed).
+     * Observed never invents softsubs for conflicting-title packs that are clearly wrong-lang-only
+     * (conflictingLang stays 0 from titles).
+     *
      * Multi-Subs alone is NOT max score when a preference is set — A&C "Multi-Sub" packs
      * are often Latam/España-only and must not beat real Eng Dual packs or fall through
      * as auto-play winners.
      */
-    private fun trackSignals(text: String, context: Context, kind: ContentKind): TrackSignals {
+    private fun trackSignals(
+        text: String,
+        context: Context,
+        kind: ContentKind,
+        candidate: StreamCandidate? = null,
+    ): TrackSignals {
         val preferred = normalizePreferredSubtitle(context.preferredSubtitleLanguage)
         val softsub = isLikelySoftsubRelease(text)
         val knownAssTierGroup = isKnownAnimeSoftsubGroup(text)
@@ -222,7 +326,7 @@ internal object StreamScoringEngine {
         val hasPreferred = preferred != null && textMentionsLanguage(text, preferred)
         val conflictingLang = preferred != null && hasConflictingSubtitleLanguage(text, preferred)
 
-        val softsubFit = when {
+        var softsubFit = when {
             raw || (hardsub && !hasSoftSignal) -> 0
             // Wrong-language ASS/SRT never beats preferred Eng SRT/PGS (score 0, out of auto-play).
             conflictingLang -> 0
@@ -241,12 +345,33 @@ internal object StreamScoringEngine {
             else -> 1
         }
 
-        val dualFit = when (kind) {
+        var dualFit = when (kind) {
             ContentKind.ANIME -> if (dualAudio) 1 else 0
             ContentKind.K_DRAMA, ContentKind.J_DRAMA -> 0
             ContentKind.MAINSTREAM, ContentKind.LIVE -> if (dualAudio) 1 else 0
         }
-        return TrackSignals(softsubFit = softsubFit, dualFit = dualFit)
+
+        var usedObserved = false
+        val hash = candidate?.infoHash?.trim()?.lowercase().orEmpty()
+        val observed = if (hash.isNotEmpty()) context.observedTracksByHash[hash] else null
+        // Real player inventory always wins floor max — title tags are best-effort only.
+        if (observed != null) {
+            val (obsSoft, obsDual) = observed.toTitleScaleSignals(
+                preferredSubtitleLanguage = context.preferredSubtitleLanguage,
+                animeLike = kind == ContentKind.ANIME ||
+                    kind == ContentKind.MAINSTREAM ||
+                    kind == ContentKind.LIVE,
+            )
+            if (obsSoft > softsubFit) {
+                softsubFit = obsSoft
+                usedObserved = true
+            }
+            if (obsDual > dualFit) {
+                dualFit = obsDual
+                usedObserved = true
+            }
+        }
+        return TrackSignals(softsubFit = softsubFit, dualFit = dualFit, usedObserved = usedObserved)
     }
 
     private fun decodeFit(text: String, animeEpisode: Boolean): Int {
@@ -587,16 +712,17 @@ internal object StreamScoringEngine {
         }
     }
 
-    private fun StreamCandidate.isAutoPlayEligible(): Boolean {
+    private fun StreamCandidate.isAutoPlayEligible(
+        allowUncachedFallback: Boolean = false,
+    ): Boolean {
         if (!isWellFormed()) return false
         val hash = infoHash?.trim().orEmpty()
         if (hash.isNotBlank()) {
             return when (cacheState) {
-                // UNKNOWN used to be eligible as a post-probe fallback; Auto-Play no longer
-                // starts uncached torrents (Sources still lists them for manual pick).
                 StreamCacheState.CACHED -> true
                 StreamCacheState.NOT_APPLICABLE -> true
-                StreamCacheState.UNKNOWN, StreamCacheState.CHECKING, StreamCacheState.NOT_CACHED -> false
+                StreamCacheState.NOT_CACHED, StreamCacheState.UNKNOWN -> allowUncachedFallback
+                StreamCacheState.CHECKING -> false
             }
         }
         val url = directUrl?.trim().orEmpty()
@@ -605,12 +731,22 @@ internal object StreamScoringEngine {
     }
 
     private fun StreamCandidate.isInstantOrCachedAutoPlay(): Boolean {
-        if (!isAutoPlayEligible()) return false
+        if (!isWellFormed()) return false
         val hash = infoHash?.trim().orEmpty()
         if (hash.isBlank()) return true
         return when (cacheState) {
             StreamCacheState.CACHED, StreamCacheState.NOT_APPLICABLE -> true
             StreamCacheState.UNKNOWN, StreamCacheState.CHECKING, StreamCacheState.NOT_CACHED -> false
+        }
+    }
+
+    /** Non-Instant torrent eligible only as post-probe auto-play fallback (force debrid). */
+    private fun StreamCandidate.isUncachedDebridAutoPlayEligible(): Boolean {
+        val hash = infoHash?.trim().orEmpty()
+        if (hash.isBlank()) return !directUrl.isNullOrBlank() && !isNonInstantStreamUrl(directUrl.trim())
+        return when (cacheState) {
+            StreamCacheState.NOT_CACHED, StreamCacheState.UNKNOWN -> true
+            StreamCacheState.CACHED, StreamCacheState.NOT_APPLICABLE, StreamCacheState.CHECKING -> false
         }
     }
 

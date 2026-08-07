@@ -164,6 +164,10 @@ internal fun PlayerRuntimeController.updateAvailableTracks(tracks: Tracks) {
         audioTracks = audioAccumulator,
         subtitleTracks = subtitleAccumulator
     )
+    maybeRememberObservedReleaseTracks(
+        audioTracks = audioAccumulator,
+        subtitleTracks = subtitleAccumulator,
+    )
     if (currentStreamHasVideoTrack) maybeScheduleFirstFrameWatchdog() else cancelFirstFrameWatchdog()
     tryAutoSelectPreferredSubtitleFromAvailableTracks()
     maybeAdjustLibassPipelineForTracks(tracks)

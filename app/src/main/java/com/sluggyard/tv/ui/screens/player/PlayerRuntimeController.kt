@@ -85,6 +85,7 @@ class PlayerRuntimeController(
     internal val layoutPreferenceDataStore: com.sluggyard.tv.data.local.LayoutPreferenceDataStore,
     internal val watchedItemsPreferences: com.sluggyard.tv.data.local.WatchedItemsPreferences,
     internal val trackPreferenceDataStore: com.sluggyard.tv.data.local.TrackPreferenceDataStore,
+    internal val releaseTrackMemoryDataStore: com.sluggyard.tv.data.local.ReleaseTrackMemoryDataStore,
     internal val audioDelayRouteDataStore: AudioDelayRouteDataStore,
     internal val torrentService: TorrentService,
     internal val torrentSettings: com.sluggyard.tv.core.torrent.TorrentSettings,
@@ -545,6 +546,8 @@ class PlayerRuntimeController(
     internal var isTorrentStream: Boolean = navigationArgs.infoHash != null && !initialStreamUrl.startsWith("http")
     internal var currentInfoHash: String? = navigationArgs.infoHash
     internal var currentFileIdx: Int? = navigationArgs.fileIdx
+    /** Debounce TRACK_MEMORY DataStore writes across MPV/Exo track scan churn. */
+    internal var lastRememberedReleaseTracksFingerprint: String? = null
     internal var currentTorrentSources: List<String>? =
         navigationArgs.sourcesJson?.let { raw ->
             runCatching {

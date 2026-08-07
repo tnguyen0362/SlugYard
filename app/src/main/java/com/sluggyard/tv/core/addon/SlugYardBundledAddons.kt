@@ -32,12 +32,11 @@ object SlugYardBundledAddons {
             }
         }
 
-    /** Default content sources for debrid — excludes optional PlayFlix (manual Community install). */
+    /** Default debrid scrapers (Torrentio + MediaFusion base URLs; Meteor/AIO via provision). */
     fun buildConfiguredContentSourceUrls(debridSettings: DebridSettings): List<String> =
         SlugYardCommunitySourcePolicy.bootstrapManifestUrls
             .filter { manifestUrl ->
-                CONTENT_SOURCE_BASE_URLS.any(manifestUrl::startsWith) &&
-                    !SlugYardCommunitySourcePolicy.isOptionalCommunityManifest(manifestUrl)
+                CONTENT_SOURCE_BASE_URLS.any(manifestUrl::startsWith)
             }
 
     fun isDefaultAddon(url: String): Boolean =

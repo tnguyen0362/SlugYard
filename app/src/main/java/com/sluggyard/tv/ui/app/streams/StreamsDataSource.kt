@@ -56,8 +56,8 @@ class StreamsDataSource(
         configuredDebrid: DebridService?,
         maxConcurrent: Int = DEFAULT_ADDON_CONCURRENCY,
         /**
-         * Finding/auto-pick for movies skips AIO (slow anime scrapers). Player / manual
-         * Sources should keep AIO so users can still browse those listings.
+         * When false, AIOStreams is excluded from the fanout. Default true for both movies
+         * and series (movie scrapes still benefit from AIO packs when the host is configured).
          */
         includeAioStreams: Boolean = true,
     ): Flow<List<StreamGroup>> = channelFlow {

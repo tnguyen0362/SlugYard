@@ -11,7 +11,7 @@ class ProviderAddonConfigTest {
     @Test
     fun torrentioUsesTheConnectedProviderAndEncodedCredential() {
         assertEquals(
-            "https://torrentio.strem.fun/debridoptions=nodownloadlinks%7Ctorbox=key%2Fpart%3Done/manifest.json",
+            "https://torrentio.strem.fun/torbox=key%2Fpart%3Done/manifest.json",
             buildTorrentioManifestUrl(DebridService.TORBOX, "key/part=one"),
         )
     }

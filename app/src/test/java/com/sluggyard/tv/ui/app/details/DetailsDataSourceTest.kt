@@ -53,6 +53,24 @@ class DetailsDataSourceTest {
     }
 
     @Test
+    fun `tmdb movie ids resolve to imdb`() = runTest {
+        val resolved = resolveMetaContentId(type = "movie", id = "tmdb:1311031") { _, _ ->
+            "tt32820897"
+        }
+        assertEquals("tt32820897", resolved)
+    }
+
+    @Test
+    fun `tmdb series episode suffix is preserved on imdb id`() = runTest {
+        val resolved = resolveMetaContentId(type = "series", id = "tmdb:1396:2:6") { tmdbId, mediaType ->
+            assertEquals(1396, tmdbId)
+            assertEquals("tv", mediaType)
+            "tt0903747"
+        }
+        assertEquals("tt0903747:2:6", resolved)
+    }
+
+    @Test
     fun `tmdb ids are resolved to imdb before meta fetch`() = runTest {
         var requestedId: String? = null
         val source = DetailsDataSource(

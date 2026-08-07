@@ -36,12 +36,17 @@ class MpvPlayerSurfaceView @JvmOverloads constructor(
     private var pendingInitialStartOption: String? = null
     private var preferredSubtitleLanguages: List<String> = emptyList()
     private var preferAssSubtitles: Boolean = false
+    /** Once the user picks a track/off, stop preferAss retry and auto re-selection. */
+    @Volatile
+    private var userPinnedSubtitleSelection: Boolean = false
     private var subtitleSelectionRetryCount = 0
     private var cachePausePropertySupported: Boolean? = null
 
     private val subtitleSelectionRunnable = object : Runnable {
         override fun run() {
             if (!initialized || preferredSubtitleLanguages.isEmpty()) return
+            // Manual pick wins over the delayed preferAss / slang retry loop.
+            if (userPinnedSubtitleSelection) return
             // MKV track discovery can complete after the first preference pass.
             // Do not treat an arbitrary auto-selected track as success: anime
             // releases often expose an early forced/Japanese track before the
@@ -75,6 +80,8 @@ class MpvPlayerSurfaceView @JvmOverloads constructor(
 
     fun setMedia(url: String, headers: Map<String, String>, startPositionMs: Long = 0L) {
         ensureInitialized()
+        // New media: auto preferAss / slang may run again until the user picks a track.
+        userPinnedSubtitleSelection = false
         val requestKey = buildMediaRequestKey(url, headers) + "#start=${startPositionMs.coerceAtLeast(0L)}"
         if (hasQueuedInitialMedia && requestKey == lastMediaRequestKey) return
 
@@ -361,6 +368,16 @@ class MpvPlayerSurfaceView @JvmOverloads constructor(
             .getOrDefault(false)
     }
 
+    /**
+     * Call when the user (or an intentional restore of their sticky pick) chooses a
+     * specific subtitle track / addon / Off. Cancels the delayed preferAss retry that
+     * otherwise keeps stomping non-ASS and external (OpenSubtitles) picks.
+     */
+    fun pinUserSubtitleSelection() {
+        userPinnedSubtitleSelection = true
+        removeCallbacks(subtitleSelectionRunnable)
+    }
+
     fun selectSubtitleTrackById(trackId: Int): Boolean {
         if (!initialized) return false
         return runCatching {
@@ -431,6 +448,7 @@ class MpvPlayerSurfaceView @JvmOverloads constructor(
     }
 
     private fun selectPreferredSubtitleTrack() {
+        if (userPinnedSubtitleSelection) return
         mpv.setPropertyString("slang", preferredSubtitleLanguages.joinToString(","))
         mpv.setPropertyBoolean("sub-visibility", true)
         val preferredAss = if (preferAssSubtitles) {

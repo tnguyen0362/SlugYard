@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withTimeoutOrNull
 
 private const val TORBOX_DIAGNOSTIC_TAG = "TorboxFiles"
+private const val UNCACHED_TORBOX_TIMEOUT_MS = 40_000L
 
 /** Connection state deliberately exposes no API keys to Compose or navigation. */
 data class DebridConnection(
@@ -132,12 +133,24 @@ private class TorboxManualResolver(
 
     override suspend fun resolve(infoHash: String, fileIndex: Int?, season: Int?, episode: Int?): ResolvedPlaybackSource {
         val key = credentials.requiredKey(service)
-        val torrentId = transport.createCachedTorrent(key, infoHash).orUnavailable(
-            "This torrent is not cached on TorBox. Pick a source marked Instant/Cached.",
-        )
+        // Prefer Instant/Cached (add_only_if_cached). If TorBox has nothing yet, queue a real
+        // download so Sources / uncached auto-play can still start a Download row.
+        val torrentId = when (val cached = transport.createCachedTorrent(key, infoHash)) {
+            is TorboxResult.Success -> cached.value
+            else -> {
+                Log.i(
+                    TORBOX_DIAGNOSTIC_TAG,
+                    "cached create miss hash=${infoHash.take(12)} — queuing uncached download",
+                )
+                val queued = transport.createTorrent(key, infoHash, onlyIfCached = false)
+                    .orUnavailable("TorBox could not add this torrent. Try another source.")
+                awaitTorboxReady(key, queued)
+                queued
+            }
+        }
+        val files = awaitTorboxFiles(key, torrentId)
         val selected = fileSelector.selectFile(
-            transport.torrentFiles(key, torrentId).orUnavailable("Torbox could not prepare this stream")
-                .map { TorboxTorrentFileDto(it.id, it.name, null, null, it.mimeType, it.sizeBytes) },
+            files.map { TorboxTorrentFileDto(it.id, it.name, null, null, it.mimeType, it.sizeBytes) },
             resolveFor(infoHash, fileIndex), season, episode,
         ) ?: throw DebridUnavailableException("Torbox did not return a playable file")
         Log.d(
@@ -145,9 +158,62 @@ private class TorboxManualResolver(
             "download-link requested season=$season episode=$episode fileId=${selected.id} " +
                 "size=${selected.size ?: -1} name='${selected.displayName().take(180)}'",
         )
-        val url = transport.downloadUrl(key, torrentId, selected.id ?: throw DebridUnavailableException("Torbox did not return a playable file"))
-        .orUnavailable("TorBox did not return a download URL for this file. Try another Instant/Cached source.")
+        val url = transport.downloadUrl(
+            key,
+            torrentId,
+            selected.id ?: throw DebridUnavailableException("Torbox did not return a playable file"),
+        ).orUnavailable("TorBox did not return a download URL for this file. Try another source.")
         return ResolvedPlaybackSource(url, infoHash)
+    }
+
+    private suspend fun awaitTorboxReady(key: String, torrentId: Int) {
+        val ready = withTimeoutOrNull(UNCACHED_TORBOX_TIMEOUT_MS) {
+            while (true) {
+                val snap = transport.torrentSnapshot(key, torrentId).orUnavailable(
+                    "TorBox could not inspect this torrent",
+                )
+                if (snap.isFailed) {
+                    throw DebridUnavailableException(
+                        "TorBox failed while downloading this torrent (${snap.downloadState}). Try another source.",
+                    )
+                }
+                if (snap.isReady) return@withTimeoutOrNull true
+                // Files can land slightly before terminal state — treat as ready enough to pick.
+                if (snap.files.isNotEmpty() && (snap.progress ?: 0.0) >= 0.99) {
+                    return@withTimeoutOrNull true
+                }
+                delay(1_000L)
+            }
+            @Suppress("UNREACHABLE_CODE")
+            false
+        }
+        if (ready != true) {
+            throw DebridUnavailableException(
+                "TorBox is still downloading this torrent. Wait a moment or pick another source.",
+            )
+        }
+    }
+
+    private suspend fun awaitTorboxFiles(key: String, torrentId: Int): List<TorboxFile> {
+        val files = withTimeoutOrNull(15_000L) {
+            while (true) {
+                val snap = transport.torrentSnapshot(key, torrentId).orUnavailable(
+                    "Torbox could not prepare this stream",
+                )
+                if (snap.files.isNotEmpty()) return@withTimeoutOrNull snap.files
+                if (snap.isFailed) {
+                    throw DebridUnavailableException(
+                        "TorBox failed while preparing this torrent. Try another source.",
+                    )
+                }
+                delay(750L)
+            }
+            @Suppress("UNREACHABLE_CODE")
+            emptyList<TorboxFile>()
+        }
+        return files ?: throw DebridUnavailableException(
+            "TorBox is still preparing files for this torrent. Try again in a moment.",
+        )
     }
 }
 

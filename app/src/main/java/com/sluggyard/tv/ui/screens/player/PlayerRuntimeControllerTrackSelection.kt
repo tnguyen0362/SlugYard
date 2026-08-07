@@ -158,24 +158,39 @@ internal fun PlayerRuntimeController.applyAddonSubtitleOverrideByLanguage(
     return false
 }
 
-internal fun PlayerRuntimeController.selectSubtitleTrack(trackIndex: Int) {
+internal fun PlayerRuntimeController.selectSubtitleTrack(trackIndex: Int, pinUserSelection: Boolean = false) {
     logSwitchTrace(
         stage = "select-subtitle-track",
-        message = "trackIndex=$trackIndex usingMpv=${isUsingMpvEngine()} " +
+        message = "trackIndex=$trackIndex usingMpv=${isUsingMpvEngine()} pinUser=$pinUserSelection " +
             "track=${_uiState.value.subtitleTracks.getOrNull(trackIndex)?.let { "${it.language}/${it.name}/${it.trackId}/forced=${it.isForced}" } ?: "none"}"
     )
     if (isUsingMpvEngine()) {
-        Log.d(PlayerRuntimeController.TAG, "Selecting INTERNAL subtitle trackIndex=$trackIndex (mpv)")
+        Log.e(PlayerRuntimeController.TAG, "Selecting INTERNAL subtitle trackIndex=$trackIndex (mpv) pinUser=$pinUserSelection")
         val shouldKeepPlaying = !userPausedManually && !_uiState.value.playbackEnded
         val track = _uiState.value.subtitleTracks.getOrNull(trackIndex)
         val trackId = track?.trackId?.toIntOrNull()
+        // Stop preferAss delayed retry / heal from immediately undoing this pick.
+        if (pinUserSelection) {
+            mpvView?.pinUserSubtitleSelection()
+        }
         val changed = trackId != null && mpvView?.selectSubtitleTrackById(trackId) == true
         if (changed) {
             pendingAddonSubtitleLanguage = null
             pendingAddonSubtitleTrackId = null
             pendingAudioSelectionAfterSubtitleRefresh = null
+            _uiState.update {
+                it.copy(
+                    selectedSubtitleTrackIndex = trackIndex,
+                    selectedAddonSubtitle = null,
+                )
+            }
             updateMpvAvailableTracks()
             keepMpvPlayingIfNeeded(shouldKeepPlaying)
+        } else {
+            Log.e(
+                PlayerRuntimeController.TAG,
+                "MPV subtitle select failed trackIndex=$trackIndex trackId=${track?.trackId}",
+            )
         }
         return
     }
@@ -206,6 +221,12 @@ internal fun PlayerRuntimeController.selectSubtitleTrack(trackIndex: Int) {
                 .setOverrideForType(override)
                 .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
                 .build()
+            _uiState.update {
+                it.copy(
+                    selectedSubtitleTrackIndex = trackIndex,
+                    selectedAddonSubtitle = null,
+                )
+            }
             return@let
         }
         Log.w(
@@ -260,6 +281,7 @@ internal fun PlayerRuntimeController.disableSubtitles() {
     )
     if (isUsingMpvEngine()) {
         if (mpvView?.disableSubtitles() == true) {
+            mpvView?.pinUserSubtitleSelection()
             pendingAddonSubtitleLanguage = null
             pendingAddonSubtitleTrackId = null
             pendingAudioSelectionAfterSubtitleRefresh = null
@@ -417,16 +439,22 @@ internal fun PlayerRuntimeController.selectAddonSubtitle(subtitle: Subtitle) {
         ) {
             return
         }
-        Log.d(PlayerRuntimeController.TAG, "Selecting ADDON subtitle lang=${subtitle.lang} id=${subtitle.id} (mpv)")
+        Log.e(PlayerRuntimeController.TAG, "Selecting ADDON subtitle lang=${subtitle.lang} id=${subtitle.id} (mpv)")
         val wasPlaying = isPlaybackCurrentlyPlaying()
         val normalizedLang = PlayerSubtitleUtils.normalizeLanguageCode(subtitle.lang)
         val trackTitle = buildAddonSubtitleTrackId(subtitle)
+        // Pin before add — addAndSelect + updateMpvAvailableTracks used to immediately
+        // re-force preferAss dialogue and make the list click a no-op.
+        mpvView?.pinUserSubtitleSelection()
         val added = mpvView?.addAndSelectExternalSubtitle(
             url = subtitle.url,
             title = trackTitle,
             language = normalizedLang
         ) == true
-        if (!added) return
+        if (!added) {
+            Log.e(PlayerRuntimeController.TAG, "MPV addAndSelectExternalSubtitle failed id=${subtitle.id}")
+            return
+        }
 
         pendingAddonSubtitleLanguage = null
         pendingAddonSubtitleTrackId = null

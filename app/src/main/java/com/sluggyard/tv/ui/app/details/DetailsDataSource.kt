@@ -28,19 +28,23 @@ internal suspend fun resolveMetaContentId(
     tmdbToImdb: suspend (tmdbId: Int, mediaType: String) -> String?,
 ): String {
     if (!id.startsWith("tmdb:", ignoreCase = true)) return id
-    val numeric = id.removePrefix("tmdb:")
-        .removePrefix("TMDB:")
-        .substringBefore(':')
-        .toIntOrNull()
-        ?: return id
+    // tmdb:1311031 or tmdb:1396:1:2 — keep :season:episode after the IMDb swap.
+    val afterPrefix = id.substringAfter(':')
+    val numeric = afterPrefix.substringBefore(':').toIntOrNull() ?: return id
+    val episodeSuffix = afterPrefix
+        .indexOf(':')
+        .takeIf { it >= 0 }
+        ?.let { afterPrefix.substring(it) }
+        .orEmpty()
     val mediaType = when (type.trim().lowercase()) {
         "series", "tv", "show", "shows", "tvshow", "tvshows" -> "tv"
         else -> "movie"
     }
-    return tmdbToImdb(numeric, mediaType)
+    val imdb = tmdbToImdb(numeric, mediaType)
         ?.trim()
         ?.takeIf { it.startsWith("tt", ignoreCase = true) }
-        ?: id
+        ?: return id
+    return imdb + episodeSuffix
 }
 
 /** Loads Details metadata from the origin addon, falling back to a meta catalog (Cinemeta). */

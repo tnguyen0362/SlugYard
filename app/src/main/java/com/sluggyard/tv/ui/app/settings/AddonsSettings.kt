@@ -301,42 +301,39 @@ private fun buildAddonCards(
 }
 
 private fun buildCommunityCatalog(installed: List<ManagedAddon>): List<AddonCardModel> {
-    // Optional allowlisted community packs — never auto-provisioned; Install is explicit.
+    // Optional allowlisted community packs — empty today (scrapers are default provision, not Community).
     return SlugYardCommunitySourcePolicy.optionalCommunityManifestUrls.map { url ->
         val existing = installed.firstOrNull {
-            SlugYardCommunitySourcePolicy.isPlayFlixManifest(it.manifestUrl) &&
-                SlugYardCommunitySourcePolicy.isPlayFlixManifest(url)
+            it.manifestUrl.equals(url, ignoreCase = true)
         }
         if (existing != null) {
             existing.toCardModel(installed = true)
         } else {
             AddonCardModel(
                 manifestUrl = url,
-                name = SlugYardCommunitySourcePolicy.PLAYFLIX_DISPLAY_NAME,
-                version = SlugYardCommunitySourcePolicy.PLAYFLIX_DISPLAY_VERSION,
+                name = "Community addon",
+                version = null,
                 categoryLine = "Movie & Series",
-                description = SlugYardCommunitySourcePolicy.PLAYFLIX_DISPLAY_DESCRIPTION,
+                description = "Stremio-compatible addon",
                 logoUrl = null,
-                showLogo = false,
+                showLogo = true,
                 installed = false,
             )
         }
     }
 }
 
-private fun ManagedAddon.toCardModel(installed: Boolean): AddonCardModel {
-    val isPlayFlix = SlugYardCommunitySourcePolicy.isPlayFlixManifest(manifestUrl)
-    return AddonCardModel(
+private fun ManagedAddon.toCardModel(installed: Boolean): AddonCardModel =
+    AddonCardModel(
         manifestUrl = manifestUrl,
         name = SlugYardCommunitySourcePolicy.addonDisplayName(this),
         version = SlugYardCommunitySourcePolicy.addonDisplayVersion(this),
         categoryLine = formatAddonTypes(manifest),
         description = SlugYardCommunitySourcePolicy.addonDisplayDescription(this),
         logoUrl = manifest.logoUrl,
-        showLogo = !isPlayFlix,
+        showLogo = true,
         installed = installed,
     )
-}
 
 private fun formatAddonTypes(manifest: AddonManifestContract): String {
     val labels = manifest.types.mapNotNull { raw ->
