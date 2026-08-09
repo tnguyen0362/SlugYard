@@ -298,8 +298,9 @@ internal object StreamScoringEngine {
      * 0 otherwise
      *
      * When [ObservedReleaseTracks] exist for this infoHash, softsub/dual take max(title, observed).
-     * Observed never invents softsubs for conflicting-title packs that are clearly wrong-lang-only
-     * (conflictingLang stays 0 from titles).
+     * [ListingReleaseProbe] lifts structured MediaInfo / file-path signals from free listing text
+     * (no network) under the same max — never overrides a clearer title conflict (score 0).
+     * Observed (post-play memory) still wins the floor when higher.
      *
      * Multi-Subs alone is NOT max score when a preference is set — A&C "Multi-Sub" packs
      * are often Latam/España-only and must not beat real Eng Dual packs or fall through
@@ -352,21 +353,33 @@ internal object StreamScoringEngine {
         }
 
         var usedObserved = false
+        // Free listing parse (structured Audio:/Subs: / companion .ass paths) — no I/O.
+        val listingAnimeLike = kind == ContentKind.ANIME ||
+            kind == ContentKind.MAINSTREAM ||
+            kind == ContentKind.LIVE
+        val (listSoft, listDual) = ListingReleaseProbe.inferTrackFits(
+            releaseBlob = text,
+            preferredSubtitleLanguage = context.preferredSubtitleLanguage,
+            animeLike = listingAnimeLike,
+        )
+        // Never lift out of hard conflict (0): wrong-lang title stays out of auto-play.
+        if (softsubFit > 0 && listSoft > softsubFit) softsubFit = listSoft
+        // Never invent dual on K/J drama even if listing text looks dual-ish.
+        if (listingAnimeLike && listDual > dualFit) dualFit = listDual
+
         val hash = candidate?.infoHash?.trim()?.lowercase().orEmpty()
         val observed = if (hash.isNotEmpty()) context.observedTracksByHash[hash] else null
         // Real player inventory always wins floor max — title tags are best-effort only.
         if (observed != null) {
             val (obsSoft, obsDual) = observed.toTitleScaleSignals(
                 preferredSubtitleLanguage = context.preferredSubtitleLanguage,
-                animeLike = kind == ContentKind.ANIME ||
-                    kind == ContentKind.MAINSTREAM ||
-                    kind == ContentKind.LIVE,
+                animeLike = listingAnimeLike,
             )
             if (obsSoft > softsubFit) {
                 softsubFit = obsSoft
                 usedObserved = true
             }
-            if (obsDual > dualFit) {
+            if (listingAnimeLike && obsDual > dualFit) {
                 dualFit = obsDual
                 usedObserved = true
             }

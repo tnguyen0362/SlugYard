@@ -28,6 +28,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -350,7 +351,17 @@ class WatchProgressRepositoryImpl @Inject constructor(
                 if (useTraktProgress) {
                     traktProgressService.observeAiredEpisodes(contentId)
                 } else {
-                    flowOf(emptyList())
+                    // SlugYard/local mode: resolve episode order from the primary addon's meta
+                    // episode list so next-up can advance without Trakt. Fail-open when unknown.
+                    flow {
+                        emit(
+                            fetchContentMetadata(contentId = contentId, contentType = "series")
+                                ?.episodes
+                                ?.keys
+                                ?.sortedWith(compareBy({ it.first }, { it.second }))
+                                .orEmpty(),
+                        )
+                    }
                 }
             }
             .distinctUntilChanged()

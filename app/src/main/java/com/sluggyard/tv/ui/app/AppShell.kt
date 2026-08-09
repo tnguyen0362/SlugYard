@@ -66,9 +66,17 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import coil3.imageLoader
+import coil3.request.ImageRequest
+import coil3.size.Size
+import coil3.size.pxOrElse
+import com.sluggyard.tv.ui.app.preferLargePosterUrl
 import com.sluggyard.tv.ui.app.requestFocusReliably
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
@@ -101,6 +109,13 @@ import com.sluggyard.tv.ui.app.data.PlaybackProgressStore
 import com.sluggyard.tv.ui.app.data.groupPlaybackCheckpoints
 import com.sluggyard.tv.ui.app.data.toContinueWatchingCheckpoint
 import com.sluggyard.tv.ui.app.data.useTraktContinueWatching
+import com.sluggyard.tv.ui.app.data.mergeTraktCwResumeInputs
+import com.sluggyard.tv.ui.app.data.toCwResumeInput
+import com.sluggyard.tv.ui.app.data.toCwNextUpSeed
+import com.sluggyard.tv.core.watchstate.ContinueWatchingMembership
+import com.sluggyard.tv.core.watchstate.CwEpisodeOrderItem
+import com.sluggyard.tv.core.watchstate.CwMembershipSettings
+import com.sluggyard.tv.core.watchstate.CwRailRow
 import com.sluggyard.tv.data.local.TraktAuthState
 import com.sluggyard.tv.data.local.WatchProgressSource
 import com.sluggyard.tv.domain.repository.WatchProgressRepository
@@ -140,6 +155,9 @@ import com.sluggyard.tv.ui.app.home.HomePoster
 import com.sluggyard.tv.ui.app.home.HomeScreen
 import com.sluggyard.tv.ui.app.home.HomeState
 import com.sluggyard.tv.ui.app.home.TmdbHomeDataSource
+import com.sluggyard.tv.ui.app.home.isPrimaryHomeShelfTitle
+import com.sluggyard.tv.ui.app.preferCardBackdropUrl
+import com.sluggyard.tv.ui.app.preferLargePosterUrl
 import com.sluggyard.tv.ui.app.home.withHeroEnrichments
 import com.sluggyard.tv.ui.app.home.enrichContinueWatchingPosters
 import com.sluggyard.tv.ui.app.home.withContinueWatchingPosters
@@ -175,6 +193,7 @@ import com.sluggyard.tv.ui.app.debrid.CloudManagerScreen
 import com.sluggyard.tv.ui.app.data.AioStreamsConfigTransport
 import com.sluggyard.tv.ui.app.data.ProviderAddonConfigurator
 import com.sluggyard.tv.core.addonprotocol.SlugYardCommunitySourcePolicy
+import com.sluggyard.tv.BuildConfig
 import com.sluggyard.tv.core.logging.ExperimentalDiagnostics
 import com.sluggyard.tv.ui.app.watchhub.WatchHubDataSource
 import com.sluggyard.tv.ui.app.watchhub.WatchHubPlatform
@@ -182,10 +201,8 @@ import com.sluggyard.tv.ui.app.watchhub.WatchHubScreen
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -342,11 +359,19 @@ class AppGraph(
     }
 
     suspend fun installAllowlistedAddon(manifestUrl: String) {
-        val normalized = manifestUrl.trim().let { raw ->
+        val raw = manifestUrl.trim()
+        // Product pack install = re-provision every scraper under PlayFlix.
+        if (SlugYardCommunitySourcePolicy.isPlayFlixPackIdentifier(raw)) {
+            val hasDebrid = debridRuntime.configuredService() != null ||
+                debridRuntime.configuredAddonUrls() != null
+            provisionCommunitySources(debridConfigured = hasDebrid)
+            return
+        }
+        val normalized = raw.let { value ->
             when {
-                raw.endsWith("/manifest.json", ignoreCase = true) -> raw
-                raw.contains("://") -> raw.trimEnd('/') + "/manifest.json"
-                else -> raw
+                value.endsWith("/manifest.json", ignoreCase = true) -> value
+                value.contains("://") -> value.trimEnd('/') + "/manifest.json"
+                else -> value
             }
         }
         val configured = if (
@@ -368,6 +393,10 @@ class AppGraph(
     }
 
     suspend fun uninstallAllowlistedAddon(manifestUrl: String) {
+        if (SlugYardCommunitySourcePolicy.isPlayFlixPackIdentifier(manifestUrl.trim())) {
+            communityProvisioner.uninstallPlayFlixPack()
+            return
+        }
         communityProvisioner.uninstallByManifestUrl(manifestUrl)
     }
 
@@ -719,6 +748,64 @@ private fun AppContent(
         } else {
             playbackCheckpoints
         }
+    }
+    // Next-up machinery: completed-episode seeds + per-show episode order resolve the next
+    // unwatched episode. Seeds stay last-completed; the membership module advances them.
+    val nextUpSeeds by watchProgressRepository.observeNextUpSeeds().collectAsState(initial = emptyList())
+    val dismissedNextUpKeys by settingsFacade.traktSettings.dismissedNextUpKeys.collectAsState(initial = emptySet())
+    val showUnairedNextUp by settingsFacade.traktSettings.showUnairedNextUp.collectAsState(initial = true)
+    var nextUpEpisodeOrder by remember { mutableStateOf<Map<String, List<Pair<Int, Int>>>>(emptyMap()) }
+    LaunchedEffect(nextUpSeeds) {
+        val showIds = nextUpSeeds.mapNotNull { it.contentId.takeIf(String::isNotBlank) }.distinct()
+        nextUpEpisodeOrder = emptyMap()
+        // Bounded: only resolve order for the most recent seed shows, fail-open per show.
+        showIds.take(MaxNextUpOrderResolutions).forEach { showId ->
+            launch {
+                watchProgressRepository.getAiredEpisodeOrder(showId).collect { order ->
+                    nextUpEpisodeOrder = nextUpEpisodeOrder + (showId to order)
+                }
+            }
+        }
+    }
+    val cwRows = remember(
+        useTraktCw,
+        traktContinueWatching,
+        playbackCheckpoints,
+        nextUpSeeds,
+        dismissedNextUpKeys,
+        showUnairedNextUp,
+        nextUpEpisodeOrder,
+    ) {
+        val resumeInputs = if (useTraktCw) {
+            mergeTraktCwResumeInputs(
+                traktInProgress = traktContinueWatching.map { it.toCwResumeInput() },
+                local = playbackCheckpoints.map { it.toCwResumeInput() },
+            )
+        } else {
+            playbackCheckpoints.map { it.toCwResumeInput() }
+        }
+        // Secondary filters (A7): log why next-up seeds are dropped so a missing tile is not a
+        // silent mystery. Membership itself applies dismissed/hidden/unaired rules after this.
+        if (BuildConfig.DEBUG) {
+            val seeds = nextUpSeeds.mapNotNull { it.toCwNextUpSeed() }
+            seeds.forEach { seed ->
+                when {
+                    seed.seriesKey in dismissedNextUpKeys ->
+                        ExperimentalDiagnostics.event("home", "cw_seed_dropped", "reason" to "dismissed", "showId" to seed.showId)
+                    nextUpEpisodeOrder[seed.showId].isNullOrEmpty() ->
+                        ExperimentalDiagnostics.event("home", "cw_seed_dropped", "reason" to "no_episode_order", "showId" to seed.showId)
+                }
+            }
+        }
+        ContinueWatchingMembership.build(
+            resumeInputs = resumeInputs,
+            seeds = nextUpSeeds.mapNotNull { it.toCwNextUpSeed() },
+            episodeOrder = nextUpEpisodeOrder.mapValues { (_, pairs) ->
+                pairs.map { (season, episode) -> CwEpisodeOrderItem(season, episode) }
+            },
+            dismissedShowIds = dismissedNextUpKeys,
+            settings = CwMembershipSettings(showUnaired = showUnairedNextUp),
+        )
     }
     val libraryWatch by graph.libraryWatch.state.collectAsState(initial = LibraryWatchState())
     val profiles by graph.profiles.state.collectAsState(initial = com.sluggyard.tv.ui.app.data.ProfileState())
@@ -1138,8 +1225,8 @@ private fun AppContent(
             browseCatalogState = state
         }
     }
-    val rawHomeState = remember(catalogState, continueWatchingCheckpoints) {
-        catalogState.toScreenState(continueWatchingCheckpoints)
+    val rawHomeState = remember(catalogState, cwRows) {
+        catalogState.toScreenState(cwRows)
     }
     // Catalog rows can transiently flicker load state as later refinements arrive, which would
     // otherwise flip the computed hero to null for a frame and force-recreate the hero panel
@@ -1238,24 +1325,109 @@ private fun AppContent(
             onHomeSplashVisibleChange(true)
         }
     }
-    // Single dismiss gate: start the clock when splash is shown, then leave on catalog settle,
-    // empty-home after the min duration, or the hard max — never hang on a zeroed timestamp.
+    // Splash stays up until catalogs finish AND first-rail posters are actually in Coil
+    // memory — not just "wait 1s on top of a half-drawn home". Dismiss only after that,
+    // a hard min duration, or the safety max.
     LaunchedEffect(homeSplashVisible, homeReloadNonce) {
         if (!homeSplashVisible) return@LaunchedEffect
         val startedAt = System.currentTimeMillis()
         homeSplashStartedAt = startedAt
+        var posterWarmDone = false
+        var posterWarmAttempted = false
+        // Card poster decode target matches Home PosterCard / prefetch (176×264 dp @ density).
+        val density = context.resources.displayMetrics.density
+        val posterW = (176f * density).toInt().coerceAtLeast(1)
+        val posterH = (264f * density).toInt().coerceAtLeast(1)
+        val posterDecode = Size(posterW, posterH)
+        val loader = context.imageLoader
         while (homeSplashVisible) {
             val rows = catalogState.rows
-            val pending = rows.count { it.loadState is CatalogLoadState.Loading }
+            // Popular/Featured gate splash when present — don't pin the logo on genre rails.
+            val splashRows = rows
+                .filter { isPrimaryHomeShelfTitle(it.title) }
+                .ifEmpty { rows.take(2) }
+            val pending = splashRows.count { it.loadState is CatalogLoadState.Loading }
+            val contentRows = splashRows.mapNotNull { it.loadState as? CatalogLoadState.Content }
             val elapsed = System.currentTimeMillis() - startedAt
-            // Settled rows, or still-empty after min (no catalogs / hung request builder).
-            val catalogsReady = when {
-                pending > 0 -> false
-                rows.isNotEmpty() -> true
-                elapsed >= HomeSplashMinDurationMs -> true
-                else -> false
+            val catalogsSettled = splashRows.isNotEmpty() && pending == 0
+            val hasVisibleShelves = contentRows.isNotEmpty()
+            if (catalogsSettled && hasVisibleShelves && !posterWarmDone) {
+                if (!posterWarmAttempted) {
+                    posterWarmAttempted = true
+                    // Prefer heavy Metahub first shelves; warm more posters there than genre rails.
+                    val warmTargets = contentRows
+                        .take(HomeSplashWarmShelfCount)
+                        .flatMap { row -> row.posters.take(HomeSplashWarmPostersPerShelf) }
+                        .distinctBy { it.id }
+                        .mapNotNull { poster ->
+                            preferLargePosterUrl(poster.imageUrl)?.let { url -> poster to url }
+                        }
+                        .take(HomeSplashWarmMaxPosters)
+                    if (warmTargets.isEmpty()) {
+                        posterWarmDone = true
+                    } else {
+                        // Block on real decodes into memory (same size/keys as the cards).
+                        val successes = withContext(Dispatchers.IO) {
+                            coroutineScope {
+                                warmTargets.map { (poster, url) ->
+                                    async {
+                                        val key = "poster:${poster.id}:$url:${posterW}x${posterH}"
+                                        val result = runCatching {
+                                            loader.execute(
+                                                ImageRequest.Builder(context)
+                                                    .data(url)
+                                                    .size(posterDecode)
+                                                    .precision(coil3.size.Precision.EXACT)
+                                                    .memoryCacheKey(key)
+                                                    .diskCacheKey("poster:${poster.id}:$url")
+                                                    .build(),
+                                            )
+                                        }.getOrNull()
+                                        result?.image != null
+                                    }
+                                }.awaitAll().count { it }
+                            }
+                        }
+                        val need = minOf(HomeSplashWarmMinSuccess, warmTargets.size)
+                            .coerceAtLeast(1)
+                        posterWarmDone = successes >= need
+                        // Also warm landscape for primary shelves so first D-pad expands ready.
+                        contentRows
+                            .take(HomeSplashWarmShelfCount)
+                            .flatMap { row -> row.posters.take(HomeSplashWarmLandscapesPerShelf) }
+                            .distinctBy { it.id }
+                            .forEach { poster ->
+                                val posterUrl = preferLargePosterUrl(poster.imageUrl)
+                                val url = preferCardBackdropUrl(poster.backdropUrl)
+                                    ?.takeIf { it.isNotBlank() && it != posterUrl }
+                                    ?: return@forEach
+                                val landW = (posterH * 16f / 9f).toInt()
+                                    .coerceAtMost(640)
+                                    .coerceAtLeast(1)
+                                val landSize = Size(landW, posterH)
+                                loader.enqueue(
+                                    ImageRequest.Builder(context)
+                                        .data(url)
+                                        .size(landSize)
+                                        .precision(coil3.size.Precision.EXACT)
+                                        .memoryCacheKey(
+                                            "card-backdrop:${poster.id}:$url:${landW}x${posterH}",
+                                        )
+                                        .diskCacheKey("card-backdrop:${poster.id}:$url")
+                                        .build(),
+                                )
+                            }
+                    }
+                } else {
+                    // Warm ran once; allow dismiss after min+preload budget if network was weak.
+                    posterWarmDone = elapsed >= HomeSplashMinDurationMs + HomeSplashPosterPreloadMs
+                }
+            } else if (catalogsSettled && !hasVisibleShelves) {
+                // All splash shelves empty/error — nothing to paint; allow dismiss after min hold.
+                posterWarmDone = true
             }
-            if (elapsed >= HomeSplashMinDurationMs && catalogsReady) {
+            val minOk = elapsed >= HomeSplashMinDurationMs
+            if (minOk && catalogsSettled && posterWarmDone) {
                 onHomeSplashVisibleChange(false)
                 break
             }
@@ -3222,6 +3394,7 @@ private fun playPreparingArtForStreams(
 }
 
 private const val MaxHomeRowPosters = 32
+private const val MaxNextUpOrderResolutions = 12
 /** Cap how many debrid resolve attempts auto-pick will burn before surfacing Sources. */
 private const val MaxAutoPickResolveAttempts = 3
 
@@ -3291,11 +3464,21 @@ private fun StreamGroup.isAioStreamsGroup(): Boolean {
 }
 
 /** Home cold-start splash: let TMDB/addon fanout finish before focus hits a partial shelf list. */
-private const val HomeSplashMinDurationMs = 1_800L
-private const val HomeSplashMaxDurationMs = 12_000L
+private const val HomeSplashMinDurationMs = 5_500L
+private const val HomeSplashMaxDurationMs = 18_000L
+/**
+ * After shelves settle, Coil must actually finish first-rail poster decodes.
+ * Used only as a soft floor before giving up when the network is slow.
+ */
+private const val HomeSplashPosterPreloadMs = 4_500L
+private const val HomeSplashWarmShelfCount = 2
+private const val HomeSplashWarmPostersPerShelf = 14
+private const val HomeSplashWarmLandscapesPerShelf = 12
+private const val HomeSplashWarmMaxPosters = 28
+private const val HomeSplashWarmMinSuccess = 10
 
 private fun HomeCatalogState.toScreenState(
-    playbackCheckpoints: List<com.sluggyard.tv.ui.app.data.PlaybackCheckpoint>,
+    cwRows: List<com.sluggyard.tv.core.watchstate.CwRailRow>,
 ): HomeState {
     val catalogRows = rows.mapNotNull { row ->
         val content = row.loadState as? CatalogLoadState.Content ?: return@mapNotNull null
@@ -3332,41 +3515,70 @@ private fun HomeCatalogState.toScreenState(
             contentType = type,
         )
     }
-    val heroCandidates = catalogRows
-        .flatMap { it.posters }
-        .distinctBy { it.id }
-        .take(8)
-        .mapNotNull(::heroFor)
+    val heroCandidates = run {
+        val primary = catalogRows.filter { isPrimaryHomeShelfTitle(it.title) }
+        val source = primary.ifEmpty { catalogRows }
+        source
+            .flatMap { it.posters }
+            .distinctBy { it.id }
+            .take(8)
+            .mapNotNull(::heroFor)
+    }
     return HomeState(
         hero = heroCandidates.firstOrNull(),
         heroCandidates = heroCandidates,
         rows = buildList {
-        if (playbackCheckpoints.isNotEmpty()) {
+        if (cwRows.isNotEmpty()) {
             add(
                 HomeRow(
                     id = "continue_watching",
                     title = "Continue Watching",
-                    posters = groupPlaybackCheckpoints(playbackCheckpoints).map { checkpoint ->
-                        val checkpointParentId = checkpoint.parentId
-                            ?: inferSeriesParentId(checkpoint.contentId, checkpoint.season, checkpoint.episode)
-                        val catalogMatch = checkpointParentId?.let(catalogPostersById::get)
-                            ?: catalogPostersById[checkpoint.contentId]
-                        com.sluggyard.tv.ui.app.home.HomePoster(
-                            id = checkpoint.contentId,
-                            title = catalogMatch?.title ?: checkpoint.title,
-                            imageUrl = checkpoint.posterUrl ?: catalogMatch?.imageUrl,
-                            backdropUrl = catalogMatch?.backdropUrl,
-                            progressFraction = checkpoint.progressFraction?.toFloat(),
-                            contentType = checkpoint.contentType,
-                            addonId = checkpoint.addonId ?: catalogMatch?.addonId,
-                            season = checkpoint.season,
-                            episode = checkpoint.episode,
-                            parentId = checkpointParentId ?: catalogMatch?.parentId,
-                            parentType = checkpoint.parentType ?: catalogMatch?.parentType,
-                            resumePositionMs = checkpoint.positionMs,
-                            contentGenres = checkpoint.contentGenres,
-                            contentLanguage = checkpoint.contentLanguage,
-                        )
+                    posters = cwRows.map { row ->
+                        when (row) {
+                            is com.sluggyard.tv.core.watchstate.CwRailRow.Resume -> {
+                                val checkpointParentId = row.seriesKey
+                                val catalogMatch = checkpointParentId.let(catalogPostersById::get)
+                                    ?: catalogPostersById[row.contentId]
+                                com.sluggyard.tv.ui.app.home.HomePoster(
+                                    id = row.contentId,
+                                    title = catalogMatch?.title ?: row.title,
+                                    imageUrl = row.posterUrl ?: catalogMatch?.imageUrl,
+                                    backdropUrl = catalogMatch?.backdropUrl,
+                                    progressFraction = row.progressFraction?.toFloat(),
+                                    contentType = row.contentType,
+                                    addonId = row.addonId ?: catalogMatch?.addonId,
+                                    season = row.season,
+                                    episode = row.episode,
+                                    parentId = checkpointParentId,
+                                    parentType = row.contentType.takeIf { it.equals("series", true) }
+                                        ?: catalogMatch?.parentType,
+                                    resumePositionMs = row.positionMs,
+                                    contentGenres = row.contentGenres,
+                                    contentLanguage = row.contentLanguage,
+                                    nextUp = false,
+                                )
+                            }
+                            is com.sluggyard.tv.core.watchstate.CwRailRow.NextUp -> {
+                                val catalogMatch = catalogPostersById[row.showId]
+                                    ?: catalogPostersById[row.seriesKey]
+                                com.sluggyard.tv.ui.app.home.HomePoster(
+                                    id = row.showId,
+                                    title = catalogMatch?.title ?: row.title,
+                                    imageUrl = row.posterUrl ?: catalogMatch?.imageUrl,
+                                    backdropUrl = catalogMatch?.backdropUrl,
+                                    // Next-up: no fake 100% resume bar.
+                                    progressFraction = null,
+                                    contentType = "series",
+                                    addonId = row.addonId ?: catalogMatch?.addonId,
+                                    season = row.season,
+                                    episode = row.episode,
+                                    parentId = row.seriesKey,
+                                    parentType = "series",
+                                    resumePositionMs = 0L,
+                                    nextUp = true,
+                                )
+                            }
+                        }
                     },
                 ),
             )

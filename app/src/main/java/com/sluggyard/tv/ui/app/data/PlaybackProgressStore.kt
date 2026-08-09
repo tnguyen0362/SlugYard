@@ -47,7 +47,10 @@ data class PlaybackCheckpoint(
 
     /** Continue Watching membership: percentage threshold or the absolute ~10s floor. */
     val isResumable: Boolean
-        get() = remoteProgressFraction?.let { it in 0.02..0.90 }
+        get() = remoteProgressFraction?.let {
+            it >= com.sluggyard.tv.core.watchstate.STARTED_PROGRESS_FRACTION &&
+                it < com.sluggyard.tv.core.watchstate.COMPLETED_PROGRESS_FRACTION
+        }
             ?: WatchStatePolicy.isStartedButIncomplete(positionMs, durationMs)
 }
 

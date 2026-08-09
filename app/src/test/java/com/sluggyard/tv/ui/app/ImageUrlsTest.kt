@@ -48,4 +48,40 @@ class ImageUrlsTest {
             preferCardBackdropUrl("https://image.tmdb.org/t/p/w1280/back.jpg"),
         )
     }
+
+    @Test
+    fun preferCardBackdropUrl_keepsMetahubFullHdMedium_notSoftSmall() {
+        // Metahub medium/large/original are the same ~1080p file; small is soft 480px bandaid.
+        // Cards keep medium quality; Coil decode size handles TV layout width.
+        assertEquals(
+            "https://images.metahub.space/background/medium/tt0111161/img",
+            preferCardBackdropUrl("https://images.metahub.space/background/medium/tt0111161/img"),
+        )
+        assertEquals(
+            "https://images.metahub.space/background/medium/tt0111161/img",
+            preferCardBackdropUrl("https://images.metahub.space/background/large/tt0111161/img"),
+        )
+        assertEquals(
+            "https://images.metahub.space/background/medium/tt0111161/img",
+            preferCardBackdropUrl("https://images.metahub.space/background/original/tt0111161/img"),
+        )
+        assertEquals(
+            "https://images.metahub.space/background/medium/tt0111161/img",
+            preferCardBackdropUrl("https://images.metahub.space/background/small/tt0111161/img"),
+        )
+        assertEquals(
+            "https://images.metahub.space/fanart/medium/tt0111161/img",
+            preferCardBackdropUrl("https://images.metahub.space/fanart/small/tt0111161/img"),
+        )
+    }
+
+    @Test
+    fun preferCardBackdropUrl_traktStaysMediumNotFull() {
+        assertEquals(
+            "https://media.trakt.tv/images/movies/000/000/001/fanarts/medium/file.jpg.webp",
+            preferCardBackdropUrl(
+                "https://media.trakt.tv/images/movies/000/000/001/fanarts/full/file.jpg.webp",
+            ),
+        )
+    }
 }

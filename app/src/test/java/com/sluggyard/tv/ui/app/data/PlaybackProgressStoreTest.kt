@@ -34,7 +34,7 @@ class PlaybackProgressStoreTest {
 
         store.save(episodeOne)
         store.save(episodeTwo)
-        store.save(episodeOne.copy(positionMs = 950L, durationMs = 1_000L, updatedAtEpochMs = 3L))
+        store.save(episodeOne.copy(positionMs = 980L, durationMs = 1_000L, updatedAtEpochMs = 3L))
 
         assertEquals(listOf(episodeTwo), store.checkpoints.first())
     }

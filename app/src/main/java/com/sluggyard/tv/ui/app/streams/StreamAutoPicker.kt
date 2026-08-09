@@ -268,7 +268,7 @@ private fun autoPickQualityHint(title: String): Int {
  * Cheap admission sort for the anime score cap — keyword + memory only, never full [StreamScoringEngine.rank]
  * (that path used to freeze Finding on Onn when applied to whole dumps every tick).
  *
- * Order: observed dual/ASS memory → Dual-Audio token → softsub tokens → SeaDex curator →
+ * Order: observed dual/ASS memory → Dual-Audio token / listing dual → softsub tokens → SeaDex →
  * Instant → seeders (survivability) → res.
  */
 private fun animeScorePoolAdmissionOrder(
@@ -295,7 +295,21 @@ private fun animeScorePoolAdmissionOrder(
         return b
     }
 
+    fun listingBoost(c: StreamCandidate): Int {
+        val (soft, dual) = ListingReleaseProbe.inferTrackFits(
+            releaseBlob = releaseBlob(c),
+            preferredSubtitleLanguage = context.preferredSubtitleLanguage,
+            animeLike = true,
+        )
+        var b = 0
+        if (dual == 1) b += 3
+        if (soft >= 4) b += 2
+        else if (soft >= 2) b += 1
+        return b
+    }
+
     return compareByDescending<StreamCandidate> { memoryBoost(it) }
+        .thenByDescending { listingBoost(it) }
         .thenByDescending { dualHint.containsMatchIn(releaseBlob(it)) }
         .thenByDescending { softHint.containsMatchIn(releaseBlob(it)) }
         .thenByDescending { it.isCuratedSeaDexSource() }

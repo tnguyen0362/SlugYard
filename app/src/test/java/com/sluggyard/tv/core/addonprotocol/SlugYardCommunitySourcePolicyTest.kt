@@ -50,23 +50,28 @@ class SlugYardCommunitySourcePolicyTest {
     }
 
     @Test
-    fun `mediafusion keeps upstream display branding not app name`() {
-        val addon = ManagedAddon(
+    fun `scrapers keep technical names - product pack is PlayFlix`() {
+        val torrentio = ManagedAddon(
+            manifestUrl = "https://torrentio.strem.fun/manifest.json",
+            manifest = AddonManifestContract(
+                id = "torrentio",
+                name = "Torrentio",
+                resources = setOf(AddonResource.STREAM),
+            ),
+        )
+        val mediaFusion = ManagedAddon(
             manifestUrl = SlugYardCommunitySourcePolicy.PLAYFLIX_MANIFEST_URL,
             manifest = AddonManifestContract(
                 id = "mediafusion",
                 name = "MediaFusion",
                 version = "6.1.1",
-                description = "MediaFusion — universal torrent addon",
             ),
         )
-        assertEquals("MediaFusion", SlugYardCommunitySourcePolicy.addonDisplayName(addon))
-        assertEquals("6.1.1", SlugYardCommunitySourcePolicy.addonDisplayVersion(addon))
-        assertEquals(
-            "MediaFusion — universal torrent addon",
-            SlugYardCommunitySourcePolicy.addonDisplayDescription(addon),
-        )
-        assertFalse(SlugYardCommunitySourcePolicy.isPlayFlixStreamAddon(addon.manifest.id, addon.manifest.name))
+        // Registry still stores upstream names; Settings never surfaces them individually.
+        assertEquals("Torrentio", SlugYardCommunitySourcePolicy.addonDisplayName(torrentio))
+        assertEquals("MediaFusion", SlugYardCommunitySourcePolicy.addonDisplayName(mediaFusion))
+        assertEquals("PlayFlix", SlugYardCommunitySourcePolicy.PLAYFLIX_DISPLAY_NAME)
+        assertTrue(SlugYardCommunitySourcePolicy.isPlayFlixPackIdentifier(SlugYardCommunitySourcePolicy.PLAYFLIX_PACK_ID))
     }
 
     @Test
@@ -92,7 +97,7 @@ class SlugYardCommunitySourcePolicyTest {
     }
 
     @Test
-    fun `settings addon list hides scrapers including mediafusion`() {
+    fun `settings hides individual scrapers - PlayFlix pack covers all of them`() {
         val cinemeta = ManagedAddon(
             manifestUrl = "https://v3-cinemeta.strem.io/manifest.json",
             manifest = AddonManifestContract(
@@ -109,6 +114,14 @@ class SlugYardCommunitySourcePolicyTest {
                 resources = setOf(AddonResource.STREAM),
             ),
         )
+        val meteor = ManagedAddon(
+            manifestUrl = "https://meteorfortheweebs.midnightignite.me/manifest.json",
+            manifest = AddonManifestContract(
+                id = "meteor",
+                name = "Meteor",
+                resources = setOf(AddonResource.STREAM),
+            ),
+        )
         val mediaFusion = ManagedAddon(
             manifestUrl = SlugYardCommunitySourcePolicy.PLAYFLIX_MANIFEST_URL,
             manifest = AddonManifestContract(
@@ -121,8 +134,13 @@ class SlugYardCommunitySourcePolicyTest {
         assertTrue(SlugYardCommunitySourcePolicy.isUserFacingSettingsAddon(cinemeta))
         assertFalse(SlugYardCommunitySourcePolicy.isUserFacingSettingsAddon(mediaFusion))
         assertFalse(SlugYardCommunitySourcePolicy.isUserFacingSettingsAddon(torrentio))
+        assertFalse(SlugYardCommunitySourcePolicy.isUserFacingSettingsAddon(meteor))
         assertTrue(SlugYardCommunitySourcePolicy.isStreamScraperManifest(torrentio.manifestUrl))
         assertTrue(SlugYardCommunitySourcePolicy.isStreamScraperManifest(mediaFusion.manifestUrl))
+        assertTrue(SlugYardCommunitySourcePolicy.isStreamScraperManifest(meteor.manifestUrl))
+        assertTrue(SlugYardCommunitySourcePolicy.isPlayFlixPackInstalled(listOf(torrentio, meteor, mediaFusion)))
+        assertTrue(SlugYardCommunitySourcePolicy.isPlayFlixInstalled(listOf(mediaFusion)))
+        assertFalse(SlugYardCommunitySourcePolicy.isPlayFlixPackInstalled(listOf(cinemeta)))
         assertTrue(SlugYardCommunitySourcePolicy.optionalCommunityManifestUrls.isEmpty())
     }
 
