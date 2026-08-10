@@ -394,6 +394,9 @@ class PlayerRuntimeController(
     internal var autoSubtitleSelected: Boolean = false
     internal var subtitleMode: Boolean = false
     internal var addonSubtitles: List<Subtitle> = emptyList()
+    internal var addonSubtitleFetchJob: Job? = null
+    internal var addonSubtitleFetchGeneration: Long = 0L
+    internal var playerInitializationJob: Job? = null
     internal var lastSubtitlePreferredLanguage: String? = null
     internal var lastSubtitleSecondaryLanguage: String? = null
     internal var lastUseForcedSubtitles: Boolean? = null

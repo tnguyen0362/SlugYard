@@ -59,8 +59,7 @@ private const val SubtitleOffKey = "off"
 private const val SubtitleFooterKey = "footer"
 
 internal fun audioTrackUiLabel(track: TrackInfo): String {
-    val language = track.language
-        ?.takeIf { it.isNotBlank() && !it.equals("und", ignoreCase = true) }
+    val language = com.sluggyard.tv.ui.screens.player.resolveAudioTrackLanguageCode(track.language, track.name)
         ?.let(::languageCodeToName)
         ?: "Unknown language"
     val format = audioFormatLabel(track.codec)
@@ -198,6 +197,8 @@ fun PlayerTrackOverlay(
                 onDisableSubtitles = actions.onDisableSubtitles,
                 listFocusRequester = listFocusRequester,
                 isLoadingAddonSubtitles = state.isLoadingAddonSubtitles,
+                hasAddonSubtitleResults = state.addonSubtitles.isNotEmpty(),
+                addonSubtitlesError = state.addonSubtitlesError,
                 onRetrySubtitleSearch = actions.onRetrySubtitleSearch,
             )
         }
@@ -387,6 +388,8 @@ private fun ColumnScope.SubtitleChoiceList(
     onDisableSubtitles: () -> Unit,
     listFocusRequester: FocusRequester,
     isLoadingAddonSubtitles: Boolean,
+    hasAddonSubtitleResults: Boolean,
+    addonSubtitlesError: String?,
     onRetrySubtitleSearch: () -> Unit,
 ) {
     val listState = rememberLazyListState()
@@ -436,9 +439,11 @@ private fun ColumnScope.SubtitleChoiceList(
                 if (isLoadingAddonSubtitles) {
                     TrackStatus("Searching for more subtitles...")
                 } else {
+                    val searchError = addonSubtitlesError?.takeIf(String::isNotBlank)
+                    if (searchError != null) TrackStatus(searchError)
                     if (choices.isEmpty()) TrackStatus("No subtitles found automatically")
                     TvButton(
-                        label = if (choices.isEmpty()) "Search OpenSubtitles" else "Search again",
+                        label = if (hasAddonSubtitleResults) "Search again" else "Search OpenSubtitles",
                         onClick = onRetrySubtitleSearch,
                         style = ButtonStyle.Secondary,
                         fillMaxWidth = true,

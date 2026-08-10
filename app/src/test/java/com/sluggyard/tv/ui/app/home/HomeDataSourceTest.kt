@@ -36,6 +36,27 @@ class HomeDataSourceTest {
         assertEquals("Film", cards.single().title)
     }
 
+    @Test
+    fun `catalog posters keep portrait and landscape artwork separate`() = runTest {
+        val source = HomeDataSource(
+            registrySnapshot = { AddonRegistryState(listOf(addon("cinemeta", enabled = true))) },
+            gateway = fakeGateway {
+                """{"metas":[{
+                    "id":"tt0427340",
+                    "type":"movie",
+                    "name":"The Journey",
+                    "poster":"https://images.metahub.space/poster/small/tt0427340/img",
+                    "background":"https://images.metahub.space/background/medium/tt0427340/img"
+                }]}"""
+            },
+        )
+
+        val poster = source.catalogRequests().single().load().single()
+
+        assertEquals("https://images.metahub.space/poster/small/tt0427340/img", poster.imageUrl)
+        assertEquals("https://images.metahub.space/background/medium/tt0427340/img", poster.backdropUrl)
+    }
+
     private fun addon(id: String, enabled: Boolean, configuredUrl: String? = null): ManagedAddon = ManagedAddon(
         manifestUrl = "https://$id.test/manifest.json",
         configuredManifestUrl = configuredUrl,

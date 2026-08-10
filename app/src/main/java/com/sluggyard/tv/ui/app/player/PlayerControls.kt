@@ -114,8 +114,7 @@ fun PlayerControls(
         ?: "Off"
     val selectedAudioLabel = state.audioTracks
         .firstOrNull { it.index == state.selectedAudioTrackIndex || it.isSelected }
-        ?.name
-        ?.takeIf { it.isNotBlank() }
+        ?.let(::audioTrackUiLabel)
         ?: "Audio"
     val showPausedMeta = !state.isPlaying
     val clockText = rememberClockText(state.osdClockEnabled)

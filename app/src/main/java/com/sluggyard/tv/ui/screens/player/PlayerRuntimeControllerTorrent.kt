@@ -164,6 +164,10 @@ internal fun PlayerRuntimeController.launchTorrentSourceStream(
     infoHash: String,
     loadSavedProgress: Boolean
 ) {
+    // Torrent resolution may suspend for long enough that the previous source's startup
+    // prefetch could otherwise publish before initializePlayer() receives the local URL.
+    playerInitializationJob?.cancel()
+    playerInitializationJob = null
     torrentStreamJob?.cancel()
     torrentStreamJob = scope.launch {
         try {

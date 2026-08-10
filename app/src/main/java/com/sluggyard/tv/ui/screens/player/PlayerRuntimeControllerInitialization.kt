@@ -77,6 +77,7 @@ import com.sluggyard.tv.data.repository.PlaybackIssueErrorInput
 import com.sluggyard.tv.domain.model.Subtitle
 import io.github.peerless2012.ass.media.kt.buildWithAssSupport
 import io.github.peerless2012.ass.media.type.AssRenderType
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -97,14 +98,27 @@ private const val ADAPTIVE_INITIAL_BITRATE_ESTIMATE_BPS = 25_000_000L
 
 /**
  * Snapshot of the subtitle state prepared before the player is built.
- * `fetchedSubtitles` is the full set visible to the UI; `attachedSubtitles`
- * is the subset wired into the ExoPlayer MediaItem as sidecar tracks.
+ * `fetchedSubtitles` retains the complete provider response, `attachedSubtitles`
+ * is the subset wired into the ExoPlayer MediaItem as sidecar tracks, and
+ * `visibleSubtitles` is the subset exposed under the current language filter.
  * `fetchCompleted` is false when the prefetch timed out or was skipped.
  */
 internal data class StartupSubtitlePreparation(
     val fetchedSubtitles: List<Subtitle>,
     val attachedSubtitles: List<Subtitle>,
-    val fetchCompleted: Boolean
+    val fetchCompleted: Boolean,
+    val visibleSubtitles: List<Subtitle> = fetchedSubtitles,
+)
+
+internal fun completedStartupSubtitlePreparation(
+    fetchedSubtitles: List<Subtitle>,
+    attachedSubtitles: List<Subtitle>,
+    showOnlyPreferredLanguages: Boolean,
+): StartupSubtitlePreparation = StartupSubtitlePreparation(
+    fetchedSubtitles = fetchedSubtitles,
+    attachedSubtitles = attachedSubtitles,
+    fetchCompleted = true,
+    visibleSubtitles = if (showOnlyPreferredLanguages) attachedSubtitles else fetchedSubtitles,
 )
 
 /**
@@ -310,9 +324,12 @@ internal fun PlayerRuntimeController.initializePlayer(
     // A direct stream/engine change wins over any queued error recovery.
     playbackRecoveryGeneration += 1L
 
-    scope.launch {
+    playerInitializationJob?.cancel()
+    playerInitializationJob = scope.launch {
         try {
             initializePlayerInternal(url, headers, overrideInternalPlayerEngine, allowEngineFailover, startPaused)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (e: Exception) {
             handleInitializePlayerException(e, allowEngineFailover)
         }
@@ -2373,17 +2390,15 @@ internal suspend fun PlayerRuntimeController.prepareStartupSubtitles(
         }
         AddonSubtitleStartupMode.FAST_STARTUP -> emptyList()
     }
-    val visibleSubtitles = if (showOnlyPreferredLanguages) attachedSubtitles else fetchedSubtitles
-
-    return StartupSubtitlePreparation(
-        fetchedSubtitles = visibleSubtitles,
+    return completedStartupSubtitlePreparation(
+        fetchedSubtitles = fetchedSubtitles,
         attachedSubtitles = attachedSubtitles,
-        fetchCompleted = true
+        showOnlyPreferredLanguages = showOnlyPreferredLanguages,
     ).also {
         recordLoadingDiagnosticEvent(
             phase = "fetching_subtitles_done",
             message = context.getString(R.string.player_loading_subtitles),
-            detail = visibleSubtitles.size.toString()
+            detail = it.visibleSubtitles.size.toString()
         )
     }
 }
@@ -2392,6 +2407,10 @@ internal suspend fun PlayerRuntimeController.prepareStartupSubtitles(
  * Clears all addon-subtitle selection state for a new stream.
  */
 internal fun PlayerRuntimeController.resetAddonSubtitleStateForNewStream() {
+    addonSubtitleFetchJob?.cancel()
+    addonSubtitleFetchJob = null
+    addonSubtitleFetchGeneration++
+    addonSubtitles = emptyList()
     autoSubtitleSelected = subtitleDisabledByPersistedPreference || subtitleAddonRestoredByPersistedPreference
     hasScannedTextTracksOnce = false
     pendingAddonSubtitleLanguage = null
@@ -2445,9 +2464,10 @@ internal fun PlayerRuntimeController.applyStartupSubtitlePreparation(startupSubt
         .map(::addonSubtitleKey)
         .toSet()
     if (!startupSubtitlePreparation.fetchCompleted) return
+    addonSubtitles = startupSubtitlePreparation.fetchedSubtitles
     _uiState.update {
         it.copy(
-            addonSubtitles = startupSubtitlePreparation.fetchedSubtitles,
+            addonSubtitles = startupSubtitlePreparation.visibleSubtitles,
             isLoadingAddonSubtitles = false,
             addonSubtitlesError = null
         )

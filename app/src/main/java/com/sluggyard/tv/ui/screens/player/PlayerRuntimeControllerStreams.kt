@@ -921,6 +921,7 @@ private fun PlayerRuntimeController.switchToTorrentSourceStream(stream: Stream) 
     flushPlaybackSnapshotForSwitchOrExit()
     resetLoadingOverlayForNewStream()
     releasePlayer(flushPlaybackState = false)
+    resetAddonSubtitleStateForNewStream()
     hasRetriedCurrentStreamAfter416 = false
     errorRetryCount = 0
     subtitleDisabledByPersistedPreference = false
@@ -1540,7 +1541,9 @@ private fun PlayerRuntimeController.switchToEpisodeStreamCommon(
     showStreamSourceIndicator(stream)
     recomputeNextEpisode(resetVisibility = true)
     updateEpisodeDescription()
-    refreshSubtitlesForCurrentEpisode()
+    // The torrent URL does not exist until launchTorrentSourceStream resolves it. Clear stale
+    // choices now, then let normal player initialization fetch against the resolved local URL.
+    resetAddonSubtitleStateForNewStream()
 
     playbackStartedForParentalGuide = false
     skipIntervals = emptyList()
