@@ -74,8 +74,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import coil3.imageLoader
 import coil3.request.ImageRequest
-import coil3.size.Size
-import coil3.size.pxOrElse
 import com.sluggyard.tv.ui.app.preferLargePosterUrl
 import com.sluggyard.tv.ui.app.requestFocusReliably
 import androidx.datastore.core.DataStore
@@ -155,7 +153,13 @@ import com.sluggyard.tv.ui.app.home.HomePoster
 import com.sluggyard.tv.ui.app.home.HomeScreen
 import com.sluggyard.tv.ui.app.home.HomeState
 import com.sluggyard.tv.ui.app.home.TmdbHomeDataSource
+import com.sluggyard.tv.ui.app.home.homeBackdropMemoryCacheKey
+import com.sluggyard.tv.ui.app.home.homeLandscapeArtworkSize
+import com.sluggyard.tv.ui.app.home.homePortraitArtworkSize
+import com.sluggyard.tv.ui.app.home.homePosterMemoryCacheKey
 import com.sluggyard.tv.ui.app.home.isPrimaryHomeShelfTitle
+import com.sluggyard.tv.ui.app.home.runHomeArtworkWarmBatch
+import com.sluggyard.tv.ui.app.home.withRemainingHomeSplashBudget
 import com.sluggyard.tv.ui.app.preferCardBackdropUrl
 import com.sluggyard.tv.ui.app.preferLargePosterUrl
 import com.sluggyard.tv.ui.app.home.withHeroEnrichments
@@ -168,6 +172,9 @@ import com.sluggyard.tv.ui.app.streams.hasLikelySoftsubCachedHint
 import com.sluggyard.tv.ui.app.streams.selectAutoPlayCandidate
 import com.sluggyard.tv.ui.app.streams.hasPendingCacheChecks
 import com.sluggyard.tv.ui.app.streams.matchesLastPlayed
+import com.sluggyard.tv.ui.app.streams.shouldAllowUncachedAutoPlayFallback
+import com.sluggyard.tv.ui.app.streams.autoPickOutcomeWhenNoWinner
+import com.sluggyard.tv.ui.app.streams.AutoPickNoWinnerDecision
 import com.sluggyard.tv.ui.app.streams.DigitalReleaseLookup
 import com.sluggyard.tv.ui.app.streams.DigitalReleasePolicy
 import com.sluggyard.tv.ui.app.streams.StreamScoringEngine
@@ -1330,15 +1337,16 @@ private fun AppContent(
     // a hard min duration, or the safety max.
     LaunchedEffect(homeSplashVisible, homeReloadNonce) {
         if (!homeSplashVisible) return@LaunchedEffect
-        val startedAt = System.currentTimeMillis()
+        val startedAt = android.os.SystemClock.elapsedRealtime()
         homeSplashStartedAt = startedAt
         var posterWarmDone = false
         var posterWarmAttempted = false
         // Card poster decode target matches Home PosterCard / prefetch (176×264 dp @ density).
         val density = context.resources.displayMetrics.density
-        val posterW = (176f * density).toInt().coerceAtLeast(1)
-        val posterH = (264f * density).toInt().coerceAtLeast(1)
-        val posterDecode = Size(posterW, posterH)
+        val posterPixels = homePortraitArtworkSize(density)
+        val posterDecode = posterPixels.toCoilSize()
+        val landscapePixels = homeLandscapeArtworkSize(density)
+        val landscapeDecode = landscapePixels.toCoilSize()
         val loader = context.imageLoader
         while (homeSplashVisible) {
             val rows = catalogState.rows
@@ -1348,7 +1356,11 @@ private fun AppContent(
                 .ifEmpty { rows.take(2) }
             val pending = splashRows.count { it.loadState is CatalogLoadState.Loading }
             val contentRows = splashRows.mapNotNull { it.loadState as? CatalogLoadState.Content }
-            val elapsed = System.currentTimeMillis() - startedAt
+            val elapsed = android.os.SystemClock.elapsedRealtime() - startedAt
+            if (elapsed >= HomeSplashMaxDurationMs) {
+                onHomeSplashVisibleChange(false)
+                break
+            }
             val catalogsSettled = splashRows.isNotEmpty() && pending == 0
             val hasVisibleShelves = contentRows.isNotEmpty()
             if (catalogsSettled && hasVisibleShelves && !posterWarmDone) {
@@ -1367,56 +1379,70 @@ private fun AppContent(
                         posterWarmDone = true
                     } else {
                         // Block on real decodes into memory (same size/keys as the cards).
-                        val successes = withContext(Dispatchers.IO) {
-                            coroutineScope {
-                                warmTargets.map { (poster, url) ->
-                                    async {
-                                        val key = "poster:${poster.id}:$url:${posterW}x${posterH}"
-                                        val result = runCatching {
-                                            loader.execute(
-                                                ImageRequest.Builder(context)
-                                                    .data(url)
-                                                    .size(posterDecode)
-                                                    .precision(coil3.size.Precision.EXACT)
-                                                    .memoryCacheKey(key)
-                                                    .diskCacheKey("poster:${poster.id}:$url")
-                                                    .build(),
+                        val successes = withRemainingHomeSplashBudget(
+                            startedAtElapsedMs = startedAt,
+                            nowElapsedMs = android.os.SystemClock.elapsedRealtime(),
+                            maximumDurationMs = HomeSplashMaxDurationMs,
+                        ) {
+                            withContext(Dispatchers.IO) {
+                                runHomeArtworkWarmBatch(warmTargets) { (poster, url) ->
+                                    loader.execute(
+                                        ImageRequest.Builder(context)
+                                            .data(url)
+                                            .size(posterDecode)
+                                            .precision(coil3.size.Precision.EXACT)
+                                            .memoryCacheKey(
+                                                homePosterMemoryCacheKey(poster.id, url, posterPixels),
                                             )
-                                        }.getOrNull()
-                                        result?.image != null
-                                    }
-                                }.awaitAll().count { it }
+                                            .diskCacheKey("poster:${poster.id}:$url")
+                                            .build(),
+                                    ).image != null
+                                }
                             }
-                        }
+                        } ?: 0
                         val need = minOf(HomeSplashWarmMinSuccess, warmTargets.size)
                             .coerceAtLeast(1)
-                        posterWarmDone = successes >= need
-                        // Also warm landscape for primary shelves so first D-pad expands ready.
-                        contentRows
+                        val portraitWarmDone = successes >= need
+                        // Gate only the entry landscape for each primary shelf. The previous
+                        // 24-backdrop enqueue burst saturated Coil without establishing that
+                        // either card reachable by the first Up/Down move was actually ready.
+                        val landscapeTargets = contentRows
                             .take(HomeSplashWarmShelfCount)
-                            .flatMap { row -> row.posters.take(HomeSplashWarmLandscapesPerShelf) }
-                            .distinctBy { it.id }
-                            .forEach { poster ->
+                            .mapNotNull { row ->
+                                val poster = row.posters.firstOrNull() ?: return@mapNotNull null
                                 val posterUrl = preferLargePosterUrl(poster.imageUrl)
                                 val url = preferCardBackdropUrl(poster.backdropUrl)
                                     ?.takeIf { it.isNotBlank() && it != posterUrl }
-                                    ?: return@forEach
-                                val landW = (posterH * 16f / 9f).toInt()
-                                    .coerceAtMost(640)
-                                    .coerceAtLeast(1)
-                                val landSize = Size(landW, posterH)
-                                loader.enqueue(
-                                    ImageRequest.Builder(context)
-                                        .data(url)
-                                        .size(landSize)
-                                        .precision(coil3.size.Precision.EXACT)
-                                        .memoryCacheKey(
-                                            "card-backdrop:${poster.id}:$url:${landW}x${posterH}",
-                                        )
-                                        .diskCacheKey("card-backdrop:${poster.id}:$url")
-                                        .build(),
-                                )
+                                    ?: return@mapNotNull null
+                                poster to url
                             }
+                            .distinctBy { (poster, _) -> poster.id }
+                        val landscapeSuccesses = withRemainingHomeSplashBudget(
+                            startedAtElapsedMs = startedAt,
+                            nowElapsedMs = android.os.SystemClock.elapsedRealtime(),
+                            maximumDurationMs = HomeSplashMaxDurationMs,
+                        ) {
+                            withContext(Dispatchers.IO) {
+                                runHomeArtworkWarmBatch(landscapeTargets) { (poster, url) ->
+                                    loader.execute(
+                                        ImageRequest.Builder(context)
+                                            .data(url)
+                                            .size(landscapeDecode)
+                                            .precision(coil3.size.Precision.EXACT)
+                                            .memoryCacheKey(
+                                                homeBackdropMemoryCacheKey(
+                                                    poster.id,
+                                                    url,
+                                                    landscapePixels,
+                                                ),
+                                            )
+                                            .diskCacheKey("card-backdrop:${poster.id}:$url")
+                                            .build(),
+                                    ).image != null
+                                }
+                            }
+                        } ?: 0
+                        posterWarmDone = portraitWarmDone && landscapeSuccesses == landscapeTargets.size
                     }
                 } else {
                     // Warm ran once; allow dismiss after min+preload budget if network was weak.
@@ -2046,9 +2072,16 @@ private fun AppContent(
                             }
                         }
                     }
-                    val allowUncached = discoveryHardCeilingReached ||
-                        cacheWaitExpired ||
-                        streamDiscoveryComplete
+                    val anyAddonStillLoading = groupsForAttempt.any {
+                        it.state is com.sluggyard.tv.ui.app.streams.StreamGroupState.Loading
+                    }
+                    // Never treat early Instant readiness as "discovery finished for uncached /
+                    // terminal None" — partial Instant must not terminal-fail mid-fanout.
+                    val allowUncached = shouldAllowUncachedAutoPlayFallback(
+                        discoveryHardCeilingReached = discoveryHardCeilingReached,
+                        cacheWaitExpired = cacheWaitExpired,
+                        anyAddonStillLoading = anyAddonStillLoading,
+                    )
                     val candidate = selectAutoPlayCandidate(
                         groups = groupsForAttempt,
                         context = scoringContext.copy(digitalReleaseStatus = digitalReleaseStatus),
@@ -2059,41 +2092,39 @@ private fun AppContent(
                     if (candidate != null) return@withContext AutoPickOutcome.Play(candidate)
                     // Empty partial fanout often "completes" in ~0.3s with 0/0 scrapers — keep
                     // Finding until the hard ceiling, not a terminal none + Hulu message.
-                    val listingCount = groupsForAttempt.sumOf { group ->
-                        (group.state as? com.sluggyard.tv.ui.app.streams.StreamGroupState.Content)
-                            ?.streams?.size ?: 0
+                    // Same for Instant rows present that choose() filtered (language/size) while
+                    // other scrapers are still filling — listingCount>0 must NOT terminal-fail.
+                    when (autoPickOutcomeWhenNoWinner(discoveryHardCeilingReached)) {
+                        AutoPickNoWinnerDecision.Wait -> AutoPickOutcome.Wait
+                        AutoPickNoWinnerDecision.NoneAvailable -> AutoPickOutcome.NoneAvailable
                     }
-                    if (listingCount == 0 && !discoveryHardCeilingReached) {
-                        return@withContext AutoPickOutcome.Wait
-                    }
-                    // Rows present but still TorBox CHECKING only — none are Instant/uncached-eligible.
-                    // Don't terminal-None in the short cache window (still Finding, not Hulu dump).
-                    if (
-                        !discoveryHardCeilingReached &&
-                        !cacheWaitExpired &&
-                        hasPendingCacheChecks(groupsForAttempt)
-                    ) {
-                        return@withContext AutoPickOutcome.Wait
-                    }
-                    if (allowUncached || discoveryHardCeilingReached) {
-                        return@withContext AutoPickOutcome.NoneAvailable
-                    }
-                    AutoPickOutcome.Wait
                 }
                 // Retry Wait locally — same token will not re-enter collect (distinctUntilChanged).
+                // Poll until hard ceiling so later Instant/uncached rows can win after an early
+                // go-soft partial dump nulls out.
                 if (pickOutcome == AutoPickOutcome.Wait) {
                     android.util.Log.i(
                         "SlugYardAutoPick",
-                        "single-flight Wait title='${streams.title}' — retry",
+                        "single-flight Wait title='${streams.title}' — poll until ceiling",
                     )
-                    delay(200)
-                    // Force another pass by falling through only if still on this Streams dest.
-                    if (destination == streams && resolvingCandidateId == null && autoPickFinishedFor != streams.id) {
+                    var resolved: AutoPickOutcome = AutoPickOutcome.Wait
+                    while (
+                        destination == streams &&
+                        resolvingCandidateId == null &&
+                        autoPickFinishedFor != streams.id
+                    ) {
+                        if (discoveryHardCeilingReached) break
+                        delay(250)
                         val retryGroups = streamGroups
-                        val allowUncached = discoveryHardCeilingReached ||
-                            cacheWaitExpired ||
-                            streamDiscoveryComplete
-                        val retryOutcome = withContext(Dispatchers.Default) {
+                        val anyLoading = retryGroups.any {
+                            it.state is com.sluggyard.tv.ui.app.streams.StreamGroupState.Loading
+                        }
+                        val allowUncached = shouldAllowUncachedAutoPlayFallback(
+                            discoveryHardCeilingReached = discoveryHardCeilingReached,
+                            cacheWaitExpired = cacheWaitExpired,
+                            anyAddonStillLoading = anyLoading,
+                        )
+                        val candidate = withContext(Dispatchers.Default) {
                             val memoryHashes = retryGroups
                                 .flatMap { (it.state as? com.sluggyard.tv.ui.app.streams.StreamGroupState.Content)?.streams.orEmpty() }
                                 .mapNotNull { it.infoHash?.trim()?.takeIf(String::isNotEmpty) }
@@ -2116,39 +2147,55 @@ private fun AppContent(
                                 preferredSubtitleLanguage = playerSettings.subtitleStyle.preferredLanguage,
                                 observedTracksByHash = observedByHash,
                             )
-                            val candidate = selectAutoPlayCandidate(
+                            selectAutoPlayCandidate(
                                 groups = retryGroups,
                                 context = scoringContext,
                                 excludedCandidateIds = autoPickRejectedIds,
                                 preferLastPlayed = null,
                                 allowUncachedFallback = allowUncached,
                             )
-                            if (candidate != null) {
-                                AutoPickOutcome.Play(candidate)
-                            } else {
-                                val listingCount = retryGroups.sumOf { group ->
-                                    (group.state as? com.sluggyard.tv.ui.app.streams.StreamGroupState.Content)
-                                        ?.streams?.size ?: 0
-                                }
-                                when {
-                                    listingCount == 0 && !discoveryHardCeilingReached -> AutoPickOutcome.Wait
-                                    !discoveryHardCeilingReached &&
-                                        !cacheWaitExpired &&
-                                        hasPendingCacheChecks(retryGroups) -> AutoPickOutcome.Wait
-                                    allowUncached || discoveryHardCeilingReached -> AutoPickOutcome.NoneAvailable
-                                    else -> AutoPickOutcome.Wait
-                                }
-                            }
                         }
-                        withContext(NonCancellable) {
-                            when (retryOutcome) {
-                                is AutoPickOutcome.Play -> resolveStreamCandidate(retryOutcome.candidate, streams)
-                                AutoPickOutcome.NoneAvailable -> {
-                                    autoPickFinishedFor = streams.id
-                                    streamMessage = "No playable stream was found. Open Sources and pick a source."
-                                }
-                                else -> Unit
+                        if (candidate != null) {
+                            resolved = AutoPickOutcome.Play(candidate)
+                            break
+                        }
+                    }
+                    if (resolved is AutoPickOutcome.Wait &&
+                        destination == streams &&
+                        resolvingCandidateId == null &&
+                        autoPickFinishedFor != streams.id
+                    ) {
+                        // Hard ceiling (or abandoned wait): one last full pick with uncached open.
+                        val finalGroups = streamGroups
+                        val candidate = withContext(Dispatchers.Default) {
+                            selectAutoPlayCandidate(
+                                groups = finalGroups,
+                                context = StreamScoringEngine.Context(
+                                    title = streams.title,
+                                    contentType = streams.type,
+                                    genres = genreList,
+                                    language = streams.contentLanguage ?: detailsState?.contentLanguage,
+                                    preferredSubtitleLanguage = playerSettings.subtitleStyle.preferredLanguage,
+                                ),
+                                excludedCandidateIds = autoPickRejectedIds,
+                                preferLastPlayed = null,
+                                allowUncachedFallback = true,
+                            )
+                        }
+                        resolved = if (candidate != null) {
+                            AutoPickOutcome.Play(candidate)
+                        } else {
+                            AutoPickOutcome.NoneAvailable
+                        }
+                    }
+                    withContext(NonCancellable) {
+                        when (val out = resolved) {
+                            is AutoPickOutcome.Play -> resolveStreamCandidate(out.candidate, streams)
+                            AutoPickOutcome.NoneAvailable -> {
+                                autoPickFinishedFor = streams.id
+                                streamMessage = "No playable stream was found. Open Sources and pick a source."
                             }
+                            else -> Unit
                         }
                     }
                     return@collect
@@ -3473,7 +3520,6 @@ private const val HomeSplashMaxDurationMs = 18_000L
 private const val HomeSplashPosterPreloadMs = 4_500L
 private const val HomeSplashWarmShelfCount = 2
 private const val HomeSplashWarmPostersPerShelf = 14
-private const val HomeSplashWarmLandscapesPerShelf = 12
 private const val HomeSplashWarmMaxPosters = 28
 private const val HomeSplashWarmMinSuccess = 10
 

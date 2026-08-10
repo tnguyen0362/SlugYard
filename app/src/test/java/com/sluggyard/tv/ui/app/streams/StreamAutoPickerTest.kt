@@ -1138,6 +1138,84 @@ class StreamAutoPickerTest {
     }
 
     @Test
+    fun originLanguageTagOnMultiSubDoesNotHardEmptyInstantPool() {
+        // Multi-sub Instant that only tags origin language text is not an exclusive localization
+        // pack — choose must return a winner (any title language), not null.
+        val tagged = candidate("tagged", cacheState = StreamCacheState.CACHED, infoHash = "tag-hash")
+            .copy(
+                title = "Show.S01E01.1080p.WEB-DL.Korean.Multi-Subs",
+                videoSizeBytes = 900L * 1024 * 1024,
+                seeders = 40,
+            )
+        val context = StreamScoringEngine.Context(
+            title = "Show",
+            contentType = "series",
+            preferredSubtitleLanguage = "en",
+        )
+        assertEquals(tagged, selectAutoPlayCandidate(groups(tagged), context))
+    }
+
+    @Test
+    fun preferredLanguageInstantWinsOverConflictingTaggedInstant() {
+        val other = candidate("other", cacheState = StreamCacheState.CACHED, infoHash = "other-hash")
+            .copy(
+                title = "Show.S01E01.1080p.WEB-DL.Spanish.Softsubs",
+                videoSizeBytes = 800L * 1024 * 1024,
+                seeders = 90,
+            )
+        val preferred = candidate("pref", cacheState = StreamCacheState.CACHED, infoHash = "pref-hash")
+            .copy(
+                title = "Show.S01E01.1080p.WEB-DL.English.Softsubs",
+                videoSizeBytes = 700L * 1024 * 1024,
+                seeders = 10,
+            )
+        val context = StreamScoringEngine.Context(
+            title = "Show",
+            contentType = "series",
+            preferredSubtitleLanguage = "en",
+        )
+        assertEquals(preferred, selectAutoPlayCandidate(groups(other, preferred), context))
+    }
+
+    @Test
+    fun uncachedFallbackNotOpenedByDiscoveryFlagAlone() {
+        // Early Instant readiness must not open uncached / enable terminal None.
+        assertFalse(
+            shouldAllowUncachedAutoPlayFallback(
+                discoveryHardCeilingReached = false,
+                cacheWaitExpired = true,
+                anyAddonStillLoading = true,
+            ),
+        )
+        assertTrue(
+            shouldAllowUncachedAutoPlayFallback(
+                discoveryHardCeilingReached = true,
+                cacheWaitExpired = false,
+                anyAddonStillLoading = true,
+            ),
+        )
+        assertTrue(
+            shouldAllowUncachedAutoPlayFallback(
+                discoveryHardCeilingReached = false,
+                cacheWaitExpired = true,
+                anyAddonStillLoading = false,
+            ),
+        )
+    }
+
+    @Test
+    fun noWinnerIsWaitUntilHardCeiling() {
+        assertEquals(
+            AutoPickNoWinnerDecision.Wait,
+            autoPickOutcomeWhenNoWinner(discoveryHardCeilingReached = false),
+        )
+        assertEquals(
+            AutoPickNoWinnerDecision.NoneAvailable,
+            autoPickOutcomeWhenNoWinner(discoveryHardCeilingReached = true),
+        )
+    }
+
+    @Test
     fun autoPickScoresOnlyCachedPoolEvenWhenHundredsOfUncachedExist() {
         val cached = candidate("cached", cacheState = StreamCacheState.CACHED, infoHash = "cached-hash")
             .copy(title = "Movie.2160p.WEB-DL", seeders = 10)

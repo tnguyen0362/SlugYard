@@ -374,6 +374,7 @@ private fun PlayerRuntimeController.applyMpvTrackSnapshot(snapshot: MpvTrackSnap
     }
 
     val audioTracks = effectiveSnapshot.audioTracks.mapIndexed { index, track ->
+        val language = resolveAudioTrackLanguageCode(track.language, track.name)
         val codecSuffix = buildList {
             track.codec?.takeIf { it.isNotBlank() }?.let { add(it) }
             track.channelCount?.takeIf { it > 0 }?.let { add("${it}ch") }
@@ -382,7 +383,7 @@ private fun PlayerRuntimeController.applyMpvTrackSnapshot(snapshot: MpvTrackSnap
         TrackInfo(
             index = index,
             name = displayName,
-            language = track.language,
+            language = language,
             trackId = track.id.toString(),
             codec = track.codec,
             channelCount = track.channelCount,

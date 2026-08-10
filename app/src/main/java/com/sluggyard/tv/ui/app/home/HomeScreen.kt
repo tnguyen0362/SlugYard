@@ -88,7 +88,6 @@ import coil3.imageLoader
 import coil3.memory.MemoryCache
 import coil3.request.ImageRequest
 import coil3.size.Size
-import coil3.size.pxOrElse
 import com.sluggyard.tv.ui.design.SlugYardPalette
 import com.sluggyard.tv.ui.design.SlugYardTvMetrics
 import com.sluggyard.tv.ui.theme.QuicksandFamily
@@ -232,17 +231,8 @@ private val HomeCatalogFocusTopInset = (SlugYardTvMetrics.RootNavBarHeight + 4.d
 /** Figma MoviePreview / HomePage shelf stack — tight trailing void after each rail. */
 private val HomeShelfTrailingGap = SlugYardTvMetrics.ShelfTrailingGap
 
-/** Pixel sides when Coil Size is always constructed with concrete ints. */
-private fun Size.pxW(): Int = width.pxOrElse { 0 }
-private fun Size.pxH(): Int = height.pxOrElse { 0 }
-
 /** Focused Home tiles expand to a real ~16:9 layout width (pushes neighbors — no overlap). */
 private const val HomePosterLandscapeAspect = 16f / 9f
-/**
- * Coil decode cap for card landscapes. Display is ~16:9 @ 264dp — 640px keeps hops sharp on
- * 1080p leanback while cutting full-HD Metahub JPEG decode cost vs 780/1280 hero paths.
- */
-private const val MaxLandscapeDecodeWidthPx = 640
 /** Neighbor portrait warm-cache window after focus settles (leading..trailing). */
 private const val HomePosterPrefetchBehind = 1
 private const val HomePosterPrefetchAhead = 4
@@ -254,16 +244,9 @@ private const val HomeBackdropPrefetchBehind = 1
 private const val HomeBackdropPrefetchAhead = 4
 /** Popular/Featured (Metahub full-HD) get a slightly wider window, still not a decode storm. */
 private const val HomeBackdropPrefetchAheadPrimary = 6
-/** First-paint warm count for a composed-but-unfocused row (entry tile readiness). */
-private const val HomeBackdropWarmFirst = 2
-private const val HomeBackdropWarmFirstPrimary = 3
 /** Visible LazyRow warm window for portraits. */
 private const val HomePosterScrollWarmBehind = 1
 private const val HomePosterScrollWarmAhead = 4
-/** Visible LazyRow warm for landscapes — only while this shelf owns focus. */
-private const val HomeBackdropScrollWarmBehind = 1
-private const val HomeBackdropScrollWarmAhead = 3
-private const val HomeBackdropScrollWarmAheadPrimary = 4
 /** Eager portrait warm of leading cards during splash (no focus yet). */
 private const val HomePosterWarmFirst = 8
 private const val HomePosterPrefetchSettleMs = 48L
@@ -273,6 +256,23 @@ private const val HomePosterRetryDelayMs = 140L
 private fun isLowRamTv(context: Context): Boolean {
     val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
     return am?.isLowRamDevice == true
+}
+
+/** Rows whose entry cards can receive the next vertical focus move. */
+internal fun homeVerticalWarmRowIndices(
+    rowCount: Int,
+    focusedRowIndex: Int,
+    firstCatalogRowIndex: Int,
+): List<Int> {
+    if (rowCount <= 0) return emptyList()
+    val first = firstCatalogRowIndex.coerceIn(0, rowCount - 1)
+    if (focusedRowIndex !in 0 until rowCount) {
+        return listOf(first, (first + 1).coerceAtMost(rowCount - 1)).distinct()
+    }
+    return buildList {
+        add(if (focusedRowIndex == rowCount - 1) first else focusedRowIndex + 1)
+        if (focusedRowIndex > 0) add(focusedRowIndex - 1)
+    }.distinct()
 }
 
 /** Vertical LazyColumn shelf bring-into-view (nav clearance). */
@@ -359,6 +359,7 @@ fun HomeScreen(
     onContinueWatchingFocusRestored: () -> Unit = {},
 ) {
     val context = LocalContext.current
+    val density = LocalDensity.current
     // OEM "low RAM" TV boxes still choke on simultaneous rail + landscape decode; keep expand
     // on capable devices (Onn 4K Pro etc.) and auto-disable only where Android flags it.
     val effectiveExpandOnFocus = remember(expandOnFocus, context) {
@@ -443,6 +444,47 @@ fun HomeScreen(
     // row-level BringIntoView — that per-keypress scroll animation was the catalog lag.
     // Declared before the hero rotation effect so rotation can pause while a shelf is focused.
     val focusedRowIdState = remember { mutableStateOf<String?>(null) }
+    val verticalWarmPixels = remember(density) {
+        homeLandscapeArtworkSize(density.density)
+    }
+    val verticalWarmDecode = remember(verticalWarmPixels) { verticalWarmPixels.toCoilSize() }
+    val verticalWarmKey = state.rows.joinToString(separator = "|") { row ->
+        val entry = row.posters.firstOrNull()
+        "${row.id}:${entry?.id}:${entry?.backdropUrl}"
+    }
+    // Warm only cards reachable by the next Up/Down press. The previous broad startup burst
+    // decoded dozens of full-HD backdrops that focus might never visit, saturating Coil exactly
+    // when Popular/Featured needed their first landscape frame.
+    LaunchedEffect(effectiveExpandOnFocus, verticalWarmKey, focusedRowIdState.value, verticalWarmDecode) {
+        if (!effectiveExpandOnFocus) return@LaunchedEffect
+        val focusedIndex = state.rows.indexOfFirst { it.id == focusedRowIdState.value }
+        val targets = homeVerticalWarmRowIndices(
+            rowCount = state.rows.size,
+            focusedRowIndex = focusedIndex,
+            firstCatalogRowIndex = firstCatalogRowIndex,
+        )
+        val loader = context.imageLoader
+        for (rowIndex in targets) {
+            val row = state.rows.getOrNull(rowIndex)
+                ?.takeIf { homeRowSupportsLandscape(it.id) }
+                ?: continue
+            val poster = row.posters.firstOrNull() ?: continue
+            val posterUrl = preferLargePosterUrl(poster.imageUrl)
+            val url = preferCardBackdropUrl(poster.backdropUrl)
+                ?.takeIf { it.isNotBlank() && it != posterUrl }
+                ?: continue
+            if (landscapeReadyInMemory(context, poster.id, url, verticalWarmPixels)) continue
+            loader.execute(
+                ImageRequest.Builder(context)
+                    .data(url)
+                    .size(verticalWarmDecode)
+                    .precision(coil3.size.Precision.EXACT)
+                    .memoryCacheKey(homeBackdropMemoryCacheKey(poster.id, url, verticalWarmPixels))
+                    .diskCacheKey("card-backdrop:${poster.id}:$url")
+                    .build(),
+            )
+        }
+    }
     LaunchedEffect(heroKey, heroActionFocused, focusedRowIdState.value) {
         // Only reset to the first hero when the candidate set actually changed identity (a
         // fresh catalog load) -- not merely because this composable remounted after returning
@@ -1023,30 +1065,16 @@ private fun PosterRow(
     val density = LocalDensity.current
     // Popular/Featured = Metahub ~1MB media — need a deeper warm than TMDB genre rails.
     val primaryShelf = remember(row.title) { isPrimaryHomeShelfTitle(row.title) }
-    val backdropWarmFirst = if (primaryShelf) HomeBackdropWarmFirstPrimary else HomeBackdropWarmFirst
     val backdropPrefetchAhead =
         if (primaryShelf) HomeBackdropPrefetchAheadPrimary else HomeBackdropPrefetchAhead
-    val backdropScrollAhead =
-        if (primaryShelf) HomeBackdropScrollWarmAheadPrimary else HomeBackdropScrollWarmAhead
-    val posterPrefetchDecode = remember(density) {
-        with(density) {
-            Size(176.dp.roundToPx().coerceAtLeast(1), 264.dp.roundToPx().coerceAtLeast(1))
-        }
-    }
-    val landscapePrefetchDecode = remember(density) {
-        with(density) {
-            Size(
-                (264.dp * HomePosterLandscapeAspect).roundToPx()
-                    .coerceAtMost(MaxLandscapeDecodeWidthPx)
-                    .coerceAtLeast(1),
-                264.dp.roundToPx().coerceAtLeast(1),
-            )
-        }
-    }
+    val posterPrefetchPixels = remember(density) { homePortraitArtworkSize(density.density) }
+    val posterPrefetchDecode = remember(posterPrefetchPixels) { posterPrefetchPixels.toCoilSize() }
+    val landscapePrefetchPixels = remember(density) { homeLandscapeArtworkSize(density.density) }
+    val landscapePrefetchDecode = remember(landscapePrefetchPixels) { landscapePrefetchPixels.toCoilSize() }
     // Eager landscape warm for entry tiles + neighbors around focus via ImageLoader only
     // (no AsyncImage cost on every card). Prefer sequential warm so vertical hops aren't
     // fighting a Metahub decode storm for a whole shelf.
-    var prefetchedLandscapeIds by remember(row.id) { mutableStateOf<Set<String>>(emptySet()) }
+    val prefetchedLandscapeIds = remember(row.id) { mutableSetOf<String>() }
     val rowOwnsFocus = focusedRowIdState?.value == row.id
     suspend fun warmBackdrop(
         poster: HomePoster,
@@ -1061,42 +1089,34 @@ private fun PosterRow(
                     context,
                     poster.id,
                     url,
-                    landscapePrefetchDecode.pxW(),
-                    landscapePrefetchDecode.pxH(),
+                    landscapePrefetchPixels,
                 )
             ) {
                 return
             }
             // Sticky warm-flag after LRU eviction must not claim the tile is cached.
-            prefetchedLandscapeIds = prefetchedLandscapeIds - poster.id
+            prefetchedLandscapeIds.remove(poster.id)
         }
-        val lw = landscapePrefetchDecode.pxW()
-        val lh = landscapePrefetchDecode.pxH()
         val result = loader.execute(
             ImageRequest.Builder(context)
                 .data(url)
                 .size(landscapePrefetchDecode)
                 .precision(coil3.size.Precision.EXACT)
-                .memoryCacheKey("card-backdrop:${poster.id}:$url:${lw}x${lh}")
+                .memoryCacheKey(homeBackdropMemoryCacheKey(poster.id, url, landscapePrefetchPixels))
                 .diskCacheKey("card-backdrop:${poster.id}:$url")
                 .build(),
         )
         if (result.image != null) {
-            prefetchedLandscapeIds = prefetchedLandscapeIds + poster.id
+            prefetchedLandscapeIds.add(poster.id)
         }
     }
     LaunchedEffect(row.id, focusedPosterIndex, rowOwnsFocus, row.posters, landscapePrefetchDecode, expandOnFocus) {
         if (!expandOnFocus) return@LaunchedEffect
         val from: Int
         val to: Int
-        if (focusedPosterIndex < 0 || !rowOwnsFocus) {
-            // Unfocused / just composed: only the entry-adjacent tiles that Up/Down lands on.
-            from = 0
-            to = (backdropWarmFirst - 1).coerceAtMost(row.posters.lastIndex)
-        } else {
-            from = (focusedPosterIndex - HomeBackdropPrefetchBehind).coerceAtLeast(0)
-            to = (focusedPosterIndex + backdropPrefetchAhead).coerceAtMost(row.posters.lastIndex)
-        }
+        if (focusedPosterIndex < 0 || !rowOwnsFocus) return@LaunchedEffect
+        from = (focusedPosterIndex - HomeBackdropPrefetchBehind).coerceAtLeast(0)
+        to = (focusedPosterIndex + backdropPrefetchAhead).coerceAtMost(row.posters.lastIndex)
         if (from > to) return@LaunchedEffect
         // Warm focused/entry first so vertical hop reveal is ready, then neighbors sequentially.
         val order = buildList {
@@ -1113,14 +1133,12 @@ private fun PosterRow(
         val loader = context.imageLoader
         fun enqueuePortrait(poster: HomePoster) {
             val url = preferLargePosterUrl(poster.imageUrl) ?: return
-            val w = posterPrefetchDecode.pxW()
-            val h = posterPrefetchDecode.pxH()
             loader.enqueue(
                 ImageRequest.Builder(context)
                     .data(url)
                     .size(posterPrefetchDecode)
                     .precision(coil3.size.Precision.EXACT)
-                    .memoryCacheKey("poster:${poster.id}:$url:${w}x${h}")
+                    .memoryCacheKey(homePosterMemoryCacheKey(poster.id, url, posterPrefetchPixels))
                     .diskCacheKey("poster:${poster.id}:$url")
                     .build(),
             )
@@ -1141,16 +1159,13 @@ private fun PosterRow(
             enqueuePortrait(row.posters[i])
         }
     }
-    // Visible-window portrait warm tracks L→R. Landscape scroll-warm only while this shelf
-    // owns focus — otherwise every composed shelf floods Coil during vertical hops.
+    // Visible-window portrait warm tracks L→R. Landscape warming has one owner above, keyed to
+    // focusedPosterIndex; running it again from this collector duplicated every focused request.
     LaunchedEffect(
         row.id,
         row.posters,
         posterPrefetchDecode,
-        landscapePrefetchDecode,
-        expandOnFocus,
         listState,
-        rowOwnsFocus,
     ) {
         val loader = context.imageLoader
         snapshotFlow {
@@ -1171,25 +1186,16 @@ private fun PosterRow(
                     for (i in portraitFrom..portraitTo) {
                         val poster = row.posters[i]
                         val url = preferLargePosterUrl(poster.imageUrl) ?: continue
-                        val w = posterPrefetchDecode.pxW()
-                        val h = posterPrefetchDecode.pxH()
                         loader.enqueue(
                             ImageRequest.Builder(context)
                                 .data(url)
                                 .size(posterPrefetchDecode)
                                 .precision(coil3.size.Precision.EXACT)
-                                .memoryCacheKey("poster:${poster.id}:$url:${w}x${h}")
+                                .memoryCacheKey(homePosterMemoryCacheKey(poster.id, url, posterPrefetchPixels))
                                 .diskCacheKey("poster:${poster.id}:$url")
                                 .build(),
                         )
                     }
-                }
-                if (!expandOnFocus || !rowOwnsFocus) return@collect
-                val landFrom = (first - HomeBackdropScrollWarmBehind).coerceAtLeast(0)
-                val landTo = (last + backdropScrollAhead).coerceAtMost(row.posters.lastIndex)
-                if (landFrom > landTo) return@collect
-                for (i in landFrom..landTo) {
-                    warmBackdrop(row.posters[i], loader)
                 }
             }
     }
@@ -1316,19 +1322,14 @@ internal fun PosterCard(
     }
     val context = LocalContext.current
     val density = LocalDensity.current
-    val posterDecode = remember(cardWidth, cardHeight, density) {
-        with(density) {
-            Size(cardWidth.roundToPx().coerceAtLeast(1), cardHeight.roundToPx().coerceAtLeast(1))
-        }
+    val posterPixels = remember(cardWidth, cardHeight, density) {
+        homePortraitArtworkSize(density.density, cardWidth.value, cardHeight.value)
     }
-    val landscapeDecode = remember(focusedWidth, cardHeight, density) {
-        with(density) {
-            Size(
-                focusedWidth.roundToPx().coerceAtMost(MaxLandscapeDecodeWidthPx).coerceAtLeast(1),
-                cardHeight.roundToPx().coerceAtLeast(1),
-            )
-        }
+    val posterDecode = remember(posterPixels) { posterPixels.toCoilSize() }
+    val landscapePixels = remember(cardHeight, density) {
+        homeLandscapeArtworkSize(density.density, cardHeight.value)
     }
+    val landscapeDecode = remember(landscapePixels) { landscapePixels.toCoilSize() }
     // Prefer true poster art for the unfocused tile — never substitute backdrop here.
     val posterUrl = remember(poster.id, poster.imageUrl) {
         preferLargePosterUrl(poster.imageUrl)
@@ -1341,17 +1342,14 @@ internal fun PosterCard(
             ?.takeIf { it != posterUrl }
     }
     // Seed painted from Coil memory when warm landed before this item recomposed (fast hop).
-    val landscapeDecodeW = landscapeDecode.pxW()
-    val landscapeDecodeH = landscapeDecode.pxH()
-    var landscapePainted by remember(poster.id, landscapeUrl, landscapeDecodeW, landscapeDecodeH) {
+    var landscapePainted by remember(poster.id, landscapeUrl, landscapePixels) {
         mutableStateOf(
             landscapeUrl != null &&
                 landscapeReadyInMemory(
                     context,
                     poster.id,
                     landscapeUrl,
-                    landscapeDecodeW,
-                    landscapeDecodeH,
+                    landscapePixels,
                 ),
         )
     }
@@ -1372,15 +1370,14 @@ internal fun PosterCard(
     }
     // Catch-up: seed painted from memory before mounting AsyncImage, and if focused, decode this
     // tile so grey bars never span a multi-frame wait for a lazy AsyncImage enqueue.
-    LaunchedEffect(focused, landscapeUrl, landscapeDecodeW, landscapeDecodeH) {
+    LaunchedEffect(focused, landscapeUrl, landscapePixels) {
         if (landscapeUrl == null) return@LaunchedEffect
         if (
             landscapeReadyInMemory(
                 context,
                 poster.id,
                 landscapeUrl,
-                landscapeDecodeW,
-                landscapeDecodeH,
+                landscapePixels,
             )
         ) {
             landscapePainted = true
@@ -1393,9 +1390,7 @@ internal fun PosterCard(
                     .data(landscapeUrl)
                     .size(landscapeDecode)
                     .precision(coil3.size.Precision.EXACT)
-                    .memoryCacheKey(
-                        "card-backdrop:${poster.id}:$landscapeUrl:${landscapeDecodeW}x${landscapeDecodeH}",
-                    )
+                    .memoryCacheKey(homeBackdropMemoryCacheKey(poster.id, landscapeUrl, landscapePixels))
                     .diskCacheKey("card-backdrop:${poster.id}:$landscapeUrl")
                     .build(),
             )
@@ -1580,8 +1575,7 @@ internal fun PosterCard(
                 composeKey(poster.id, posterUrl) {
                     var posterReloadToken by remember(poster.id, posterUrl) { mutableIntStateOf(0) }
                     val posterRequest = remember(poster.id, posterUrl, posterDecode, posterReloadToken) {
-                        val cacheKey =
-                            "poster:${poster.id}:$posterUrl:${posterDecode.pxW()}x${posterDecode.pxH()}"
+                        val cacheKey = homePosterMemoryCacheKey(poster.id, posterUrl, posterPixels)
                         ImageRequest.Builder(context)
                             .data(posterUrl)
                             .size(posterDecode)
@@ -1621,9 +1615,7 @@ internal fun PosterCard(
                             .data(fallbackUrl)
                             .size(posterDecode)
                             .precision(coil3.size.Precision.EXACT)
-                            .memoryCacheKey(
-                                "poster-fallback:${poster.id}:$fallbackUrl:${posterDecode.pxW()}x${posterDecode.pxH()}",
-                            )
+                            .memoryCacheKey(homePosterFallbackMemoryCacheKey(poster.id, fallbackUrl, posterPixels))
                             .build()
                     }
                     AsyncImage(
@@ -1648,8 +1640,7 @@ internal fun PosterCard(
             if (wantsLandscape && landscapeUrl != null && focused) {
                 composeKey(poster.id, landscapeUrl) {
                     val landscapeRequest = remember(poster.id, landscapeUrl, landscapeDecode) {
-                        val cacheKey =
-                            "card-backdrop:${poster.id}:$landscapeUrl:${landscapeDecode.pxW()}x${landscapeDecode.pxH()}"
+                        val cacheKey = homeBackdropMemoryCacheKey(poster.id, landscapeUrl, landscapePixels)
                         ImageRequest.Builder(context)
                             .data(landscapeUrl)
                             .size(landscapeDecode)
@@ -1855,9 +1846,8 @@ private fun landscapeReadyInMemory(
     context: android.content.Context,
     posterId: String,
     url: String,
-    decodeWidth: Int,
-    decodeHeight: Int,
+    size: HomeArtworkPixelSize,
 ): Boolean =
     context.imageLoader.memoryCache?.get(
-        MemoryCache.Key("card-backdrop:$posterId:$url:${decodeWidth}x${decodeHeight}"),
+        MemoryCache.Key(homeBackdropMemoryCacheKey(posterId, url, size)),
     ) != null

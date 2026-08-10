@@ -17,10 +17,10 @@ class ImageUrlsTest {
     }
 
     @Test
-    fun preferLargePosterUrl_rewritesTmdbPosterWidth() {
+    fun preferLargePosterUrl_rewritesTmdbPosterFor4kCatalogCards() {
         val input = "https://image.tmdb.org/t/p/w185/abc.jpg"
         assertEquals(
-            "https://image.tmdb.org/t/p/w500/abc.jpg",
+            "https://image.tmdb.org/t/p/w780/abc.jpg",
             preferLargePosterUrl(input),
         )
     }
@@ -38,13 +38,13 @@ class ImageUrlsTest {
     }
 
     @Test
-    fun preferCardBackdropUrl_uses780Not1280() {
+    fun preferCardBackdropUrl_uses1280ForFocused4kCards() {
         assertEquals(
-            "https://image.tmdb.org/t/p/w780/back.jpg",
+            "https://image.tmdb.org/t/p/w1280/back.jpg",
             preferCardBackdropUrl("https://image.tmdb.org/t/p/w300/back.jpg"),
         )
         assertEquals(
-            "https://image.tmdb.org/t/p/w780/back.jpg",
+            "https://image.tmdb.org/t/p/w1280/back.jpg",
             preferCardBackdropUrl("https://image.tmdb.org/t/p/w1280/back.jpg"),
         )
     }
@@ -76,9 +76,9 @@ class ImageUrlsTest {
     }
 
     @Test
-    fun preferCardBackdropUrl_traktStaysMediumNotFull() {
+    fun preferCardBackdropUrl_traktUsesFullForFocused4kCards() {
         assertEquals(
-            "https://media.trakt.tv/images/movies/000/000/001/fanarts/medium/file.jpg.webp",
+            "https://media.trakt.tv/images/movies/000/000/001/fanarts/full/file.jpg.webp",
             preferCardBackdropUrl(
                 "https://media.trakt.tv/images/movies/000/000/001/fanarts/full/file.jpg.webp",
             ),

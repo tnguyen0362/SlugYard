@@ -140,41 +140,15 @@ internal object StreamScoringEngine {
             allowUncachedFallback -> safePool.filter { it.isUncachedDebridAutoPlayEligible() }
             else -> emptyList()
         }
-        // Size gate: reject opaque huge torrents that hang TorBox/MPV, but allow named
-        // multi-file season packs (Judas/Anime Time Dual+Multi-Subs) so episode file-select
-        // can pick SxxExx out of the pack. Resolve failure still rejects and tries the next.
-        val sizedPool = cachePool.filter { it.isSaneAutoPlaySize(context) }
-        // With a subtitle preference, never auto-start wrong-language packs (PL/ES-only).
-        // Anime: keep neutral Dual/Multi soft packs even when they omit "English" — the old
-        // "must mention preferred" shrink preferred Eng-tagged PGS remuxes over SeaDex duals.
-        // Mainstream: still prefer rows that mention preferred lang when any exist.
-        val preferred = normalizePreferredSubtitle(context.preferredSubtitleLanguage)
-        val languageSafePool = if (preferred != null) {
-            val nonConflicting = sizedPool.filter { candidate ->
-                !hasConflictingSubtitleLanguage(candidate.releaseText().lowercase(), preferred)
+        // Size / language / digital gates apply to the Instant pool first. If Instant rows all
+        // fail those gates and uncached fallback is open, re-run the same gates on
+        // debrid-startable rows instead of returning null while better scrapers may still arrive.
+        var playPool = gatedPlayPool(cachePool, context, kind)
+        if (playPool.isEmpty() && allowUncachedFallback) {
+            val uncachedPool = safePool.filter { it.isUncachedDebridAutoPlayEligible() }
+            if (uncachedPool.isNotEmpty()) {
+                playPool = gatedPlayPool(uncachedPool, context, kind)
             }
-            when (kind) {
-                ContentKind.ANIME -> nonConflicting
-                else -> {
-                    val mentioningPreferred = nonConflicting.filter { candidate ->
-                        textMentionsLanguage(candidate.releaseText().lowercase(), preferred)
-                    }
-                    when {
-                        mentioningPreferred.isNotEmpty() -> mentioningPreferred
-                        nonConflicting.isNotEmpty() -> nonConflicting
-                        else -> emptyList()
-                    }
-                }
-            }
-        } else {
-            sizedPool
-        }
-        // Pre-digital movies: refuse all auto-play until TMDB shows a past digital release.
-        val playPool = languageSafePool.filter { candidate ->
-            DigitalReleasePolicy.allowsAutoPlay(
-                context.digitalReleaseStatus,
-                candidate.releaseText(),
-            )
         }
         val winner = playPool.maxWithOrNull(rankComparator(context)) ?: return null
         // During Finding (Instant-only), refuse mono PGS remuxes for anime so Dual/ASS can
@@ -667,19 +641,93 @@ internal object StreamScoringEngine {
     }
 
     /**
-     * True when the release advertises a non-preferred subtitle language, or is a known
-     * Spanish-leaning fansub pack (A&C / AandC) while preferred is not Spanish.
-     * Multi-Subs does NOT clear the conflict — A&C Multi-Sub is Latam/España, not Eng.
+     * Soft language signal for ranking only (see [trackSignals] softsubFit).
+     * Preferred-language hits clear the flag; non-preferred names / known Spanish fansub
+     * groups demote rank so preferred softsubs win when both Instant rows exist.
      */
     private fun hasConflictingSubtitleLanguage(text: String, preferred: String): Boolean {
         if (textMentionsLanguage(text, preferred)) return false
         val preferredBase = preferred.substringBefore('-').substringBefore('_').lowercase()
         if (preferredBase != "es" && looksLikeSpanishFansubPack(text)) return true
         return SUBTITLE_CONFLICT_LANGUAGE_BASES.any { base ->
-            base != preferredBase &&
-                // Japanese is usually the dual-audio source track, not a subtitle conflict.
-                base != "ja" &&
-                textMentionsConflictLanguage(text, base)
+            base != preferredBase && textMentionsConflictLanguage(text, base)
+        }
+    }
+
+    /**
+     * Hard veto for packs that are *exclusively* a non-preferred localization (Spanish ASS,
+     * Napisy PL, A&C Latam Multi-Sub). Multi-audio / multi-sub / dual releases and bare
+     * origin/dialogue language tags are **not** exclusive — they stay Instant-eligible
+     * and ranking sorts them. No content-kind or language-family allowlists.
+     */
+    private fun isExclusiveNonPreferredLocalizationPack(
+        text: String,
+        preferred: String,
+    ): Boolean {
+        if (textMentionsLanguage(text, preferred)) return false
+        val preferredBase = preferred.substringBefore('-').substringBefore('_').lowercase()
+        if (preferredBase != "es" && looksLikeSpanishFansubPack(text)) return true
+        // Multi-language packaging is not an exclusive foreign pack.
+        if (MULTI_SUBS_REGEX.containsMatchIn(text) || DUAL_AUDIO_REGEX.containsMatchIn(text)) {
+            return false
+        }
+        if (!hasConflictingSubtitleLanguage(text, preferred)) return false
+        // Conflicting *and* localization-pack framing (softsub/ASS/napisy/etc), not a bare
+        // dialogue/origin language token on an Instant WEB-DL.
+        return hasLocalizationPackSignal(text)
+    }
+
+    private fun hasLocalizationPackSignal(text: String): Boolean =
+        ASS_SOFTSUB_FORMAT.containsMatchIn(text) ||
+            PGS_SOFTSUB_FORMAT.containsMatchIn(text) ||
+            SRT_SOFTSUB_FORMAT.containsMatchIn(text) ||
+            SOFTSUB_KEYWORD.containsMatchIn(text) ||
+            EXPLICIT_SUB_REGEX.containsMatchIn(text) ||
+            HARD_SUB_REGEX.containsMatchIn(text) ||
+            Regex("""\bnapisy\b""").containsMatchIn(text)
+
+    /**
+     * Size / exclusive-localization / digital-release gates, then preferred-language preference.
+     * Language preference never hard-empties Instant when only origin-tagged rows exist.
+     */
+    private fun gatedPlayPool(
+        pool: List<StreamCandidate>,
+        context: Context,
+        @Suppress("UNUSED_PARAMETER") kind: ContentKind,
+    ): List<StreamCandidate> {
+        // Size gate: reject opaque huge torrents that hang TorBox/MPV, but allow named
+        // multi-file season packs so episode file-select can pull SxxExx out of the pack.
+        val sizedPool = pool.filter { it.isSaneAutoPlaySize(context) }
+        val preferred = normalizePreferredSubtitle(context.preferredSubtitleLanguage)
+        val afterLanguage = if (preferred == null) {
+            sizedPool
+        } else {
+            val notExclusive = sizedPool.filter { candidate ->
+                !isExclusiveNonPreferredLocalizationPack(
+                    candidate.releaseText().lowercase(),
+                    preferred,
+                )
+            }
+            // All Instant rows are exclusive foreign packs (e.g. Spanish ASS only) → empty,
+            // wait for scrapers / uncached. Mixed / multi-sub / bare tags stay.
+            if (notExclusive.isEmpty()) {
+                emptyList()
+            } else {
+                // Prefer non-conflicting packs; never require the preferred *word* in the title
+                // (dual/multi softpacks often omit it). Ranking uses softsubFit for preferred fit.
+                // Fail-open to notExclusive when every row is only mildly conflicting (origin tags).
+                val nonConflicting = notExclusive.filter { candidate ->
+                    !hasConflictingSubtitleLanguage(candidate.releaseText().lowercase(), preferred)
+                }
+                nonConflicting.ifEmpty { notExclusive }
+            }
+        }
+        // Pre-digital movies: refuse all auto-play until TMDB shows a past digital release.
+        return afterLanguage.filter { candidate ->
+            DigitalReleasePolicy.allowsAutoPlay(
+                context.digitalReleaseStatus,
+                candidate.releaseText(),
+            )
         }
     }
 

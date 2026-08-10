@@ -10,30 +10,25 @@ package com.sluggyard.tv.ui.app
  * Trakt CDN only serves `thumb` / `medium` / `full` — never rewrite those to `/large/` (404 →
  * blank More Like This / catalog tiles).
  *
- * Card landscape backdrops ([preferCardBackdropUrl]) stay display-bounded (TMDB w780 / Trakt
- * medium), never soft Metahub `small`. Metahub only has soft 480 vs full-HD medium (large is
- * the same full-HD file) — forcing small was a quality-killing bandage. Smooth landscape hops
- * come from Coil's MaxLandscapeDecodeWidthPx decode cap + hero-pause/prefetch, not from 480px artwork.
+ * Focused card backdrops ([preferCardBackdropUrl]) retain enough source detail for a 4K TV while
+ * Coil decodes to the card's actual on-screen size. Metahub only has soft 480 vs full-HD medium
+ * (large is the same full-HD file), so `small` is never used for focused artwork.
  */
 
-/** Landscape art for focused catalog cards — sharp sources, Coil-capped decode size. */
+/** Landscape art for focused catalog cards — source detail must match a 4K TV card. */
 fun preferCardBackdropUrl(url: String?): String? {
     if (url.isNullOrBlank()) return url
     if (isTraktMediaHost(url)) {
-        // Card strip: medium is enough; /full/ is hero-grade and janks horizontal focus on Onn.
-        return url
-            .replace("/thumb/", "/medium/")
-            .replace("/full/", "/medium/")
-            .replace("/large/", "/medium/")
+        return upgradeTraktImageSize(url)
     }
     var next = url
-    // TMDB: hard-cap card strip to w780 (never original / w1280). Real mid-tier, not soft mush.
+    // A focused landscape card can cover more than 780px on a 4K TV.
     if ("image.tmdb.org" in next) {
         next = next
-            .replace(Regex("""/t/p/w\d+/"""), "/t/p/w780/")
-            .replace(Regex("""/t/p/h\d+/"""), "/t/p/w780/")
-            .replace("/t/p/original/", "/t/p/w780/")
-            .replace(Regex("""/t/p/(?!w\d+/|h\d+/)[^/]+/"""), "/t/p/w780/")
+            .replace(Regex("""/t/p/w\d+/"""), "/t/p/w1280/")
+            .replace(Regex("""/t/p/h\d+/"""), "/t/p/w1280/")
+            .replace("/t/p/original/", "/t/p/w1280/")
+            .replace(Regex("""/t/p/(?!w\d+/|h\d+/)[^/]+/"""), "/t/p/w1280/")
         return next
     }
     // Metahub: Cinemeta ships background/medium. medium/large/original are the same ~1080p file;
@@ -48,28 +43,15 @@ fun preferCardBackdropUrl(url: String?): String? {
             .replace("/fanart/large/", "/fanart/medium/")
             .replace("/fanart/small/", "/fanart/medium/")
     }
-    // Generic addon size folders: prefer medium for cards (never hero-grade large/full).
-    next = next
-        .replace("/original/", "/medium/")
-        .replace("/large/", "/medium/")
-        .replace("/full/", "/medium/")
-        .replace("/small/", "/medium/")
-        .replace("/thumb/", "/medium/")
-    // Absolute w185/w342/w1280 path segments → w780 for card strip.
-    next = next.replace(Regex("""/(w\d+|h\d+)/""")) { match ->
-        val token = match.groupValues[1]
-        if (token.startsWith("h")) "/w780/" else {
-            val n = token.drop(1).toIntOrNull() ?: 780
-            if (n > 780) "/w780/" else match.value
-        }
-    }
+    // Unknown add-ons own their URL formats; do not silently replace high-quality artwork with a
+    // guessed medium variant. Coil still decodes it to the card's exact display dimensions.
     return next
 }
 
 fun preferLargePosterUrl(url: String?): String? {
     if (url.isNullOrBlank()) return url
     if (isTraktMediaHost(url)) return upgradeTraktImageSize(url)
-    return tmdbSize(url, posterWidth = 500, backdropWidth = 1280)
+    return tmdbSize(url, posterWidth = 780, backdropWidth = 1280)
 }
 
 fun preferTvBackdropUrl(url: String?): String? {
