@@ -18,6 +18,9 @@ import java.security.MessageDigest
 import javax.inject.Inject
 import javax.inject.Singleton
 
+internal fun openSubtitlesLanguageQuery(languages: List<String>): String? =
+    languages.joinToString(",").takeIf { it.isNotBlank() }
+
 /**
  * Talks to the OpenSubtitles REST API to search for subtitles and download
  * them into a private cache directory. A user-configured API key is required
@@ -50,7 +53,7 @@ class OpenSubtitlesRepository @Inject constructor(
                 movieHash = movieHash,
                 imdbId = imdbId,
                 query = query,
-                languages = languages.joinToString(","),
+                languages = openSubtitlesLanguageQuery(languages),
                 type = type,
                 season = season,
                 episode = episode,

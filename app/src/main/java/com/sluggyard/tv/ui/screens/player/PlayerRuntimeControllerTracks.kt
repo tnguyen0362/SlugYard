@@ -319,7 +319,8 @@ private fun PlayerRuntimeController.scanAudioGroup(
 
         val codec = CustomDefaultTrackNameProvider.formatNameFromMime(format.sampleMimeType)
         val channels = CustomDefaultTrackNameProvider.getChannelLayoutName(format.channelCount)
-        val langDisplay = format.language?.takeIf { it != "und" }?.let { languageCodeToName(it) }
+        val language = resolveAudioTrackLanguageCode(format.language, format.label)
+        val langDisplay = language?.let { languageCodeToName(it) }
         val baseName = format.label ?: langDisplay
             ?: context.getString(com.sluggyard.tv.R.string.player_track_audio_fallback, audioTracks.size + 1)
         val suffix = listOfNotNull(codec, channels).joinToString(" ")
@@ -328,7 +329,7 @@ private fun PlayerRuntimeController.scanAudioGroup(
         audioTracks += TrackInfo(
             index = audioTracks.size,
             name = displayName,
-            language = format.language,
+            language = language,
             trackId = format.id,
             codec = codec,
             channelCount = format.channelCount.takeIf { it > 0 },

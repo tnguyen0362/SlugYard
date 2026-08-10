@@ -56,8 +56,9 @@ internal fun selectAutoPlayCandidate(
         )
     }
 
-    // Mainstream: Instant-only until probes settle. Anime: once uncached fallback is open, score
-    // Instant + download-start rows together so Dual/ASS can beat Instant Eng-PGS mono.
+    // Cap ranking pool without melting leanback. Instant-eligible rows first; when
+    // uncached fallback is open, include debrid-startable rows so Instant that later lose
+    // size/language gates still leave choose something to score (choose itself prefers Instant).
     val kind = StreamScoringEngine.contentKind(context)
     val cachedPool = candidates.filter { it.isAutoPlayEligibleForLog() }
     val uncachedPool = candidates.filter { it.isUncachedFallbackEligibleForLog() }
@@ -66,7 +67,10 @@ internal fun selectAutoPlayCandidate(
             val combined = (cachedPool + uncachedPool).distinctBy { it.dedupeKey() }
             if (combined.isNotEmpty()) combined else emptyList()
         }
-        cachedPool.isNotEmpty() -> cachedPool
+        cachedPool.isNotEmpty() && !allowUncachedFallback -> cachedPool
+        cachedPool.isNotEmpty() && allowUncachedFallback -> {
+            (cachedPool + uncachedPool).distinctBy { it.dedupeKey() }
+        }
         allowUncachedFallback -> uncachedPool
         else -> emptyList()
     }
@@ -94,12 +98,12 @@ internal fun selectAutoPlayCandidate(
     val winner = StreamScoringEngine.choose(
         scorePool,
         context,
-        // Mainstream: if Instant exists, stay Instant-only (old gate).
-        // Anime: Instant is ranked after dual/soft — open uncached when the shell says so.
-        allowUncachedFallback = when (kind) {
-            StreamScoringEngine.ContentKind.ANIME -> allowUncachedFallback
-            else -> allowUncachedFallback && cachedPool.isEmpty()
-        },
+        // Instant always ranked first inside choose. allowUncached only matters when Instant is
+        // empty **or** Instant rows fail size/language gates and debrid-start rows must open.
+        // Previously mainstream forced false whenever ANY Instant sat in the log-eligible pool —
+        // that left choose with null after a partial Instant dump while AppShell still treated
+        // fallback as open and terminal-failed Finding.
+        allowUncachedFallback = allowUncachedFallback,
     )
 
     val groupSummary = groups.joinToString(" | ") { group ->
@@ -304,6 +308,45 @@ private fun animeScorePoolAdmissionOrder(
         }
         .thenByDescending { it.seeders ?: 0 }
         .thenByDescending { autoPickQualityHint(it.title) }
+}
+
+/**
+ * Whether Finding may open the uncached/debrid-start pool.
+ *
+ * Early Instant readiness used to set discovery complete and open uncached the same tick;
+ * choose() could return null on a partial dump and the shell terminal-failed Finding while
+ * other scrapers were still Loading.
+ *
+ * Uncached opens only after the hard discovery ceiling, or after cache probes have expired **and**
+ * every addon group has left Loading (true fanout settle) — never on early Instant readiness alone.
+ */
+internal fun shouldAllowUncachedAutoPlayFallback(
+    discoveryHardCeilingReached: Boolean,
+    cacheWaitExpired: Boolean,
+    anyAddonStillLoading: Boolean,
+): Boolean {
+    if (discoveryHardCeilingReached) return true
+    return cacheWaitExpired && !anyAddonStillLoading
+}
+
+/**
+ * Decision after score/choose returned null.
+ *
+ * Terminal None is **only** legal after the hard ceiling. ListingCount > 0 must not mean
+ * "sources finished" — partial Instant that fails filters used to short-circuit Finding.
+ */
+internal fun autoPickOutcomeWhenNoWinner(
+    discoveryHardCeilingReached: Boolean,
+): AutoPickNoWinnerDecision =
+    if (discoveryHardCeilingReached) {
+        AutoPickNoWinnerDecision.NoneAvailable
+    } else {
+        AutoPickNoWinnerDecision.Wait
+    }
+
+internal enum class AutoPickNoWinnerDecision {
+    Wait,
+    NoneAvailable,
 }
 
 /** Guards against candidates with no actionable source at all (neither a direct URL nor a

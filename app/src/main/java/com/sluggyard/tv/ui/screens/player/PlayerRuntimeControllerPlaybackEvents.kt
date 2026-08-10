@@ -1006,7 +1006,7 @@ fun PlayerRuntimeController.onEvent(event: PlayerEvent) {
         is PlayerEvent.OnSelectSubtitleTrack -> handleSelectSubtitleTrack(event.index)
         PlayerEvent.OnDisableSubtitles -> handleDisableSubtitles()
         is PlayerEvent.OnSelectAddonSubtitle -> handleSelectAddonSubtitle(event)
-        PlayerEvent.OnRetrySubtitleSearch -> fetchAddonSubtitles()
+        PlayerEvent.OnRetrySubtitleSearch -> refreshSubtitlesForCurrentEpisode()
         is PlayerEvent.OnSetPlaybackSpeed -> handleSetPlaybackSpeed(event.speed)
         PlayerEvent.OnToggleControls -> handleToggleControls()
         PlayerEvent.OnShowAudioOverlay -> showAudioOverlay()
