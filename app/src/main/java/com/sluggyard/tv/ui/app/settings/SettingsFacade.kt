@@ -43,9 +43,6 @@ interface SettingsFacade {
     val addonPreferences: AddonPreferences
     val layoutPreferences: LayoutPreferenceDataStore
     val playerSettings: Flow<PlayerSettings>
-    val openSubtitlesEnabled: Flow<Boolean>
-    val openSubtitlesApiKey: Flow<String>
-    val openSubtitlesAutoDownload: Flow<Boolean>
     val streamBadgeSettings: Flow<com.sluggyard.tv.core.streams.StreamBadgeSettings>
     val crashReportingEnabled: Flow<Boolean>
 
@@ -84,9 +81,6 @@ interface SettingsFacade {
     suspend fun setMaintainOriginalAudioOnDownmix(enabled: Boolean)
     suspend fun setTunnelingEnabled(enabled: Boolean)
     suspend fun setForceOpticalPassthrough(enabled: Boolean)
-    suspend fun setOpenSubtitlesEnabled(enabled: Boolean)
-    suspend fun setOpenSubtitlesApiKey(apiKey: String)
-    suspend fun setOpenSubtitlesAutoDownload(enabled: Boolean)
 
     suspend fun setCrashReportingEnabled(enabled: Boolean)
 
@@ -118,9 +112,6 @@ class DefaultSettingsFacade @Inject constructor(
     override val mdblistSettings: Flow<MDBListSettings> = mdblistStore.settings
     override val debridSettings: Flow<DebridSettings> = debridStore.settings
     override val playerSettings: Flow<PlayerSettings> = playerStore.playerSettings
-    override val openSubtitlesEnabled: Flow<Boolean> = playerStore.openSubtitlesEnabled
-    override val openSubtitlesApiKey: Flow<String> = playerStore.openSubtitlesApiKey
-    override val openSubtitlesAutoDownload: Flow<Boolean> = playerStore.openSubtitlesAutoDownload
     override val streamBadgeSettings: Flow<com.sluggyard.tv.core.streams.StreamBadgeSettings> =
         streamBadgeStore.settings
     override val crashReportingEnabled: Flow<Boolean> = crashReportingPreferences.enabled
@@ -249,15 +240,6 @@ class DefaultSettingsFacade @Inject constructor(
 
     override suspend fun setForceOpticalPassthrough(enabled: Boolean) =
         trackSetting("player.optical_passthrough", enabled) { playerStore.setForceOpticalPassthrough(enabled) }
-
-    override suspend fun setOpenSubtitlesEnabled(enabled: Boolean) =
-        trackSetting("opensubtitles.enabled", enabled) { playerStore.setOpenSubtitlesEnabled(enabled) }
-
-    override suspend fun setOpenSubtitlesApiKey(apiKey: String) =
-        trackSetting("opensubtitles.api_key", "<redacted>") { playerStore.setOpenSubtitlesApiKey(apiKey) }
-
-    override suspend fun setOpenSubtitlesAutoDownload(enabled: Boolean) =
-        trackSetting("opensubtitles.auto_download", enabled) { playerStore.setOpenSubtitlesAutoDownload(enabled) }
 
     override suspend fun setCrashReportingEnabled(enabled: Boolean) =
         trackSetting("crash_reporting.enabled", enabled) { crashReportingPreferences.setEnabled(enabled) }

@@ -13,6 +13,36 @@ private const val HomePosterWidthDp = 176f
 private const val HomePosterHeightDp = 264f
 private const val HomeLandscapeAspect = 16f / 9f
 
+internal data class HomeArtworkRenderState(
+    val expandLandscapeFrame: Boolean,
+    val showPortrait: Boolean,
+    val showLandscape: Boolean,
+    val showLandscapeChrome: Boolean,
+)
+
+/**
+ * Enforces the focused-card artwork contract independently of Compose and Coil timing.
+ *
+ * Focused landscape-capable cards expand their frame, but must **fail-open to portrait** until
+ * landscape successfully paints (and stay on portrait if landscape never loads). Hiding both
+ * produced blank grey CW/catalog cards on leanback SOCs under Coil pressure.
+ */
+internal fun homeArtworkRenderState(
+    focused: Boolean,
+    wantsLandscape: Boolean,
+    landscapePainted: Boolean,
+): HomeArtworkRenderState {
+    val expandLandscapeFrame = focused && wantsLandscape
+    val showLandscape = expandLandscapeFrame && landscapePainted
+    return HomeArtworkRenderState(
+        expandLandscapeFrame = expandLandscapeFrame,
+        // Portrait remains visible whenever landscape is not painted — load or permanent miss.
+        showPortrait = !showLandscape,
+        showLandscape = showLandscape,
+        showLandscapeChrome = showLandscape,
+    )
+}
+
 internal data class HomeArtworkPixelSize(
     val width: Int,
     val height: Int,

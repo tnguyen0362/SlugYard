@@ -347,6 +347,37 @@ class StreamAutoPickerTest {
     }
 
     @Test
+    fun animeInstantVostfrDoesNotWinWhenPreferredEnglish() {
+        // Device log 2026-08-11: Instant Tsundere VOSTFR French ASS auto-started over
+        // ToonsHub Multi-Subs Instant Eng ASS tracks.
+        val vostfr = candidate("fr", cacheState = StreamCacheState.CACHED, infoHash = "fr-hash")
+            .copy(
+                title = "The Angel Next Door Spoils Me Rotten S02E08 VOSTFR 1080p WEB x264 AAC -Tsundere-Raws (CR)",
+                filename = "Angel.S02E08.VOSTFR.1080p.mkv",
+                seeders = 200,
+            )
+        val multi = candidate("multi", cacheState = StreamCacheState.CACHED, infoHash = "multi-hash")
+            .copy(
+                title = "[ToonsHub] The Angel Next Door Spoils Me Rotten S02E08 1080p CR WEB-DL AAC2.0 H.264 (Multi-Subs)",
+                filename = "The.Angel.Next.Door.Spoils.Me.Rotten.S02E08.1080p.CR.WEB-DL.JPN.AAC2.0.H.264.MSubs-ToonsHub.mkv",
+                seeders = 40,
+            )
+        val context = StreamScoringEngine.Context(
+            title = "The Angel Next Door Spoils Me Rotten",
+            contentType = "series",
+            genres = listOf("Animation", "Comedy", "Drama"),
+            language = "ja",
+            preferredSubtitleLanguage = "en",
+        )
+
+        assertEquals(0, StreamScoringEngine.rank(vostfr, context).softsubFit)
+        assertTrue(StreamScoringEngine.rank(multi, context).softsubFit >= 2)
+        assertEquals(multi, selectAutoPlayCandidate(groups(vostfr, multi), context, allowUncachedFallback = false))
+        // Instant-only French must not lock Finding when Eng Multi is not yet Instant.
+        assertNull(selectAutoPlayCandidate(groups(vostfr), context, allowUncachedFallback = false))
+    }
+
+    @Test
     fun preferredLanguageAssBeatsPreferredLanguageSrtForAnime() {
         // Repro: auto-play matched Eng preference via SRT while AnimeTosho had Eng ASS
         // (no dub title — ASS styling/signs matter).
@@ -373,6 +404,57 @@ class StreamAutoPickerTest {
         assertEquals(5, StreamScoringEngine.rank(ass, context).softsubFit)
         assertEquals(3, StreamScoringEngine.rank(srt, context).softsubFit)
         assertEquals(ass, selectAutoPlayCandidate(groups(srt, ass), context))
+    }
+
+    @Test
+    fun animeInstantOnlyPlainSrtDoesNotAutoStartDuringFinding() {
+        // Angel Next Door: Instant Eng SRT WEB-DL alone used to lock auto-play before ASS lands.
+        val srt = candidate("srt", cacheState = StreamCacheState.CACHED, infoHash = "srt-hash")
+            .copy(
+                title = "The.Angel.Next.Door.S01E01.1080p.WEB-DL.English.SRT",
+                filename = "Angel.Next.Door.S01E01.1080p.English.SRT.mkv",
+                seeders = 120,
+            )
+        val context = StreamScoringEngine.Context(
+            title = "The Angel Next Door Spoils Me Rotten",
+            contentType = "series",
+            genres = listOf("Animation"),
+            language = "ja",
+            preferredSubtitleLanguage = "en",
+        )
+
+        assertNull(selectAutoPlayCandidate(groups(srt), context, allowUncachedFallback = false))
+        // Once cache wait expires / hard ceiling, SRT may start if nothing better arrived.
+        assertEquals(
+            srt,
+            selectAutoPlayCandidate(groups(srt), context, allowUncachedFallback = true),
+        )
+    }
+
+    @Test
+    fun animeWaitsPastInstantSrtForAssWhenBothEventuallyPresent() {
+        val srt = candidate("srt", cacheState = StreamCacheState.CACHED, infoHash = "srt-hash")
+            .copy(
+                title = "Show.S01E01.1080p.WEB-DL.English.SRT",
+                seeders = 200,
+            )
+        val ass = candidate("ass", cacheState = StreamCacheState.NOT_CACHED, infoHash = "ass-hash")
+            .copy(
+                title = "[SubsPlease] Show - 01 (1080p)",
+                seeders = 40,
+            )
+        val context = StreamScoringEngine.Context(
+            title = "Show",
+            contentType = "series",
+            genres = listOf("Animation"),
+            preferredSubtitleLanguage = "en",
+        )
+
+        assertNull(selectAutoPlayCandidate(groups(srt), context, allowUncachedFallback = false))
+        assertEquals(
+            ass,
+            selectAutoPlayCandidate(groups(srt, ass), context, allowUncachedFallback = true),
+        )
     }
 
     @Test
@@ -590,7 +672,17 @@ class StreamAutoPickerTest {
             genres = listOf("Animation"),
             preferredSubtitleLanguage = "en",
         )
-        assertEquals(engSrt, selectAutoPlayCandidate(groups(polishAss, spanishAss, engSrt), context))
+        assertNull(selectAutoPlayCandidate(groups(polishAss, spanishAss, engSrt), context))
+        // Prefer Eng SRT over wrong-language ASS once Instant wait opens uncached fallback —
+        // plain SRT mono no longer locks auto-play during Instant-only Finding.
+        assertEquals(
+            engSrt,
+            selectAutoPlayCandidate(
+                groups(polishAss, spanishAss, engSrt),
+                context,
+                allowUncachedFallback = true,
+            ),
+        )
         // Eng-PGS mono is delayed during Instant-only Finding (wait for dual soft); allowed after
         // probes with fallback when nothing better exists.
         assertNull(selectAutoPlayCandidate(groups(polishAss, spanishAss, engPgs), context))

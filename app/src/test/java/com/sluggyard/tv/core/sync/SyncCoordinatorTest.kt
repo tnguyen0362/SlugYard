@@ -97,21 +97,65 @@ class SyncCoordinatorTest {
         Unit
     }
 
+    @Test
+    fun signedInSyncFlushesLibraryWatchBridge() = runBlocking {
+        val library = CountingLibraryWatchBridge()
+        val local = FakeLocalStore()
+        val remote = FakeRemote(
+            snapshot = RemoteSnapshot(
+                profiles = emptyList(),
+                library = emptyList(),
+                progress = emptyList(),
+                watchedItems = emptyList(),
+                profileSettings = emptyList(),
+            ),
+        )
+
+        val result = coordinator(local, remote, libraryWatch = library).synchronize()
+
+        assertIs<SyncResult.Success<SyncSummary>>(result)
+        assertEquals(1, library.flushCalls)
+    }
+
+    @Test
+    fun signedOutDoesNotFlushLibraryWatchBridge() = runBlocking {
+        val library = CountingLibraryWatchBridge()
+        val local = FakeLocalStore()
+        val remote = FakeRemote()
+
+        val result = coordinator(local, remote, SupabaseSessionState.SignedOut, library).synchronize()
+
+        assertIs<SyncResult.Success<SyncSummary>>(result)
+        assertEquals(0, library.flushCalls)
+        assertEquals(0, remote.pullCalls)
+    }
+
     private fun coordinator(
         local: FakeLocalStore,
         remote: FakeRemote,
         state: SupabaseSessionState = SupabaseSessionState.Active(session),
+        libraryWatch: LibraryWatchSyncBridge? = null,
     ) = SyncCoordinator(
         sessions = FakeSessions(state),
         remote = remote,
         local = local,
         wait = {},
+        libraryWatch = libraryWatch,
     )
 
     private fun profile(id: Int, changedAt: Long) = CloudProfile(id, "Profile $id", "#123456", null, changedAt)
 
     private companion object {
         val session = SupabaseSession("user-1", "access", "refresh", Long.MAX_VALUE)
+    }
+}
+
+private class CountingLibraryWatchBridge : LibraryWatchSyncBridge {
+    var flushCalls = 0
+    override suspend fun snapshot() = LibraryWatchSyncSnapshot()
+    override suspend fun apply(snapshot: LibraryWatchSyncSnapshot) = Unit
+    override suspend fun flushPending() {
+        flushCalls++
     }
 }
 

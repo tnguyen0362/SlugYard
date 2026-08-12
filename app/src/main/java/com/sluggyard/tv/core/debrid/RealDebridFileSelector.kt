@@ -31,7 +31,10 @@ class RealDebridFileSelector @Inject constructor() {
         if (episodePatterns.isNotEmpty()) {
             playable.bestDebridEpisodeMatch(targetSeason, targetEpisode) { it.displayName() }
                 ?.let { return it }
-            if (hasExplicitEpisodeTarget) return null
+            if (hasExplicitEpisodeTarget) {
+                playable.singlePlayableOrNull()?.let { return it }
+                return null
+            }
         }
 
         resolve.fileIdx?.let { fileIdx ->

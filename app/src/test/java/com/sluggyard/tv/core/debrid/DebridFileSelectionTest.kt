@@ -24,6 +24,18 @@ class DebridFileSelectionTest {
     }
 
     @Test
+    fun `anime season pack Title N - EE matches season and episode`() {
+        val erai =
+            "[Erai-raws] Otonari no Tenshi-sama ni Itsunomanika Dame Ningen ni Sareteita Ken 2 - 09 [1080p CR WEBRip HEVC AAC][MultiSub].mkv"
+        assertTrue(erai.matchesDebridEpisodeFile(2, 9))
+        assertEquals(90, erai.debridEpisodeMatchScore(2, 9))
+        // Wrong episode must not score.
+        assertFalse(erai.matchesDebridEpisodeFile(2, 7))
+        // Absolute S1 "09" still works for season 1.
+        assertTrue("Show - 09 [1080p].mkv".matchesDebridEpisodeFile(1, 9))
+    }
+
+    @Test
     fun `standard sxxexx still matches`() {
         assertTrue("show.s01e04.1080p.mkv".matchesDebridEpisodeFile(1, 4))
         assertTrue("show.1x04.mkv".matchesDebridEpisodeFile(1, 4))

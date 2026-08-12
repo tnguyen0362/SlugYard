@@ -10,6 +10,62 @@ import org.junit.Test
 
 class HomeArtworkPolicyTest {
     @Test
+    fun `focused landscape cache miss keeps portrait fail-open`() {
+        val state = homeArtworkRenderState(
+            focused = true,
+            wantsLandscape = true,
+            landscapePainted = false,
+        )
+
+        assertTrue(state.expandLandscapeFrame)
+        assertTrue(state.showPortrait)
+        assertFalse(state.showLandscape)
+        assertFalse(state.showLandscapeChrome)
+    }
+
+    @Test
+    fun `focused painted landscape never exposes portrait`() {
+        val state = homeArtworkRenderState(
+            focused = true,
+            wantsLandscape = true,
+            landscapePainted = true,
+        )
+
+        assertTrue(state.expandLandscapeFrame)
+        assertFalse(state.showPortrait)
+        assertTrue(state.showLandscape)
+        assertTrue(state.showLandscapeChrome)
+    }
+
+    @Test
+    fun `focused card without landscape artwork remains portrait sized`() {
+        val state = homeArtworkRenderState(
+            focused = true,
+            wantsLandscape = false,
+            landscapePainted = false,
+        )
+
+        assertFalse(state.expandLandscapeFrame)
+        assertTrue(state.showPortrait)
+        assertFalse(state.showLandscape)
+        assertFalse(state.showLandscapeChrome)
+    }
+
+    @Test
+    fun `unfocused card remains portrait even when landscape is cached`() {
+        val state = homeArtworkRenderState(
+            focused = false,
+            wantsLandscape = true,
+            landscapePainted = true,
+        )
+
+        assertFalse(state.expandLandscapeFrame)
+        assertTrue(state.showPortrait)
+        assertFalse(state.showLandscape)
+        assertFalse(state.showLandscapeChrome)
+    }
+
+    @Test
     fun `fractional density uses one rounded landscape size and cache key`() {
         val size = homeLandscapeArtworkSize(density = 1.33125f)
 

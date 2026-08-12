@@ -177,6 +177,7 @@ import com.sluggyard.tv.ui.app.streams.autoPickOutcomeWhenNoWinner
 import com.sluggyard.tv.ui.app.streams.AutoPickNoWinnerDecision
 import com.sluggyard.tv.ui.app.streams.DigitalReleaseLookup
 import com.sluggyard.tv.ui.app.streams.DigitalReleasePolicy
+import com.sluggyard.tv.ui.app.streams.MatroskaSubtitleCodecProbe
 import com.sluggyard.tv.ui.app.streams.StreamScoringEngine
 import com.sluggyard.tv.ui.app.streams.StreamBadgeApplicator
 import com.sluggyard.tv.ui.app.streams.StreamGroup
@@ -759,11 +760,15 @@ private fun AppContent(
     // Next-up machinery: completed-episode seeds + per-show episode order resolve the next
     // unwatched episode. Seeds stay last-completed; the membership module advances them.
     val nextUpSeeds by watchProgressRepository.observeNextUpSeeds().collectAsState(initial = emptyList())
+    val localCompletionSeeds by graph.playbackProgress.seriesCompletionSeeds.collectAsState(initial = emptyList())
     val dismissedNextUpKeys by settingsFacade.traktSettings.dismissedNextUpKeys.collectAsState(initial = emptySet())
     val showUnairedNextUp by settingsFacade.traktSettings.showUnairedNextUp.collectAsState(initial = true)
     var nextUpEpisodeOrder by remember { mutableStateOf<Map<String, List<Pair<Int, Int>>>>(emptyMap()) }
-    LaunchedEffect(nextUpSeeds) {
-        val showIds = nextUpSeeds.mapNotNull { it.contentId.takeIf(String::isNotBlank) }.distinct()
+    LaunchedEffect(nextUpSeeds, localCompletionSeeds) {
+        val showIds = buildList {
+            addAll(nextUpSeeds.mapNotNull { it.contentId.takeIf(String::isNotBlank) })
+            addAll(localCompletionSeeds.map { it.showId })
+        }.distinct()
         nextUpEpisodeOrder = emptyMap()
         // Bounded: only resolve order for the most recent seed shows, fail-open per show.
         showIds.take(MaxNextUpOrderResolutions).forEach { showId ->
@@ -779,6 +784,7 @@ private fun AppContent(
         traktContinueWatching,
         playbackCheckpoints,
         nextUpSeeds,
+        localCompletionSeeds,
         dismissedNextUpKeys,
         showUnairedNextUp,
         nextUpEpisodeOrder,
@@ -791,10 +797,17 @@ private fun AppContent(
         } else {
             playbackCheckpoints.map { it.toCwResumeInput() }
         }
+        val seeds = buildList {
+            addAll(nextUpSeeds.mapNotNull { it.toCwNextUpSeed() })
+            addAll(localCompletionSeeds.map { it.toCwNextUpSeed() })
+        }
+            .groupBy { it.seriesKey }
+            .mapValues { (_, group) -> group.maxByOrNull(com.sluggyard.tv.core.watchstate.CwNextUpSeed::watchedAtMs)!! }
+            .values
+            .toList()
         // Secondary filters (A7): log why next-up seeds are dropped so a missing tile is not a
         // silent mystery. Membership itself applies dismissed/hidden/unaired rules after this.
         if (BuildConfig.DEBUG) {
-            val seeds = nextUpSeeds.mapNotNull { it.toCwNextUpSeed() }
             seeds.forEach { seed ->
                 when {
                     seed.seriesKey in dismissedNextUpKeys ->
@@ -806,7 +819,7 @@ private fun AppContent(
         }
         ContinueWatchingMembership.build(
             resumeInputs = resumeInputs,
-            seeds = nextUpSeeds.mapNotNull { it.toCwNextUpSeed() },
+            seeds = seeds,
             episodeOrder = nextUpEpisodeOrder.mapValues { (_, pairs) ->
                 pairs.map { (season, episode) -> CwEpisodeOrderItem(season, episode) }
             },
@@ -1278,26 +1291,56 @@ private fun AppContent(
         }
     LaunchedEffect(
         continueWatchingCheckpoints,
+        localCompletionSeeds,
+        nextUpSeeds,
         tmdbSettings.enabled,
         tmdbSettings.enrichContinueWatching,
         tmdbSettings.useArtwork,
     ) {
         val tmdb = graph.tmdbService
+        // Initial TmdbSettings() defaults enabled=false before DataStore emits — never wipe
+        // already-fetched art on that false start frame.
         if (
             tmdb == null ||
             !tmdbSettings.enabled ||
             !tmdbSettings.enrichContinueWatching ||
             !tmdbSettings.useArtwork
         ) {
-            continueWatchingTmdbPosters = emptyMap()
+            android.util.Log.i(
+                "SlugYardCwArt",
+                "enrich gated tmdbNull=${tmdb == null} enabled=${tmdbSettings.enabled} " +
+                    "enrichCw=${tmdbSettings.enrichContinueWatching} art=${tmdbSettings.useArtwork} " +
+                    "keptMap=${continueWatchingTmdbPosters.size}",
+            )
             return@LaunchedEffect
         }
-        val grouped = groupPlaybackCheckpoints(continueWatchingCheckpoints)
-        val posters = enrichContinueWatchingPosters(grouped, tmdb)
-        continueWatchingTmdbPosters = posters
+        val targets = com.sluggyard.tv.ui.app.home.buildContinueWatchingArtTargets(
+            checkpoints = continueWatchingCheckpoints,
+            completionSeeds = localCompletionSeeds,
+            extraShowIds = nextUpSeeds.mapNotNull { it.contentId.takeIf(String::isNotBlank) } +
+                nextUpSeeds.mapNotNull {
+                    com.sluggyard.tv.data.repository.StreamMergeUtils.deriveInlineMetaId(it.contentId)
+                        .takeIf(String::isNotBlank)
+                },
+        )
+        val posters = enrichContinueWatchingPosters(targets, tmdb)
+        if (posters.isNotEmpty()) {
+            // Merge so a momentary empty mid-stream list cannot blank next-up art.
+            continueWatchingTmdbPosters = continueWatchingTmdbPosters + posters
+        } else {
+            android.util.Log.i(
+                "SlugYardCwArt",
+                "enrich produced 0 urls targets=${targets.size} " +
+                    "checkpoints=${continueWatchingCheckpoints.size} " +
+                    "seeds=${localCompletionSeeds.size}",
+            )
+        }
         if (!useTraktCw) {
+            val grouped = groupPlaybackCheckpoints(continueWatchingCheckpoints)
             for (checkpoint in grouped) {
-                val poster = posters[checkpoint.contentId] ?: continue
+                val poster = posters[checkpoint.contentId]
+                    ?: checkpoint.parentId?.let { posters[it] }
+                    ?: continue
                 if (checkpoint.posterUrl == poster) continue
                 runCatching {
                     graph.playbackProgress.save(checkpoint.copy(posterUrl = poster))
@@ -1814,6 +1857,48 @@ private fun AppContent(
                                 "prepare READY but left Streams route — abort handoff id=${candidate.id}",
                             )
                             return@launch
+                        }
+                        // Anime auto-pick: Range-GET MKV Track CodecIDs before handoff.
+                        // Title "Multi-Subs" cannot tell ASS vs SRT — only the file can.
+                        if (streams.autoPick && isAnimeAutoPlayWait(streams)) {
+                            val remainingAfter =
+                                (MaxAutoPickResolveAttempts - autoPickRejectedIds.size - 1)
+                                    .coerceAtLeast(0)
+                            val inventory = MatroskaSubtitleCodecProbe.probeHttpUrl(
+                                url = result.source.url,
+                                headers = result.source.requestHeaders,
+                            )
+                            if (inventory.confidentSoftInventory) {
+                                runCatching {
+                                    graph.releaseTrackMemory?.remember(
+                                        infoHash = result.source.infoHash ?: candidate.infoHash,
+                                        fileIdx = result.source.fileIndex ?: candidate.fileIndex,
+                                        tracks = MatroskaSubtitleCodecProbe.toObservedTracks(inventory),
+                                    )
+                                }
+                            }
+                            if (MatroskaSubtitleCodecProbe.shouldRejectAnimeAutoPick(
+                                    inventory = inventory,
+                                    remainingResolveAttemptsAfterThis = remainingAfter,
+                                )
+                            ) {
+                                android.util.Log.i(
+                                    "SlugYardAutoPick",
+                                    "MKV probe REJECT pure-SRT id=${candidate.id} " +
+                                        "hits=${inventory.codecHits} remain=$remainingAfter",
+                                )
+                                streamMessage =
+                                    "Skipping SRT-only softsubs — looking for ASS/PGS…"
+                                autoPickRejectedIds = autoPickRejectedIds + candidate.id
+                                autoPickFinishedFor = null
+                                return@launch
+                            }
+                            android.util.Log.i(
+                                "SlugYardAutoPick",
+                                "MKV probe accept id=${candidate.id} ass=${inventory.hasAss} " +
+                                    "srt=${inventory.hasSrt} pgs=${inventory.hasPgs} " +
+                                    "err=${inventory.error ?: "ok"} hits=${inventory.codecHits}",
+                            )
                         }
                         streamMessage = null
                         // Launch the retained player BEFORE rewriting the route stack. Changing

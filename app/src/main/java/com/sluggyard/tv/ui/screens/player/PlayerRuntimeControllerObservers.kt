@@ -60,21 +60,6 @@ internal fun isCurrentSubtitleFetch(
     activeIdentity: SubtitleFetchIdentity?,
 ): Boolean = generation == activeGeneration && identity == activeIdentity
 
-internal fun shouldSearchOpenSubtitles(
-    isConfigured: Boolean,
-    hasApiKey: Boolean,
-    preferredLanguage: String,
-    preferredLanguageCovered: Boolean,
-    forceSearch: Boolean,
-): Boolean {
-    if (!isConfigured || !hasApiKey) return false
-    // Manual refresh: always hit configured OS (hash / listing), even when preferred is none.
-    if (forceSearch) return true
-    return preferredLanguage.isNotBlank() &&
-        preferredLanguage != "none" &&
-        !preferredLanguageCovered
-}
-
 // ---------------------------------------------------------------------------
 // Subtitle fetching
 // ---------------------------------------------------------------------------
@@ -101,14 +86,15 @@ internal fun PlayerRuntimeController.buildSubtitleFetchIdentity(): SubtitleFetch
     }
 
 /**
- * Fetches addon subtitles synchronously within the calling coroutine context.
- * Performs OpenSubtitles hashing when configured, and falls back to an
- * OpenSubtitles language search only when addon results do not already cover
- * the user's preferred language.
+ * Fetches subtitle addon results for the current title. The OpenSubtitles.com
+ * REST client is intentionally unused: community/bundled subtitle addons
+ * (e.g. opensubtitles-v3) handle search without a user API key.
+ *
+ * Optionally computes an OpenSubtitles-compatible video hash so matching
+ * subtitle addons can use file-hash lookups when the stream supports Range.
  */
 internal suspend fun PlayerRuntimeController.fetchAddonSubtitlesNow(
     request: SubtitleFetchRequest? = null,
-    forceOpenSubtitlesSearch: Boolean = false,
     onProgress: ((completed: Int, total: Int, addonName: String?) -> Unit)? = null
 ): List<Subtitle> {
     val resolvedRequest = request ?: buildSubtitleFetchRequest() ?: return emptyList()
@@ -122,12 +108,8 @@ internal suspend fun PlayerRuntimeController.fetchAddonSubtitlesNow(
     currentCoroutineContext().ensureActive()
     _uiState.update { it.copy(installedSubtitleAddonOrder = installedAddons.map { a -> a.name }) }
 
-    val openSubtitlesConfigured = playerSettingsDataStore.openSubtitlesEnabled.first()
-    val openSubtitlesApiKey = playerSettingsDataStore.openSubtitlesApiKey.first()
-
-    // Compute the OpenSubtitles hash up front when enabled: it doubles as the
-    // video fingerprint we persist into the stream link cache for reuse.
-    if (openSubtitlesConfigured && openSubtitlesApiKey.isNotBlank() && currentVideoHash == null) {
+    // Hash helps opensubtitles-v3-style addons match; also seeds stream-link cache.
+    if (currentVideoHash == null) {
         runCatching {
             OpenSubtitlesHasher.compute(currentStreamUrl, currentHeaders)?.let { result ->
                 currentVideoHash = result.hash
@@ -138,7 +120,7 @@ internal suspend fun PlayerRuntimeController.fetchAddonSubtitlesNow(
         currentCoroutineContext().ensureActive()
     }
 
-    val addonSubs = runCatching {
+    return runCatching {
         subtitleRepository.getSubtitles(
             type = resolvedRequest.type,
             id = resolvedRequest.id,
@@ -149,48 +131,6 @@ internal suspend fun PlayerRuntimeController.fetchAddonSubtitlesNow(
             onProgress = onProgress
         )
     }.getOrDefault(emptyList())
-    currentCoroutineContext().ensureActive()
-
-    // Skip the OpenSubtitles network search when an addon already covers the
-    // preferred language — avoids redundant traffic and duplicate entries.
-    val settings = currentPlayerSettingsForReport
-    val preferred = settings.subtitleStyle.preferredLanguage
-    val preferredCovered = if (preferred.isNotBlank() && preferred != "none") {
-        addonSubs.any { sub ->
-            PlayerSubtitleUtils.matchesLanguageCode(sub.lang, preferred)
-        }
-    } else {
-        false
-    }
-    if (!shouldSearchOpenSubtitles(
-            isConfigured = openSubtitlesConfigured,
-            hasApiKey = openSubtitlesApiKey.isNotBlank(),
-            preferredLanguage = preferred,
-            preferredLanguageCovered = preferredCovered,
-            forceSearch = forceOpenSubtitlesSearch,
-        )
-    ) {
-        return addonSubs
-    }
-
-    // Prefer a language filter when the user set one. Blank/"none" still allows a hash-bound
-    // OpenSubtitles hit without inventing a preferred locale.
-    val osLanguages = listOfNotNull(preferred.takeIf { it.isNotBlank() && it != "none" })
-
-    val osSubs = runCatching {
-        openSubtitlesRepository.searchSubtitles(
-            movieHash = currentVideoHash,
-            imdbId = null,
-            query = null,
-            languages = osLanguages,
-            type = resolvedRequest.type,
-            season = currentSeason,
-            episode = currentEpisode
-        )
-    }.getOrDefault(emptyList())
-    currentCoroutineContext().ensureActive()
-
-    return (addonSubs + osSubs).distinctBy { it.id }
 }
 
 internal fun PlayerRuntimeController.enableSubtitleMode() {
@@ -242,20 +182,13 @@ private fun PlayerRuntimeController.persistStreamLinkCacheWithHash() {
  * preference with auto-selection.
  */
 internal fun PlayerRuntimeController.fetchAddonSubtitles() {
-    fetchAddonSubtitles(forceOpenSubtitlesSearch = false)
-}
-
-internal fun PlayerRuntimeController.fetchAddonSubtitles(forceOpenSubtitlesSearch: Boolean) {
     val identity = buildSubtitleFetchIdentity() ?: return
     addonSubtitleFetchJob?.cancel()
     val generation = ++addonSubtitleFetchGeneration
     addonSubtitleFetchJob = scope.launch {
         _uiState.update { it.copy(isLoadingAddonSubtitles = true, addonSubtitlesError = null) }
         try {
-            val fetched = fetchAddonSubtitlesNow(
-                request = identity.request,
-                forceOpenSubtitlesSearch = forceOpenSubtitlesSearch,
-            )
+            val fetched = fetchAddonSubtitlesNow(request = identity.request)
             currentCoroutineContext().ensureActive()
             if (!isCurrentSubtitleFetch(
                     generation,
@@ -271,7 +204,8 @@ internal fun PlayerRuntimeController.fetchAddonSubtitles(forceOpenSubtitlesSearc
             _uiState.update {
                 it.copy(
                     addonSubtitles = visible,
-                    isLoadingAddonSubtitles = false
+                    isLoadingAddonSubtitles = false,
+                    addonSubtitlesError = null,
                 )
             }
             val restored = pendingRestoredAddonSubtitle
@@ -334,7 +268,7 @@ internal fun PlayerRuntimeController.refreshSubtitlesForCurrentEpisode() {
             isLoadingAddonSubtitles = false,
         )
     }
-    fetchAddonSubtitles(forceOpenSubtitlesSearch = true)
+    fetchAddonSubtitles()
 }
 
 /**

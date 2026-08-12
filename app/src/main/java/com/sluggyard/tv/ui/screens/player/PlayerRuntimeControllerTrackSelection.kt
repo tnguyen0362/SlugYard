@@ -401,33 +401,12 @@ internal fun PlayerRuntimeController.selectAddonSubtitle(subtitle: Subtitle) {
         stage = "select-addon-subtitle",
         message = "usingMpv=${isUsingMpvEngine()} addonId=${subtitle.id} addonLang=${subtitle.lang} addonName=${subtitle.addonName}"
     )
-    // OpenSubtitles search hits identify a file rather than exposing a media URL.
-    // Resolve only when selected; an empty URL is not playable.
-    if (subtitle.url.isBlank() && subtitle.id.startsWith("file:")) {
-        scope.launch {
-            _uiState.update { it.copy(isLoadingAddonSubtitles = true, addonSubtitlesError = null) }
-            val downloaded = openSubtitlesRepository.downloadSubtitle(subtitle)
-            if (downloaded == null) {
-                autoSubtitleSelected = false
-                _uiState.update {
-                    it.copy(
-                        isLoadingAddonSubtitles = false,
-                        addonSubtitlesError = "Unable to download the selected OpenSubtitles track"
-                    )
-                }
-                return@launch
-            }
-            val resolvedSubtitle = subtitle.copy(url = android.net.Uri.fromFile(downloaded).toString())
-            _uiState.update { state ->
-                state.copy(
-                    addonSubtitles = state.addonSubtitles.map { candidate ->
-                        if (candidate.id == subtitle.id && candidate.url == subtitle.url) resolvedSubtitle else candidate
-                    },
-                    isLoadingAddonSubtitles = false,
-                    addonSubtitlesError = null
-                )
-            }
-            selectAddonSubtitle(resolvedSubtitle)
+    // Built-in OpenSubtitles REST is removed; tracks must come from subtitle
+    // addons with a direct URL. Stale file: ids from older sessions cannot resolve.
+    if (subtitle.url.isBlank()) {
+        autoSubtitleSelected = false
+        _uiState.update {
+            it.copy(addonSubtitlesError = "This subtitle has no playable URL. Try Search again.")
         }
         return
     }

@@ -61,9 +61,19 @@ internal fun buildDebridEpisodePatterns(season: Int?, episode: Int?): List<Strin
     return listOf(
         "s${seasonTwo}e$episodeTwo",
         "${season}x$episodeTwo",
-        "${season}x$episode"
+        "${season}x$episode",
+        // Anime fansub listings (Torrentio Instant single-file often named this way).
+        "$season - $episodeTwo",
+        "$season - $episode",
     )
 }
+
+/**
+ * When a listing is already episode-scoped (Torrentio Instant, single-file WEBRip) but the
+ * filename omits SxxEyy tokens, accepting the only playable video is correct — refuse only
+ * when multiple videos would make a blind pick unsafe.
+ */
+internal fun <T> List<T>.singlePlayableOrNull(): T? = singleOrNull()
 
 /**
  * Matches the common "- 01" / "S01E01" pack naming style without treating specials or
@@ -80,7 +90,8 @@ internal fun String.matchesDebridEpisodeFile(season: Int?, episode: Int?): Boole
  *
  * Absolute padded numbers ("004" / "04") are only accepted for season 1. Multi-season
  * absolute packs use series-wide indices (JJK S2E4 ≈ 028, not 004), so season>1 requires
- * an explicit SxxEyy / NxNN marker.
+ * an explicit SxxEyy / NxNN marker — OR an anime-style adjacent "2 09" / "s02 09" token pair
+ * (Erai-raws, Nyaa packs: "Title 2 - 09 [1080p].mkv").
  */
 internal fun String.debridEpisodeMatchScore(season: Int?, episode: Int?): Int {
     if (season == null || episode == null) return -1
@@ -95,6 +106,17 @@ internal fun String.debridEpisodeMatchScore(season: Int?, episode: Int?): Int {
         "${season}x$episode",
     )
     if (standardPatterns.any { normalized.containsToken(it) }) return 100
+
+    // Anime WEB packs: "Show Name 2 - 09 [1080p]" → tokens "2" "09" adjacent after normalize.
+    // Require the season token immediately before the episode so absolute S2 packs don't pick
+    // a random "09" from unrelated numbering.
+    val animePairPatterns = listOf(
+        Regex("(?:^|\\s)${Regex.escape(season.toString())}\\s+${Regex.escape(episodeTwo)}(?:\\s|$)"),
+        Regex("(?:^|\\s)${Regex.escape(season.toString())}\\s+${Regex.escape(episode.toString())}(?:\\s|$)"),
+        Regex("(?:^|\\s)s${Regex.escape(seasonTwo)}\\s+(?:e\\s*)?${Regex.escape(episodeTwo)}(?:\\s|$)"),
+        Regex("(?:^|\\s)s${Regex.escape(season.toString())}\\s+(?:e\\s*)?${Regex.escape(episodeTwo)}(?:\\s|$)"),
+    )
+    if (animePairPatterns.any { it.containsMatchIn(normalized) }) return 90
 
     // Absolute pack numbers only for season 1 — never bare "4" / "1".
     if (season == 1) {
