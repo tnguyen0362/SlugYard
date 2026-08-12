@@ -49,10 +49,10 @@ object PlayerNextEpisodeRules {
     /**
      * Decides whether the "Next episode" card should be visible at [positionMs].
      *
-     * When outro skip-intervals are available, the card fires at the earliest
-     * outro start unless the post-outro tail is long enough to honor the user's
-     * configured threshold. Without outro data the user threshold is applied
-     * directly against the file duration.
+     * When outro / ending / credits skip-intervals are available, the card fires at
+     * the earliest credits start so it arrives with (and then replaces) Skip outro —
+     * Netflix-style up-next, not a late percentage-only card while ED is already up.
+     * Without outro data the user threshold is applied against file duration.
      */
     fun shouldShowNextEpisodeCard(
         positionMs: Long,
@@ -62,24 +62,41 @@ object PlayerNextEpisodeRules {
         thresholdPercent: Float,
         thresholdMinutesBeforeEnd: Float
     ): Boolean {
-        val outros = skipIntervals.filter { it.type in OUTRO_SEGMENT_TYPES }
+        val outros = skipIntervals.filter { isOutroLikeType(it.type) }
 
         if (outros.isNotEmpty()) {
-            if (durationMs <= 0L) return false
-            val latestOutroEndMs = (outros.maxOf { it.endTime } * 1_000.0).toLong()
-            val postOutroTailMs = durationMs - latestOutroEndMs
-            val userThresholdMs = userThresholdMs(thresholdMode, thresholdPercent, thresholdMinutesBeforeEnd, durationMs)
-
-            return if (postOutroTailMs > userThresholdMs) {
-                crossesUserThreshold(thresholdMode, thresholdPercent, thresholdMinutesBeforeEnd, positionMs, durationMs)
-            } else {
-                // Outro ends close to file end — fire at the earliest outro start.
-                positionMs / 1_000.0 >= outros.minOf { it.startTime }
+            // Duration is not required for the outro-start path: skip intervals are already
+            // absolute seconds into the playback.
+            if (positionMs / 1_000.0 >= outros.minOf { it.startTime }) return true
+            // Still allow an earlier user threshold if the viewer set a low one and there
+            // is known duration (edge case for very late outros with a low %).
+            if (durationMs > 0L &&
+                crossesUserThreshold(
+                    thresholdMode,
+                    thresholdPercent,
+                    thresholdMinutesBeforeEnd,
+                    positionMs,
+                    durationMs,
+                )
+            ) {
+                return true
             }
+            return false
         }
 
         if (durationMs <= 0L) return false
         return crossesUserThreshold(thresholdMode, thresholdPercent, thresholdMinutesBeforeEnd, positionMs, durationMs)
+    }
+
+    /** True for ending/credits segment labels from IntroDB / AniSkip / libass chapters. */
+    fun isOutroLikeType(type: String): Boolean {
+        val normalized = type.trim().lowercase()
+        if (normalized in OUTRO_SEGMENT_TYPES) return true
+        return "outro" in normalized ||
+            "ending" in normalized ||
+            "credits" in normalized ||
+            normalized == "ed" ||
+            "mixed-ed" in normalized
     }
 
     /**
@@ -105,21 +122,6 @@ object PlayerNextEpisodeRules {
         return !aired.isAfter(LocalDate.now(clock))
     }
 
-    private fun userThresholdMs(
-        mode: NextEpisodeThresholdMode,
-        percent: Float,
-        minutes: Float,
-        durationMs: Long
-    ): Long = when (mode) {
-        NextEpisodeThresholdMode.PERCENTAGE -> {
-            val clamped = percent.coerceIn(MIN_THRESHOLD_PERCENT, 100f)
-            ((1.0 - clamped / 100.0) * durationMs).toLong()
-        }
-        NextEpisodeThresholdMode.MINUTES_BEFORE_END -> {
-            (minutes.coerceIn(0f, 3.5f) * 60_000f).toLong()
-        }
-    }
-
     private fun crossesUserThreshold(
         mode: NextEpisodeThresholdMode,
         percent: Float,
@@ -143,7 +145,7 @@ object PlayerNextEpisodeRules {
      */
     const val MIN_THRESHOLD_PERCENT = 95f
 
-    val OUTRO_SEGMENT_TYPES = setOf("outro", "ed", "mixed-ed")
+    val OUTRO_SEGMENT_TYPES = setOf("outro", "ed", "mixed-ed", "credits", "ending")
 
     const val POST_OUTRO_AUTOPLAY_GAP_MS = 5_000L
 

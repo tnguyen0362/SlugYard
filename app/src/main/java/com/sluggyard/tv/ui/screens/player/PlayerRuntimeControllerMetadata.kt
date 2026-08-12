@@ -429,15 +429,8 @@ internal fun PlayerRuntimeController.updateActiveSkipInterval(positionMs: Long) 
     }
 }
 
-private fun isOutroLikeSkipType(type: String): Boolean {
-    val normalized = type.trim().lowercase()
-    if (normalized in PlayerNextEpisodeRules.OUTRO_SEGMENT_TYPES) return true
-    return "outro" in normalized ||
-        "ending" in normalized ||
-        "credits" in normalized ||
-        normalized == "ed" ||
-        "mixed-ed" in normalized
-}
+private fun isOutroLikeSkipType(type: String): Boolean =
+    PlayerNextEpisodeRules.isOutroLikeType(type)
 
 private fun PlayerRuntimeController.shouldPreferNextEpisodeOverOutroSkip(positionMs: Long): Boolean {
     val state = _uiState.value

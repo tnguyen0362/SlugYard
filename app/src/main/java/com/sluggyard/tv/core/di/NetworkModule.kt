@@ -4,7 +4,6 @@ import android.content.Context
 import android.util.Log
 import com.sluggyard.tv.BuildConfig
 import com.sluggyard.tv.data.remote.api.AddonApi
-import com.sluggyard.tv.data.remote.api.OpenSubtitlesApi
 import com.sluggyard.tv.data.remote.api.AniSkipApi
 import com.sluggyard.tv.data.remote.api.ArmApi
 
@@ -250,21 +249,6 @@ object NetworkModule {
     @Singleton
     fun provideAddonApi(retrofit: Retrofit): AddonApi =
         retrofit.create(AddonApi::class.java)
-
-    @Provides
-    @Singleton
-    @Named("openSubtitles")
-    fun provideOpenSubtitlesRetrofit(okHttpClient: OkHttpClient, moshi: Moshi): Retrofit =
-        Retrofit.Builder()
-            .baseUrl("https://api.opensubtitles.com/api/v1/")
-            .client(okHttpClient)
-            .addConverterFactory(MoshiConverterFactory.create(moshi))
-            .build()
-
-    @Provides
-    @Singleton
-    fun provideOpenSubtitlesApi(@Named("openSubtitles") retrofit: Retrofit): OpenSubtitlesApi =
-        retrofit.create(OpenSubtitlesApi::class.java)
 
     @Provides
     @Singleton

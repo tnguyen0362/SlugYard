@@ -10,8 +10,10 @@ import com.sluggyard.tv.data.local.WatchedItemsPreferences
 import com.sluggyard.tv.domain.model.WatchProgress
 import com.sluggyard.tv.domain.model.WatchedItem
 import com.sluggyard.tv.core.tmdb.TmdbService
+import com.sluggyard.tv.core.watchstate.seriesContentId
 import com.sluggyard.tv.domain.repository.MetaRepository
 import com.sluggyard.tv.domain.repository.WatchProgressRepository
+import com.sluggyard.tv.ui.app.data.LibraryWatchRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -28,6 +30,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -53,6 +56,7 @@ class WatchProgressRepositoryImpl @Inject constructor(
     private val metaRepository: MetaRepository,
     private val tmdbService: TmdbService,
     private val profileManager: com.sluggyard.tv.core.profile.ProfileManager,
+    private val libraryWatchRepository: LibraryWatchRepository,
 ) : WatchProgressRepository {
     companion object {
         private const val TAG = "WatchProgressRepo"
@@ -350,7 +354,18 @@ class WatchProgressRepositoryImpl @Inject constructor(
                 if (useTraktProgress) {
                     traktProgressService.observeAiredEpisodes(contentId)
                 } else {
-                    flowOf(emptyList())
+                    // SlugYard/local mode: resolve episode order from the primary addon's meta
+                    // episode list so next-up can advance without Trakt. Fail-open when unknown.
+                    flow {
+                        val showId = StreamMergeUtils.deriveInlineMetaId(contentId).ifBlank { contentId }
+                        emit(
+                            fetchContentMetadata(contentId = showId, contentType = "series")
+                                ?.episodes
+                                ?.keys
+                                ?.sortedWith(compareBy({ it.first }, { it.second }))
+                                .orEmpty(),
+                        )
+                    }
                 }
             }
             .distinctUntilChanged()
@@ -391,8 +406,9 @@ class WatchProgressRepositoryImpl @Inject constructor(
                                     item.season != 0 &&
                                     !isMalformedNextUpSeedContentId(item.contentId)
                             }
-                            .groupBy { it.contentId }
-                            .mapNotNull { (_, episodes) ->
+                            .groupBy { StreamMergeUtils.deriveInlineMetaId(it.contentId) }
+                            .mapNotNull { (showId, episodes) ->
+                                if (showId.isBlank()) return@mapNotNull null
                                 val latest = episodes.maxWithOrNull(
                                     if (useFurthest) {
                                         compareBy<WatchedItem> { it.season ?: 0 }
@@ -405,7 +421,7 @@ class WatchProgressRepositoryImpl @Inject constructor(
                                     }
                                 ) ?: return@mapNotNull null
                                 WatchProgress(
-                                    contentId = latest.contentId,
+                                    contentId = showId,
                                     contentType = latest.contentType,
                                     name = latest.title,
                                     poster = null,
@@ -562,12 +578,17 @@ class WatchProgressRepositoryImpl @Inject constructor(
      * For Trakt Sync: from watchedItemsPreferences.
      */
     override suspend fun getWatchedShowEpisodes(): Map<String, Set<Pair<Int, Int>>> {
+        fun Map<String, Set<Pair<Int, Int>>>.keyedByShow(): Map<String, Set<Pair<Int, Int>>> =
+            entries
+                .groupBy({ seriesContentId(it.key) }, { it.value })
+                .mapValues { (_, sets) -> sets.flatten().toSet() }
+
         return if (shouldUseTraktProgress()) {
-            val traktEpisodes = traktProgressService.getWatchedShowEpisodes()
+            val traktEpisodes = traktProgressService.getWatchedShowEpisodes().keyedByShow()
             val localEpisodes = watchedItemsPreferences.allItems.first()
                 .filter { it.season != null && it.episode != null }
                 .filter { it.contentType.equals("series", ignoreCase = true) || it.contentType.equals("tv", ignoreCase = true) }
-                .groupBy { it.contentId }
+                .groupBy { seriesContentId(it.contentId) }
                 .mapValues { (_, items) ->
                     items.map { it.season!! to it.episode!! }.toSet()
                 }
@@ -580,7 +601,7 @@ class WatchProgressRepositoryImpl @Inject constructor(
         } else {
             watchedItemsPreferences.allItems.first()
                 .filter { it.season != null && it.episode != null }
-                .groupBy { it.contentId }
+                .groupBy { seriesContentId(it.contentId) }
                 .mapValues { (_, items) ->
                     items.map { it.season!! to it.episode!! }.toSet()
                 }
@@ -654,6 +675,7 @@ class WatchProgressRepositoryImpl @Inject constructor(
             if (progress.isCompleted()) {
                 val watchedItem = progress.toWatchedItem()
                 watchedItemsPreferences.markAsWatched(watchedItem, profileId = profileId)
+                mirrorLibraryWatched(progress, watched = true)
             }
             return
         }
@@ -662,6 +684,7 @@ class WatchProgressRepositoryImpl @Inject constructor(
         if (progress.isCompleted()) {
             val watchedItem = progress.toWatchedItem()
             watchedItemsPreferences.markAsWatched(watchedItem, profileId = profileId)
+            mirrorLibraryWatched(progress, watched = true)
         }
     }
 
@@ -685,6 +708,7 @@ class WatchProgressRepositoryImpl @Inject constructor(
             .map { progress -> progress.toWatchedItem() }
         if (completedWatchedItems.isNotEmpty()) {
             watchedItemsPreferences.markAsWatchedBatch(completedWatchedItems, profileId = profileId)
+            progressList.filter { it.isCompleted() }.forEach { mirrorLibraryWatched(it, watched = true) }
         }
     }
 
@@ -706,6 +730,19 @@ class WatchProgressRepositoryImpl @Inject constructor(
         }
         watchProgressPreferences.removeProgress(contentId, season, episode)
         watchedItemsPreferences.unmarkAsWatched(contentId, season, episode, profileId = profileId)
+        val unmarkId = videoId?.takeIf { it.isNotBlank() } ?: contentId
+        runCatching {
+            libraryWatchRepository.setWatched(
+                id = unmarkId,
+                watched = false,
+                contentType = if (season != null && episode != null) "series" else "movie",
+                title = unmarkId,
+                season = season,
+                episode = episode,
+            )
+        }.onFailure { error ->
+            Log.w(TAG, "Failed to mirror unwatched into LibraryWatch id=$unmarkId", error)
+        }
     }
 
     override suspend fun removeFromHistoryBatch(
@@ -763,6 +800,7 @@ class WatchProgressRepositoryImpl @Inject constructor(
             watchProgressPreferences.markAsCompleted(progress, profileId = profileId)
             val watchedItem = progress.toWatchedItem(watchedAt = now)
             watchedItemsPreferences.markAsWatched(watchedItem, profileId = profileId)
+            mirrorLibraryWatched(progress, watched = true)
             runCatching {
                 if (syncRemoteToTrakt) {
                     traktProgressService.markAsWatched(
@@ -784,6 +822,7 @@ class WatchProgressRepositoryImpl @Inject constructor(
         watchProgressPreferences.markAsCompleted(progress, profileId = profileId)
         val watchedItem = progress.toWatchedItem()
         watchedItemsPreferences.markAsWatched(watchedItem, profileId = profileId)
+        mirrorLibraryWatched(progress, watched = true)
         if (hasEffectiveTraktConnection && syncRemoteToTrakt) {
             val now = System.currentTimeMillis()
             val duration = progress.duration.takeIf { it > 0L } ?: 1L
@@ -850,6 +889,7 @@ class WatchProgressRepositoryImpl @Inject constructor(
             watchProgressPreferences.markAsCompletedBatch(progressList, profileId = profileId)
             val watchedItems = progressList.map { progress -> progress.toWatchedItem(watchedAt = now) }
             watchedItemsPreferences.markAsWatchedBatch(watchedItems, profileId = profileId)
+            progressList.forEach { mirrorLibraryWatched(it, watched = true) }
             return
         }
 
@@ -857,6 +897,7 @@ class WatchProgressRepositoryImpl @Inject constructor(
         watchProgressPreferences.markAsCompletedBatch(progressList, profileId = profileId)
         val watchedItems = progressList.map { progress -> progress.toWatchedItem(watchedAt = now) }
         watchedItemsPreferences.markAsWatchedBatch(watchedItems, profileId = profileId)
+        progressList.forEach { mirrorLibraryWatched(it, watched = true) }
 
         // Mirror to Trakt if connected (same as single markAsCompleted)
         if (hasEffectiveTraktConnection) {
@@ -871,13 +912,48 @@ class WatchProgressRepositoryImpl @Inject constructor(
 
     private fun WatchProgress.toWatchedItem(watchedAt: Long = System.currentTimeMillis()): WatchedItem =
         WatchedItem(
-            contentId = contentId,
+            // Episode-shaped playback ids (tt…:S:E) must collapse to the show id so Details
+            // completedEpisodeKeys(metadata.id) and Trakt show maps can find them.
+            contentId = seriesContentId(contentId).ifBlank { contentId },
             contentType = contentType,
             title = name,
             season = season,
             episode = episode,
             watchedAt = watchedAt
         )
+
+    /**
+     * Details badges also read [LibraryWatchRepository.watchedIds] (manual marks).
+     * Mirror playback completion so checkmarks appear without a full Details reload.
+     */
+    private suspend fun mirrorLibraryWatched(progress: WatchProgress, watched: Boolean) {
+        val season = progress.season
+        val episode = progress.episode
+        val isSeriesEpisode = (progress.contentType.equals("series", ignoreCase = true) ||
+            progress.contentType.equals("tv", ignoreCase = true)) &&
+            season != null &&
+            episode != null
+        val id = when {
+            progress.videoId.isNotBlank() -> progress.videoId
+            isSeriesEpisode -> {
+                val showId = seriesContentId(progress.contentId).ifBlank { progress.contentId }
+                "$showId:$season:$episode"
+            }
+            else -> progress.contentId
+        }
+        runCatching {
+            libraryWatchRepository.setWatched(
+                id = id,
+                watched = watched,
+                contentType = progress.contentType,
+                title = progress.name,
+                season = season,
+                episode = episode,
+            )
+        }.onFailure { error ->
+            Log.w(TAG, "Failed to mirror watched=$watched into LibraryWatch id=$id", error)
+        }
+    }
 
     override suspend fun clearAll() {
         if (shouldUseTraktProgress()) {

@@ -443,7 +443,7 @@ private fun ColumnScope.SubtitleChoiceList(
                     if (searchError != null) TrackStatus(searchError)
                     if (choices.isEmpty()) TrackStatus("No subtitles found automatically")
                     TvButton(
-                        label = if (hasAddonSubtitleResults) "Search again" else "Search OpenSubtitles",
+                        label = if (hasAddonSubtitleResults) "Search again" else "Search subtitles",
                         onClick = onRetrySubtitleSearch,
                         style = ButtonStyle.Secondary,
                         fillMaxWidth = true,

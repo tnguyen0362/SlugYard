@@ -10,6 +10,9 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
+import com.sluggyard.tv.core.watchstate.seasonEpisodeLooksSeriesAbsolute
+import com.sluggyard.tv.core.watchstate.seasonLocalDisplayNumber
+import com.sluggyard.tv.core.watchstate.parseSeasonEpisodeFromVideoId
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -34,6 +37,55 @@ class DetailsDataSourceTest {
         assertEquals("Show", result.state.title)
         assertEquals(listOf("Actor One", "Actor Two"), result.state.cast)
         assertEquals(listOf("First", "Second"), result.state.seasons.single().episodes.map(DetailsEpisode::title))
+    }
+
+    @Test
+    fun `season two absolute meta episode numbers show season-local display badges`() = runTest {
+        // Anime metas often continue episode 13, 14…; UI must show 1..N within the season.
+        // When video id carries :2:9, prefer that over both absolute meta and list index.
+        val source = DetailsDataSource(
+            registrySnapshot = { AddonRegistryState(listOf(addon("source"))) },
+            gateway = object : StremioAddonGateway {
+                override suspend fun fetchManifest(manifestUrl: String) = error("unused")
+                override suspend fun fetchCatalog(manifestUrl: String, type: String, catalogId: String, extras: Map<String, String>) = error("unused")
+                override suspend fun fetchMeta(manifestUrl: String, type: String, id: String): AddonTransportResult<JsonObject> =
+                    AddonTransportResult.Success(
+                        Json.parseToJsonElement(
+                            """
+                            {"meta":{"id":"tt1","type":"series","name":"Show","videos":[
+                              {"id":"tt1:1:1","season":1,"episode":1,"title":"S1E1"},
+                              {"id":"tt1:1:12","season":1,"episode":12,"title":"S1E12"},
+                              {"id":"tt1:2:1","season":2,"episode":13,"title":"S2 opener"},
+                              {"id":"tt1:2:9","season":2,"episode":21,"title":"The Angel's Request"}
+                            ]}}
+                            """.trimIndent(),
+                        ).jsonObject,
+                    )
+                override suspend fun fetchStreams(manifestUrl: String, type: String, id: String) = error("unused")
+                override suspend fun fetchSubtitles(manifestUrl: String, type: String, id: String) = error("unused")
+            },
+        )
+
+        val result = source.load("source", "series", "tt1") as DetailsLoadResult.Ready
+        val s2 = result.state.seasons.first { it.number == 2 }.episodes
+        assertEquals(listOf(13, 21), s2.map { it.number })
+        // ids :2:1 and :2:9 win over absolute 13/21
+        assertEquals(listOf(1, 9), s2.map { it.displayNumber })
+        val ep9 = s2.first { it.id == "tt1:2:9" }
+        assertEquals(21, ep9.number)
+        assertEquals(9, ep9.displayNumber)
+        assertEquals(9, ep9.playbackEpisodeNumber(forSeason = 2))
+    }
+
+    @Test
+    fun `seasonLocalDisplayNumber prefers id then renumbers absolute packs`() {
+        assertEquals(9, seasonLocalDisplayNumber("tt1:2:9", 2, 21, 1, looksSeriesAbsolute = true))
+        assertEquals(2, seasonLocalDisplayNumber("loose-id", 2, 21, 1, looksSeriesAbsolute = true))
+        assertEquals(4, seasonLocalDisplayNumber("tt1:1:4", 1, 4, 3, looksSeriesAbsolute = false))
+        assertTrue(seasonEpisodeLooksSeriesAbsolute(listOf(13, 14, 21)))
+        assertTrue(!seasonEpisodeLooksSeriesAbsolute(listOf(1, 2, 9)))
+        assertTrue(!seasonEpisodeLooksSeriesAbsolute(listOf(2)))
+        assertTrue(!seasonEpisodeLooksSeriesAbsolute(emptyList()))
     }
 
     @Test

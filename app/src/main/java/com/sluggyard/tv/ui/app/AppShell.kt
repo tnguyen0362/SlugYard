@@ -116,6 +116,7 @@ import com.sluggyard.tv.core.watchstate.CwMembershipSettings
 import com.sluggyard.tv.core.watchstate.CwRailRow
 import com.sluggyard.tv.data.local.TraktAuthState
 import com.sluggyard.tv.data.local.WatchProgressSource
+import com.sluggyard.tv.domain.model.WatchProgress
 import com.sluggyard.tv.domain.repository.WatchProgressRepository
 import com.sluggyard.tv.core.sync.ProgressSyncBridge
 import com.sluggyard.tv.core.sync.ProviderCredentialSyncBridge
@@ -177,6 +178,7 @@ import com.sluggyard.tv.ui.app.streams.autoPickOutcomeWhenNoWinner
 import com.sluggyard.tv.ui.app.streams.AutoPickNoWinnerDecision
 import com.sluggyard.tv.ui.app.streams.DigitalReleaseLookup
 import com.sluggyard.tv.ui.app.streams.DigitalReleasePolicy
+import com.sluggyard.tv.ui.app.streams.MatroskaSubtitleCodecProbe
 import com.sluggyard.tv.ui.app.streams.StreamScoringEngine
 import com.sluggyard.tv.ui.app.streams.StreamBadgeApplicator
 import com.sluggyard.tv.ui.app.streams.StreamGroup
@@ -759,11 +761,15 @@ private fun AppContent(
     // Next-up machinery: completed-episode seeds + per-show episode order resolve the next
     // unwatched episode. Seeds stay last-completed; the membership module advances them.
     val nextUpSeeds by watchProgressRepository.observeNextUpSeeds().collectAsState(initial = emptyList())
+    val localCompletionSeeds by graph.playbackProgress.seriesCompletionSeeds.collectAsState(initial = emptyList())
     val dismissedNextUpKeys by settingsFacade.traktSettings.dismissedNextUpKeys.collectAsState(initial = emptySet())
     val showUnairedNextUp by settingsFacade.traktSettings.showUnairedNextUp.collectAsState(initial = true)
     var nextUpEpisodeOrder by remember { mutableStateOf<Map<String, List<Pair<Int, Int>>>>(emptyMap()) }
-    LaunchedEffect(nextUpSeeds) {
-        val showIds = nextUpSeeds.mapNotNull { it.contentId.takeIf(String::isNotBlank) }.distinct()
+    LaunchedEffect(nextUpSeeds, localCompletionSeeds) {
+        val showIds = buildList {
+            addAll(nextUpSeeds.mapNotNull { it.contentId.takeIf(String::isNotBlank) })
+            addAll(localCompletionSeeds.map { it.showId })
+        }.distinct()
         nextUpEpisodeOrder = emptyMap()
         // Bounded: only resolve order for the most recent seed shows, fail-open per show.
         showIds.take(MaxNextUpOrderResolutions).forEach { showId ->
@@ -779,6 +785,7 @@ private fun AppContent(
         traktContinueWatching,
         playbackCheckpoints,
         nextUpSeeds,
+        localCompletionSeeds,
         dismissedNextUpKeys,
         showUnairedNextUp,
         nextUpEpisodeOrder,
@@ -791,10 +798,17 @@ private fun AppContent(
         } else {
             playbackCheckpoints.map { it.toCwResumeInput() }
         }
+        val seeds = buildList {
+            addAll(nextUpSeeds.mapNotNull { it.toCwNextUpSeed() })
+            addAll(localCompletionSeeds.map { it.toCwNextUpSeed() })
+        }
+            .groupBy { it.seriesKey }
+            .mapValues { (_, group) -> group.maxByOrNull(com.sluggyard.tv.core.watchstate.CwNextUpSeed::watchedAtMs)!! }
+            .values
+            .toList()
         // Secondary filters (A7): log why next-up seeds are dropped so a missing tile is not a
         // silent mystery. Membership itself applies dismissed/hidden/unaired rules after this.
         if (BuildConfig.DEBUG) {
-            val seeds = nextUpSeeds.mapNotNull { it.toCwNextUpSeed() }
             seeds.forEach { seed ->
                 when {
                     seed.seriesKey in dismissedNextUpKeys ->
@@ -806,7 +820,7 @@ private fun AppContent(
         }
         ContinueWatchingMembership.build(
             resumeInputs = resumeInputs,
-            seeds = nextUpSeeds.mapNotNull { it.toCwNextUpSeed() },
+            seeds = seeds,
             episodeOrder = nextUpEpisodeOrder.mapValues { (_, pairs) ->
                 pairs.map { (season, episode) -> CwEpisodeOrderItem(season, episode) }
             },
@@ -1278,26 +1292,56 @@ private fun AppContent(
         }
     LaunchedEffect(
         continueWatchingCheckpoints,
+        localCompletionSeeds,
+        nextUpSeeds,
         tmdbSettings.enabled,
         tmdbSettings.enrichContinueWatching,
         tmdbSettings.useArtwork,
     ) {
         val tmdb = graph.tmdbService
+        // Initial TmdbSettings() defaults enabled=false before DataStore emits — never wipe
+        // already-fetched art on that false start frame.
         if (
             tmdb == null ||
             !tmdbSettings.enabled ||
             !tmdbSettings.enrichContinueWatching ||
             !tmdbSettings.useArtwork
         ) {
-            continueWatchingTmdbPosters = emptyMap()
+            android.util.Log.i(
+                "SlugYardCwArt",
+                "enrich gated tmdbNull=${tmdb == null} enabled=${tmdbSettings.enabled} " +
+                    "enrichCw=${tmdbSettings.enrichContinueWatching} art=${tmdbSettings.useArtwork} " +
+                    "keptMap=${continueWatchingTmdbPosters.size}",
+            )
             return@LaunchedEffect
         }
-        val grouped = groupPlaybackCheckpoints(continueWatchingCheckpoints)
-        val posters = enrichContinueWatchingPosters(grouped, tmdb)
-        continueWatchingTmdbPosters = posters
+        val targets = com.sluggyard.tv.ui.app.home.buildContinueWatchingArtTargets(
+            checkpoints = continueWatchingCheckpoints,
+            completionSeeds = localCompletionSeeds,
+            extraShowIds = nextUpSeeds.mapNotNull { it.contentId.takeIf(String::isNotBlank) } +
+                nextUpSeeds.mapNotNull {
+                    com.sluggyard.tv.data.repository.StreamMergeUtils.deriveInlineMetaId(it.contentId)
+                        .takeIf(String::isNotBlank)
+                },
+        )
+        val posters = enrichContinueWatchingPosters(targets, tmdb)
+        if (posters.isNotEmpty()) {
+            // Merge so a momentary empty mid-stream list cannot blank next-up art.
+            continueWatchingTmdbPosters = continueWatchingTmdbPosters + posters
+        } else {
+            android.util.Log.i(
+                "SlugYardCwArt",
+                "enrich produced 0 urls targets=${targets.size} " +
+                    "checkpoints=${continueWatchingCheckpoints.size} " +
+                    "seeds=${localCompletionSeeds.size}",
+            )
+        }
         if (!useTraktCw) {
+            val grouped = groupPlaybackCheckpoints(continueWatchingCheckpoints)
             for (checkpoint in grouped) {
-                val poster = posters[checkpoint.contentId] ?: continue
+                val poster = posters[checkpoint.contentId]
+                    ?: checkpoint.parentId?.let { posters[it] }
+                    ?: continue
                 if (checkpoint.posterUrl == poster) continue
                 runCatching {
                     graph.playbackProgress.save(checkpoint.copy(posterUrl = poster))
@@ -1474,6 +1518,34 @@ private fun AppContent(
         when (val result = graph.detailsDataSource.load(details.addonId, details.type, details.id)) {
             is DetailsLoadResult.Ready -> detailsState = result.state
             is DetailsLoadResult.Unavailable -> detailsMessage = result.message
+        }
+    }
+    // Playback completion mirrors into LibraryWatch; refresh badges without a full meta reload.
+    LaunchedEffect(destination, libraryWatch.watchedIds, detailsState?.id) {
+        val details = destination as? RootDestination.Details ?: return@LaunchedEffect
+        val state = detailsState ?: return@LaunchedEffect
+        if (!state.isSeries || state.id != details.id) return@LaunchedEffect
+        val completedKeys = runCatching {
+            val byShow = watchProgressRepository.getWatchedShowEpisodes()
+            val siblings = watchProgressRepository.getShowIdSiblings()[state.id].orEmpty() + state.id
+            siblings.flatMap { id -> byShow[id].orEmpty() }.toSet()
+        }.getOrDefault(emptySet())
+        val refreshed = state.copy(
+            seasons = state.seasons.map { season ->
+                val episodes = season.episodes.map { episode ->
+                    val watched = episode.id in libraryWatch.watchedIds ||
+                        (season.number to episode.number) in completedKeys ||
+                        (season.number to episode.displayNumber) in completedKeys
+                    episode.copy(watched = watched)
+                }
+                season.copy(
+                    episodes = episodes,
+                    fullyWatched = episodes.isNotEmpty() && episodes.all(DetailsEpisode::watched),
+                )
+            },
+        )
+        if (refreshed != state) {
+            detailsState = refreshed
         }
     }
     LaunchedEffect(detailsState?.id, detailsState?.isSeries, detailsState?.contentLanguage, destination) {
@@ -1814,6 +1886,48 @@ private fun AppContent(
                                 "prepare READY but left Streams route — abort handoff id=${candidate.id}",
                             )
                             return@launch
+                        }
+                        // Anime auto-pick: Range-GET MKV Track CodecIDs before handoff.
+                        // Title "Multi-Subs" cannot tell ASS vs SRT — only the file can.
+                        if (streams.autoPick && isAnimeAutoPlayWait(streams)) {
+                            val remainingAfter =
+                                (MaxAutoPickResolveAttempts - autoPickRejectedIds.size - 1)
+                                    .coerceAtLeast(0)
+                            val inventory = MatroskaSubtitleCodecProbe.probeHttpUrl(
+                                url = result.source.url,
+                                headers = result.source.requestHeaders,
+                            )
+                            if (inventory.confidentSoftInventory) {
+                                runCatching {
+                                    graph.releaseTrackMemory?.remember(
+                                        infoHash = result.source.infoHash ?: candidate.infoHash,
+                                        fileIdx = result.source.fileIndex ?: candidate.fileIndex,
+                                        tracks = MatroskaSubtitleCodecProbe.toObservedTracks(inventory),
+                                    )
+                                }
+                            }
+                            if (MatroskaSubtitleCodecProbe.shouldRejectAnimeAutoPick(
+                                    inventory = inventory,
+                                    remainingResolveAttemptsAfterThis = remainingAfter,
+                                )
+                            ) {
+                                android.util.Log.i(
+                                    "SlugYardAutoPick",
+                                    "MKV probe REJECT pure-SRT id=${candidate.id} " +
+                                        "hits=${inventory.codecHits} remain=$remainingAfter",
+                                )
+                                streamMessage =
+                                    "Skipping SRT-only softsubs — looking for ASS/PGS…"
+                                autoPickRejectedIds = autoPickRejectedIds + candidate.id
+                                autoPickFinishedFor = null
+                                return@launch
+                            }
+                            android.util.Log.i(
+                                "SlugYardAutoPick",
+                                "MKV probe accept id=${candidate.id} ass=${inventory.hasAss} " +
+                                    "srt=${inventory.hasSrt} pgs=${inventory.hasPgs} " +
+                                    "err=${inventory.error ?: "ok"} hits=${inventory.codecHits}",
+                            )
                         }
                         streamMessage = null
                         // Launch the retained player BEFORE rewriting the route stack. Changing
@@ -2651,11 +2765,31 @@ private fun AppContent(
                                               season = episode.season,
                                               episode = episode.episode,
                                           )
+                                          watchProgressRepository.markAsCompleted(
+                                              WatchProgress(
+                                                  contentId = state.id,
+                                                  contentType = "series",
+                                                  name = state.title,
+                                                  poster = state.posterUrl,
+                                                  backdrop = state.backdropUrl,
+                                                  logo = null,
+                                                  videoId = episode.id,
+                                                  season = episode.season,
+                                                  episode = episode.episode,
+                                                  episodeTitle = null,
+                                                  position = 1L,
+                                                  duration = 1L,
+                                                  lastWatched = System.currentTimeMillis(),
+                                                  progressPercent = 100f,
+                                              ),
+                                              syncRemoteToTrakt = true,
+                                          )
                                       }
                                 }
                             },
                              onEpisodeSelected = { seasonNumber, episode ->
                                  val details = destination as? RootDestination.Details
+                                  val playEpisode = episode.playbackEpisodeNumber(forSeason = seasonNumber)
                                   // Keep Details under Streams/WatchHub so exiting returns here.
                                   pushPlayOrWatchHub(
                                      type = "series",
@@ -2664,11 +2798,11 @@ private fun AppContent(
                                      posterUrl = state.posterUrl,
                                      backdropUrl = state.backdropUrl,
                                      season = seasonNumber,
-                                     episode = episode.number,
+                                     episode = playEpisode,
                                       addonId = details?.addonId,
                                       parentId = details?.id,
                                       parentType = details?.type,
-                                      resumePositionMs = resumeFor(episode.id, seasonNumber, episode.number),
+                                      resumePositionMs = resumeFor(episode.id, seasonNumber, playEpisode),
                                       contentGenres = state.genres.takeIf { it.isNotEmpty() }?.joinToString(","),
                                       contentLanguage = state.contentLanguage,
                                   )
@@ -2687,6 +2821,16 @@ private fun AppContent(
                                      updated.filter { next ->
                                          next.id == episode.id || (watched && next.watched)
                                       }.forEach { next ->
+                                          // Clear WatchedItems before LibraryWatch so the Details
+                                          // refresh effect cannot re-apply a stale completed key.
+                                          if (!next.watched && next.id == episode.id) {
+                                              watchProgressRepository.removeFromHistory(
+                                                  contentId = state.id,
+                                                  videoId = next.id,
+                                                  season = next.season,
+                                                  episode = next.episode,
+                                              )
+                                          }
                                           graph.libraryWatch.setWatched(
                                               id = next.id,
                                               watched = next.watched,
@@ -2695,6 +2839,27 @@ private fun AppContent(
                                               season = next.season,
                                               episode = next.episode,
                                           )
+                                          if (next.watched) {
+                                              watchProgressRepository.markAsCompleted(
+                                                  WatchProgress(
+                                                      contentId = state.id,
+                                                      contentType = "series",
+                                                      name = state.title,
+                                                      poster = state.posterUrl,
+                                                      backdrop = state.backdropUrl,
+                                                      logo = null,
+                                                      videoId = next.id,
+                                                      season = next.season,
+                                                      episode = next.episode,
+                                                      episodeTitle = null,
+                                                      position = 1L,
+                                                      duration = 1L,
+                                                      lastWatched = System.currentTimeMillis(),
+                                                      progressPercent = 100f,
+                                                  ),
+                                                  syncRemoteToTrakt = true,
+                                              )
+                                          }
                                       }
                                  }
                              },
@@ -3125,7 +3290,8 @@ private fun DetailsState.toWatchPolicyEpisodes() = seasons.flatMap { season ->
         com.sluggyard.tv.core.watchstate.DetailsEpisode(
             id = episode.id,
             season = season.number,
-            episode = episode.number,
+            // Catch-up marks by viewer-facing order (season-local), not series-absolute meta.
+            episode = episode.displayNumber.takeIf { it > 0 } ?: episode.number,
             watched = episode.watched,
         )
     }

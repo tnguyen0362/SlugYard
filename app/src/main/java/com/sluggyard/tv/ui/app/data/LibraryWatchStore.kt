@@ -10,15 +10,16 @@ import com.sluggyard.tv.core.sync.LibraryWatchSyncBridge
 import com.sluggyard.tv.core.sync.LibraryWatchSyncSnapshot
 import com.sluggyard.tv.core.sync.SupabaseSyncScheduler
 import com.sluggyard.tv.core.sync.SyncMutationRecorder
+import com.sluggyard.tv.core.sync.auth.SyncResult
 import com.sluggyard.tv.core.sync.model.CloudLibraryItem
 import com.sluggyard.tv.core.sync.model.CloudWatchedItem
 import com.sluggyard.tv.core.sync.model.SyncDomain
 import com.sluggyard.tv.core.sync.remote.SyncMutation
+import com.sluggyard.tv.core.watchstate.parseSeasonEpisodeFromVideoId
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.flow.map
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
@@ -123,12 +124,36 @@ class LibraryWatchStore(
         }
         .fold(LibraryWatchSyncSnapshot()) { snapshot, (profileId, state) ->
             snapshot.copy(
-                library = snapshot.library + state.libraryEntries.map { it.toCloudLibraryItem(profileId) },
-                watchedItems = snapshot.watchedItems + state.watchedIds.map { id ->
-                    CloudWatchedItem(profileId, id, "movie", id, null, null, 0L)
-                },
+                library = snapshot.library + state.toCloudLibraryItems(profileId),
+                watchedItems = snapshot.watchedItems + state.toCloudWatchedItems(profileId),
             )
         }
+
+    /**
+     * Queues every local library + watched row into the account outbox.
+     * Safe to call repeatedly: outbox dedupes by stable library/watched identity.
+     */
+    override suspend fun flushPending() {
+        val recorder = mutationRecorder ?: return
+        val snap = snapshot()
+        var libraryQueued = 0
+        var watchedQueued = 0
+        snap.library.forEach { item ->
+            when (recorder.record(SyncMutation.LibraryItem(item))) {
+                is SyncResult.Success -> libraryQueued++
+                else -> Unit
+            }
+        }
+        snap.watchedItems.forEach { item ->
+            when (recorder.record(SyncMutation.WatchedItem(item))) {
+                is SyncResult.Success -> watchedQueued++
+                else -> Unit
+            }
+        }
+        if (libraryQueued > 0 || watchedQueued > 0) {
+            Log.i(TAG, "flushPending queued library=$libraryQueued watched=$watchedQueued")
+        }
+    }
 
     override suspend fun apply(snapshot: LibraryWatchSyncSnapshot) {
         val groupedLibrary = snapshot.library.groupBy(CloudLibraryItem::profileId)
@@ -164,15 +189,19 @@ class LibraryWatchStore(
 
     private suspend fun recordLibraryMutation(profileId: String, id: String, inLibrary: Boolean) {
         val cloudProfileId = cloudLinkedProfileIdOrNull(profileId) ?: return
-        if (mutationRecorder == null) return
+        val recorder = mutationRecorder ?: return
         val state = dataStore.data.first()[libraryWatchKey(profileId)]
             ?.let(LibraryWatchCodec::decode)
             ?: LibraryWatchState()
         val entry = state.libraryEntries.firstOrNull { it.id == id }
-        if (inLibrary && entry != null) {
-            mutationRecorder.record(SyncMutation.LibraryItem(entry.toCloudLibraryItem(cloudProfileId)))
+            ?: LibraryEntry(id = id, title = id).takeIf { inLibrary }
+        val result = if (inLibrary && entry != null) {
+            recorder.record(SyncMutation.LibraryItem(entry.toCloudLibraryItem(cloudProfileId)))
         } else {
-            mutationRecorder.recordDelete(SyncDomain.LIBRARY, cloudProfileId, id, System.currentTimeMillis())
+            recorder.recordDelete(SyncDomain.LIBRARY, cloudProfileId, id, System.currentTimeMillis())
+        }
+        if (result !is SyncResult.Success) {
+            Log.w(TAG, "library outbox skipped (signed-out or unauthorized) id=$id inLibrary=$inLibrary")
         }
     }
 
@@ -186,16 +215,19 @@ class LibraryWatchStore(
         episode: Int?,
     ) {
         val cloudProfileId = cloudLinkedProfileIdOrNull(profileId) ?: return
-        if (mutationRecorder == null) return
-        if (watched) {
+        val recorder = mutationRecorder ?: return
+        val result = if (watched) {
             val now = System.currentTimeMillis()
-            mutationRecorder.record(
+            recorder.record(
                 SyncMutation.WatchedItem(
                     CloudWatchedItem(cloudProfileId, id, contentType, title, season, episode, now, now),
                 ),
             )
         } else {
-            mutationRecorder.recordDelete(SyncDomain.WATCHED_ITEMS, cloudProfileId, id, System.currentTimeMillis())
+            recorder.recordDelete(SyncDomain.WATCHED_ITEMS, cloudProfileId, id, System.currentTimeMillis())
+        }
+        if (result !is SyncResult.Success) {
+            Log.w(TAG, "watched outbox skipped (signed-out or unauthorized) id=$id watched=$watched")
         }
     }
 }
@@ -269,16 +301,46 @@ private data class StoredLibraryEntry(
     }
 }
 
-private fun LibraryEntry.toCloudLibraryItem(profileId: Int) = CloudLibraryItem(
-    profileId = profileId,
-    contentId = id,
-    contentType = contentType ?: "movie",
-    name = title,
-    poster = imageUrl,
-    addonBaseUrl = addonId,
-    addedAt = changedAtEpochMs,
-    changedAt = changedAtEpochMs,
-)
+private fun LibraryWatchState.toCloudLibraryItems(profileId: Int): List<CloudLibraryItem> {
+    val byId = libraryEntries.associateBy(LibraryEntry::id)
+    val ids = libraryIds + byId.keys
+    val now = System.currentTimeMillis()
+    return ids.map { id ->
+        val entry = byId[id] ?: LibraryEntry(id = id, title = id, changedAtEpochMs = now)
+        entry.toCloudLibraryItem(profileId)
+    }
+}
+
+private fun LibraryWatchState.toCloudWatchedItems(profileId: Int): List<CloudWatchedItem> {
+    val now = System.currentTimeMillis()
+    return watchedIds.map { id ->
+        val seasonEpisode = parseSeasonEpisodeFromVideoId(id)
+        CloudWatchedItem(
+            profileId = profileId,
+            contentId = id,
+            contentType = if (seasonEpisode != null) "series" else "movie",
+            title = id,
+            season = seasonEpisode?.first,
+            episode = seasonEpisode?.second,
+            watchedAt = now,
+            changedAt = now,
+        )
+    }
+}
+
+private fun LibraryEntry.toCloudLibraryItem(profileId: Int): CloudLibraryItem {
+    val stamp = changedAtEpochMs.takeIf { it > 0L } ?: System.currentTimeMillis()
+    return CloudLibraryItem(
+        profileId = profileId,
+        contentId = id,
+        contentType = contentType ?: "movie",
+        name = title.ifBlank { id },
+        poster = imageUrl,
+        addonBaseUrl = addonId,
+        addedAt = stamp,
+        changedAt = stamp,
+    )
+}
 
 private fun CloudLibraryItem.toLibraryEntry() = LibraryEntry(
     id = contentId,

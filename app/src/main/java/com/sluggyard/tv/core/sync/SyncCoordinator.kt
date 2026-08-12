@@ -105,6 +105,12 @@ interface LibraryWatchSyncBridge {
     suspend fun snapshot(): LibraryWatchSyncSnapshot
 
     suspend fun apply(snapshot: LibraryWatchSyncSnapshot)
+
+    /**
+     * Promotes the full local watchlist/watched set into the authenticated outbox.
+     * Called on every signed-in synchronize so guest-era or failed-push rows still land in the DB.
+     */
+    suspend fun flushPending() = Unit
 }
 
 /**
@@ -157,6 +163,9 @@ class SyncCoordinator(
             ?: return SyncResult.Success(SyncSummary(0, 0, local.pending().size))
         (local as? AccountBoundLocalSyncStore)?.bindOwner(session.userId)
         progress?.flushPending()
+        // Watchlist lives in rewrite DataStore; without this, only add-while-signed-in rows outbox
+        // and guest / retry misses never reach Supabase for that account.
+        libraryWatch?.flushPending()
         providerCredentials?.flushPending()
 
         val remoteSnapshot = when (val result = remote.pull(session.userId)) {

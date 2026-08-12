@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import com.google.gson.Gson
 import com.sluggyard.tv.core.profile.ProfileManager
+import com.sluggyard.tv.core.watchstate.seriesContentId
 import com.sluggyard.tv.domain.model.WatchedItem
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -74,8 +75,9 @@ class WatchedItemsPreferences @Inject constructor(
 
     fun isWatched(contentId: String, season: Int? = null, episode: Int? = null): Flow<Boolean> =
         allItems.map { items ->
+            val showId = seriesContentId(contentId)
             items.any { item ->
-                item.contentId == contentId &&
+                seriesContentId(item.contentId) == showId &&
                     item.season == season &&
                     item.episode == episode
             }
@@ -83,14 +85,20 @@ class WatchedItemsPreferences @Inject constructor(
 
     fun getWatchedEpisodesForContent(contentId: String): Flow<Set<Pair<Int, Int>>> =
         allItems.map { items ->
-            items.filter { it.contentId == contentId && it.season != null && it.episode != null }
+            val showId = seriesContentId(contentId)
+            items.filter {
+                seriesContentId(it.contentId) == showId && it.season != null && it.episode != null
+            }
                 .map { it.season!! to it.episode!! }
                 .toSet()
         }
 
     fun getWatchedEpisodesWithTimestamps(contentId: String): Flow<Map<Pair<Int, Int>, Long>> =
         allItems.map { items ->
-            items.filter { it.contentId == contentId && it.season != null && it.episode != null }
+            val showId = seriesContentId(contentId)
+            items.filter {
+                seriesContentId(it.contentId) == showId && it.season != null && it.episode != null
+            }
                 .associate { (it.season!! to it.episode!!) to it.watchedAt }
         }
 
@@ -98,17 +106,19 @@ class WatchedItemsPreferences @Inject constructor(
         item: WatchedItem,
         profileId: Int = profileManager.activeProfileId.value
     ) {
+        val normalized = item.copy(contentId = seriesContentId(item.contentId).ifBlank { item.contentId })
         store(profileId).edit { prefs ->
             val current = prefs[watchedItemsKey] ?: emptySet()
+            val showId = seriesContentId(normalized.contentId)
             val filtered = current.filterNot { json ->
                 runCatching { gson.fromJson(json, WatchedItem::class.java) }
                     .getOrNull()?.let { existing ->
-                        existing.contentId == item.contentId &&
-                            existing.season == item.season &&
-                            existing.episode == item.episode
+                        seriesContentId(existing.contentId) == showId &&
+                            existing.season == normalized.season &&
+                            existing.episode == normalized.episode
                     } ?: false
             }
-            prefs[watchedItemsKey] = filtered.toSet() + gson.toJson(item)
+            prefs[watchedItemsKey] = filtered.toSet() + gson.toJson(normalized)
         }
     }
 
@@ -117,16 +127,21 @@ class WatchedItemsPreferences @Inject constructor(
         profileId: Int = profileManager.activeProfileId.value
     ) {
         if (items.isEmpty()) return
+        val normalizedItems = items.map { item ->
+            item.copy(contentId = seriesContentId(item.contentId).ifBlank { item.contentId })
+        }
         store(profileId).edit { prefs ->
             val current = prefs[watchedItemsKey] ?: emptySet()
-            val newKeys = items.map { Triple(it.contentId, it.season, it.episode) }.toSet()
+            val newKeys = normalizedItems.map {
+                Triple(seriesContentId(it.contentId), it.season, it.episode)
+            }.toSet()
             val filtered = current.filterNot { json ->
                 runCatching { gson.fromJson(json, WatchedItem::class.java) }
                     .getOrNull()?.let { existing ->
-                        Triple(existing.contentId, existing.season, existing.episode) in newKeys
+                        Triple(seriesContentId(existing.contentId), existing.season, existing.episode) in newKeys
                     } ?: false
             }
-            prefs[watchedItemsKey] = filtered.toSet() + items.map { gson.toJson(it) }
+            prefs[watchedItemsKey] = filtered.toSet() + normalizedItems.map { gson.toJson(it) }
         }
     }
 
@@ -136,12 +151,13 @@ class WatchedItemsPreferences @Inject constructor(
         episode: Int? = null,
         profileId: Int = profileManager.activeProfileId.value
     ) {
+        val showId = seriesContentId(contentId)
         store(profileId).edit { prefs ->
             val current = prefs[watchedItemsKey] ?: emptySet()
             val filtered = current.filterNot { json ->
                 runCatching { gson.fromJson(json, WatchedItem::class.java) }
                     .getOrNull()?.let { existing ->
-                        existing.contentId == contentId &&
+                        seriesContentId(existing.contentId) == showId &&
                             existing.season == season &&
                             existing.episode == episode
                     } ?: false
@@ -156,13 +172,14 @@ class WatchedItemsPreferences @Inject constructor(
         profileId: Int = profileManager.activeProfileId.value
     ) {
         if (episodes.isEmpty()) return
-        val removeKeys = episodes.map { (s, e) -> Triple(contentId, s, e) }.toSet()
+        val showId = seriesContentId(contentId)
+        val removeKeys = episodes.map { (s, e) -> Triple(showId, s, e) }.toSet()
         store(profileId).edit { prefs ->
             val current = prefs[watchedItemsKey] ?: emptySet()
             val filtered = current.filterNot { json ->
                 runCatching { gson.fromJson(json, WatchedItem::class.java) }
                     .getOrNull()?.let { existing ->
-                        Triple(existing.contentId, existing.season, existing.episode) in removeKeys
+                        Triple(seriesContentId(existing.contentId), existing.season, existing.episode) in removeKeys
                     } ?: false
             }
             prefs[watchedItemsKey] = filtered.toSet()

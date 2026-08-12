@@ -18,9 +18,19 @@ fun DetailsState.playbackTarget(parentType: String, parentId: String): PlaybackT
     val regularSeasons = seasons.filter { it.number > 0 }.ifEmpty { seasons }.sortedBy { it.number }
     for (season in regularSeasons) {
         val next = season.episodes.firstOrNull { !it.watched } ?: continue
-        return PlaybackTarget("series", next.id, season.number, next.number)
+        return PlaybackTarget(
+            "series",
+            next.id,
+            season.number,
+            next.playbackEpisodeNumber(forSeason = season.number),
+        )
     }
     val firstSeason = regularSeasons.firstOrNull() ?: return null
     val firstEpisode = firstSeason.episodes.firstOrNull() ?: return null
-    return PlaybackTarget("series", firstEpisode.id, firstSeason.number, firstEpisode.number)
+    return PlaybackTarget(
+        "series",
+        firstEpisode.id,
+        firstSeason.number,
+        firstEpisode.playbackEpisodeNumber(forSeason = firstSeason.number),
+    )
 }

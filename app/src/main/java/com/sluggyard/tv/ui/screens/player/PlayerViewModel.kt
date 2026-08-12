@@ -31,7 +31,6 @@ import com.sluggyard.tv.data.local.StreamLinkCacheDataStore
 import com.sluggyard.tv.data.local.TmdbSettingsDataStore
 import com.sluggyard.tv.data.local.TrackPreferenceDataStore
 import com.sluggyard.tv.data.local.WatchedItemsPreferences
-import com.sluggyard.tv.data.repository.OpenSubtitlesRepository
 import com.sluggyard.tv.data.repository.ParentalGuideRepository
 import com.sluggyard.tv.data.repository.PlaybackIssueReportRepository
 import com.sluggyard.tv.data.repository.SkipIntroRepository
@@ -56,7 +55,6 @@ class PlayerViewModel @Inject constructor(
     private val streamRepository: StreamRepository,
     private val addonRepository: AddonRepository,
     private val subtitleRepository: SubtitleRepository,
-    private val openSubtitlesRepository: OpenSubtitlesRepository,
     private val parentalGuideRepository: ParentalGuideRepository,
     private val traktScrobbleService: TraktScrobbleService,
     private val traktEpisodeMappingService: TraktEpisodeMappingService,
@@ -102,7 +100,6 @@ class PlayerViewModel @Inject constructor(
         streamRepository = streamRepository,
         addonRepository = addonRepository,
         subtitleRepository = subtitleRepository,
-        openSubtitlesRepository = openSubtitlesRepository,
         parentalGuideRepository = parentalGuideRepository,
         traktScrobbleService = traktScrobbleService,
         traktEpisodeMappingService = traktEpisodeMappingService,

@@ -104,9 +104,12 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import com.sluggyard.tv.ui.util.DpadVerticalNeighbors
 import com.sluggyard.tv.ui.util.LocalDpadVerticalNeighbors
 import com.sluggyard.tv.ui.util.dpadRepeatThrottle
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 
 data class HomePoster(
     val id: String,
@@ -1071,62 +1074,67 @@ private fun PosterRow(
     val posterPrefetchDecode = remember(posterPrefetchPixels) { posterPrefetchPixels.toCoilSize() }
     val landscapePrefetchPixels = remember(density) { homeLandscapeArtworkSize(density.density) }
     val landscapePrefetchDecode = remember(landscapePrefetchPixels) { landscapePrefetchPixels.toCoilSize() }
-    // Eager landscape warm for entry tiles + neighbors around focus via ImageLoader only
-    // (no AsyncImage cost on every card). Prefer sequential warm so vertical hops aren't
-    // fighting a Metahub decode storm for a whole shelf.
-    val prefetchedLandscapeIds = remember(row.id) { mutableSetOf<String>() }
+    // Landscape warming has a row-lifetime owner. The previous LaunchedEffect directly awaited
+    // each decode and was cancelled on every D-pad focus change; logs showed those requests ending
+    // unsuccessfully after 90-700ms, so rapid scrolling could never get ahead. Scheduled jobs are
+    // children of rowScope instead: focus changes add bounded work without cancelling in-flight
+    // decodes. One decode per row prevents Metahub shelves from creating a full-HD decode storm.
+    val scheduledLandscapeKeys = remember(row.id) { mutableSetOf<String>() }
+    val landscapeWarmSemaphore = remember(row.id) { Semaphore(permits = 1) }
     val rowOwnsFocus = focusedRowIdState?.value == row.id
-    suspend fun warmBackdrop(
-        poster: HomePoster,
-        loader: coil3.ImageLoader = context.imageLoader,
-    ) {
+
+    fun scheduleBackdropWarm(poster: HomePoster) {
         val posterUrl = preferLargePosterUrl(poster.imageUrl)
         val url = preferCardBackdropUrl(poster.backdropUrl)
             ?.takeIf { it.isNotBlank() && it != posterUrl }
             ?: return
-        if (poster.id in prefetchedLandscapeIds) {
-            if (landscapeReadyInMemory(
-                    context,
-                    poster.id,
-                    url,
-                    landscapePrefetchPixels,
-                )
-            ) {
-                return
+        val requestKey = homeBackdropMemoryCacheKey(poster.id, url, landscapePrefetchPixels)
+        if (landscapeReadyInMemory(context, poster.id, url, landscapePrefetchPixels)) return
+        if (!scheduledLandscapeKeys.add(requestKey)) return
+
+        rowScope.launch {
+            try {
+                landscapeWarmSemaphore.withPermit {
+                    if (landscapeReadyInMemory(context, poster.id, url, landscapePrefetchPixels)) {
+                        return@withPermit
+                    }
+                    context.imageLoader.execute(
+                        ImageRequest.Builder(context)
+                            .data(url)
+                            .size(landscapePrefetchDecode)
+                            .precision(coil3.size.Precision.EXACT)
+                            .memoryCacheKey(requestKey)
+                            .diskCacheKey("card-backdrop:${poster.id}:$url")
+                            .build(),
+                    )
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                // Prefetch is best-effort; focused AsyncImage still owns the paint path.
+            } finally {
+                scheduledLandscapeKeys.remove(requestKey)
             }
-            // Sticky warm-flag after LRU eviction must not claim the tile is cached.
-            prefetchedLandscapeIds.remove(poster.id)
-        }
-        val result = loader.execute(
-            ImageRequest.Builder(context)
-                .data(url)
-                .size(landscapePrefetchDecode)
-                .precision(coil3.size.Precision.EXACT)
-                .memoryCacheKey(homeBackdropMemoryCacheKey(poster.id, url, landscapePrefetchPixels))
-                .diskCacheKey("card-backdrop:${poster.id}:$url")
-                .build(),
-        )
-        if (result.image != null) {
-            prefetchedLandscapeIds.add(poster.id)
         }
     }
+
+    // Popular/Featured are loaded first. Start their leading landscape window immediately rather
+    // than waiting for the first horizontal keypress; the semaphore keeps each shelf sequential.
+    LaunchedEffect(row.id, row.posters, landscapePrefetchDecode, expandOnFocus, primaryShelf) {
+        if (!expandOnFocus || !primaryShelf || row.posters.isEmpty()) return@LaunchedEffect
+        val last = backdropPrefetchAhead.coerceAtMost(row.posters.lastIndex)
+        for (index in 0..last) scheduleBackdropWarm(row.posters[index])
+    }
+
     LaunchedEffect(row.id, focusedPosterIndex, rowOwnsFocus, row.posters, landscapePrefetchDecode, expandOnFocus) {
-        if (!expandOnFocus) return@LaunchedEffect
-        val from: Int
-        val to: Int
-        if (focusedPosterIndex < 0 || !rowOwnsFocus) return@LaunchedEffect
-        from = (focusedPosterIndex - HomeBackdropPrefetchBehind).coerceAtLeast(0)
-        to = (focusedPosterIndex + backdropPrefetchAhead).coerceAtMost(row.posters.lastIndex)
+        if (!expandOnFocus || focusedPosterIndex < 0 || !rowOwnsFocus) return@LaunchedEffect
+        val from = (focusedPosterIndex - HomeBackdropPrefetchBehind).coerceAtLeast(0)
+        val to = (focusedPosterIndex + backdropPrefetchAhead).coerceAtMost(row.posters.lastIndex)
         if (from > to) return@LaunchedEffect
-        // Warm focused/entry first so vertical hop reveal is ready, then neighbors sequentially.
-        val order = buildList {
-            val anchor = if (focusedPosterIndex in from..to) focusedPosterIndex else from
-            add(anchor)
-            for (i in from..to) if (i != anchor) add(i)
-        }
-        for (i in order) {
-            warmBackdrop(row.posters[i])
-        }
+        // The focused AsyncImage owns the anchor request. Warm the next D-pad targets first, then
+        // the one item behind for quick reversal. These jobs survive this effect's next restart.
+        for (index in (focusedPosterIndex + 1)..to) scheduleBackdropWarm(row.posters[index])
+        for (index in (focusedPosterIndex - 1) downTo from) scheduleBackdropWarm(row.posters[index])
     }
     // Warm a few neighbor portraits after focus settles — cheaper than landscape; fills blanks.
     LaunchedEffect(row.id, focusedPosterIndex, row.posters, posterPrefetchDecode) {
@@ -1354,52 +1362,19 @@ internal fun PosterCard(
         )
     }
     val wantsLandscape = expandOnFocus && landscapeUrl != null
-    // ROOT CAUSE of grey sidebars on every shelf:
-    // Expanding to 16:9 before landscape is painted leaves a portrait tile centered on
-    // SurfaceElevated (grey bars). Expand and reveal land in the *same* frame so the only
-    // transition is portrait → landscape, never portrait-in-a-wide-box.
-    // Prefetch must make painted true before/at focus for a hitch-free hop; if not, stay
-    // portrait-sized until Coil has land (still better UX than grey bars).
-    val expandFrame = focused && wantsLandscape && landscapePainted
-    val layoutWidth = if (expandFrame) focusedWidth else cardWidth
-    val showLandscapeArt = expandFrame
-    // Focus chrome only when expanded landscape is live.
-    val showFocusChrome = expandFrame
+    // Landscape focus is a strict rendering state, not a delayed portrait-to-landscape morph.
+    // Focus expands immediately and portrait art is removed in the same frame. A cache miss shows
+    // one full-width neutral landscape placeholder until the exact backdrop paints; it must never
+    // expose portrait art inside a landscape interaction.
+    val artworkState = homeArtworkRenderState(
+        focused = focused,
+        wantsLandscape = wantsLandscape,
+        landscapePainted = landscapePainted,
+    )
+    val layoutWidth = if (artworkState.expandLandscapeFrame) focusedWidth else cardWidth
     LaunchedEffect(focused) {
         onFocusedChanged?.invoke(focused)
     }
-    // Catch-up: seed painted from memory before mounting AsyncImage, and if focused, decode this
-    // tile so grey bars never span a multi-frame wait for a lazy AsyncImage enqueue.
-    LaunchedEffect(focused, landscapeUrl, landscapePixels) {
-        if (landscapeUrl == null) return@LaunchedEffect
-        if (
-            landscapeReadyInMemory(
-                context,
-                poster.id,
-                landscapeUrl,
-                landscapePixels,
-            )
-        ) {
-            landscapePainted = true
-            return@LaunchedEffect
-        }
-        if (!focused) return@LaunchedEffect
-        val result = runCatching {
-            context.imageLoader.execute(
-                ImageRequest.Builder(context)
-                    .data(landscapeUrl)
-                    .size(landscapeDecode)
-                    .precision(coil3.size.Precision.EXACT)
-                    .memoryCacheKey(homeBackdropMemoryCacheKey(poster.id, landscapeUrl, landscapePixels))
-                    .diskCacheKey("card-backdrop:${poster.id}:$landscapeUrl")
-                    .build(),
-            )
-        }.getOrNull()
-        if (result?.image != null) {
-            landscapePainted = true
-        }
-    }
-
     val focusMovementModifier = if (smoothFocusMovement && onFocusedChanged == null) {
         // Standalone cards (e.g. Search) bring themselves into view. Home shelves use the
         // row-level requester so the section title stays visible under the floating nav.
@@ -1568,9 +1543,9 @@ internal fun PosterCard(
                 maxLines = 4,
                 overflow = TextOverflow.Ellipsis,
             )
-            // Portrait always under the landscape layer. Never unmount it on a warm-flag guess —
-            // only landscape alpha hides it after AsyncImage onSuccess. That kills the blank
-            // "SurfaceElevated" flash when LRU dropped a prefetched bitmap.
+            // Keep the portrait request mounted for the unfocused state, but make it fully
+            // transparent for the entire focused-landscape state. The render policy—not image
+            // callback timing—owns visibility, so a portrait decode can never flash on focus.
             if (posterUrl != null) {
                 composeKey(poster.id, posterUrl) {
                     var posterReloadToken by remember(poster.id, posterUrl) { mutableIntStateOf(0) }
@@ -1587,11 +1562,12 @@ internal fun PosterCard(
                     AsyncImage(
                         model = posterRequest,
                         contentDescription = null,
-                        // Portrait fills the unfocused frame. While focused-and-waiting we stay
-                        // this size (no expand) so we never show portrait + grey side rails.
+                        // Portrait belongs only to the unfocused state. Remove it immediately on
+                        // landscape focus; never use it as a backdrop loading placeholder.
                         modifier = Modifier
                             .size(cardWidth, cardHeight)
-                            .align(Alignment.Center),
+                            .align(Alignment.Center)
+                            .alpha(if (artworkState.showPortrait) 1f else 0f),
                         contentScale = ContentScale.Crop,
                         alignment = Alignment.Center,
                         onError = {
@@ -1637,17 +1613,24 @@ internal fun PosterCard(
             // Landscape mounts only while focused. Prefetch warms Coil memory for neighbors;
             // keeping a hidden AsyncImage on every composed tile was a major Up/Down cost
             // (N shelves × M cards × dual decode pipelines on mid-range TV SOCs).
-            if (wantsLandscape && landscapeUrl != null && focused) {
-                composeKey(poster.id, landscapeUrl) {
-                    val landscapeRequest = remember(poster.id, landscapeUrl, landscapeDecode) {
-                        val cacheKey = homeBackdropMemoryCacheKey(poster.id, landscapeUrl, landscapePixels)
+            if (wantsLandscape && focused) {
+                val activeLandscapeUrl = checkNotNull(landscapeUrl)
+                composeKey(poster.id, activeLandscapeUrl) {
+                    var landscapeReloadToken by remember(poster.id, activeLandscapeUrl) { mutableIntStateOf(0) }
+                    val landscapeRequest = remember(
+                        poster.id,
+                        activeLandscapeUrl,
+                        landscapeDecode,
+                        landscapeReloadToken,
+                    ) {
+                        val cacheKey = homeBackdropMemoryCacheKey(poster.id, activeLandscapeUrl, landscapePixels)
                         ImageRequest.Builder(context)
-                            .data(landscapeUrl)
+                            .data(activeLandscapeUrl)
                             .size(landscapeDecode)
                             // EXACT: INEXACT reuses tiny/wrong scales → soft mush under Crop.
                             .precision(coil3.size.Precision.EXACT)
                             .memoryCacheKey(cacheKey)
-                            .diskCacheKey("card-backdrop:${poster.id}:$landscapeUrl")
+                            .diskCacheKey("card-backdrop:${poster.id}:$activeLandscapeUrl")
                             .build()
                     }
                     AsyncImage(
@@ -1655,15 +1638,27 @@ internal fun PosterCard(
                         contentDescription = null,
                         modifier = Modifier
                             .fillMaxSize()
-                            .alpha(if (showLandscapeArt) 1f else 0f),
+                            .alpha(if (artworkState.showLandscape) 1f else 0f),
                         contentScale = ContentScale.Crop,
                         alignment = Alignment.Center,
-                        onSuccess = { landscapePainted = true },
-                        onError = { landscapePainted = false },
+                        onSuccess = {
+                            landscapePainted = true
+                        },
+                        onError = {
+                            landscapePainted = false
+                            val token = landscapeReloadToken
+                            if (token >= HomePosterRetryMax) return@AsyncImage
+                            scope.launch {
+                                delay(HomePosterRetryDelayMs)
+                                if (focused && landscapeReloadToken == token) {
+                                    landscapeReloadToken = token + 1
+                                }
+                            }
+                        },
                     )
                 }
             }
-            if (showFocusChrome) {
+            if (artworkState.showLandscapeChrome) {
                 Row(
                     modifier = Modifier
                         .align(Alignment.TopCenter)
@@ -1782,7 +1777,7 @@ internal fun PosterCard(
                     )
                 }
             }
-            if (showTypeBadge && !showFocusChrome) {
+            if (showTypeBadge && !artworkState.showLandscapeChrome) {
                 contentTypeLabel(poster.contentType)?.let { typeLabel ->
                     Box(
                         modifier = Modifier

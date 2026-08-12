@@ -85,6 +85,19 @@ class TorboxFileSelectorTest {
     }
 
     @Test
+    fun `accepts sole playable file when episode name lacks SxxEyy tokens`() {
+        val name =
+            "[Erai-raws] Otonari no Tenshi-sama ni Itsunomanika Dame Ningen ni Sareteita Ken 2 - 09 [1080p].mkv"
+        val selected = selector.selectFile(
+            files = listOf(file(id = 0, name = name, size = 300_000_000)),
+            resolve = resolve(fileIdx = null, season = 2, episode = 9),
+            season = 2,
+            episode = 9,
+        )
+        assertEquals(0, selected?.id)
+    }
+
+    @Test
     fun `falls back to largest playable video`() {
         val selected = selector.selectFile(
             files = listOf(

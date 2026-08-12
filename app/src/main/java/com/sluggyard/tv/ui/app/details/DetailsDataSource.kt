@@ -7,6 +7,8 @@ import com.sluggyard.tv.core.addonprotocol.SlugYardCommunitySourcePolicy
 import com.sluggyard.tv.core.addonprotocol.StremioAddonGateway
 import com.sluggyard.tv.core.addonprotocol.StremioMetadataDecoder
 import com.sluggyard.tv.core.addonprotocol.StremioResponseDecoder
+import com.sluggyard.tv.core.watchstate.seasonEpisodeLooksSeriesAbsolute
+import com.sluggyard.tv.core.watchstate.seasonLocalDisplayNumber
 import com.sluggyard.tv.ui.app.data.LibraryWatchState
 import com.sluggyard.tv.ui.app.regularSeasonsThenSpecials
 import com.sluggyard.tv.ui.util.formatEpisodeReleaseLabel
@@ -137,20 +139,30 @@ class DetailsDataSource(
                 .groupBy { it.season!! }
                 .toSortedMap()
                 .map { (season, episodes) ->
+                    val ordered = episodes.sortedBy { it.episode }
+                    val looksSeriesAbsolute = seasonEpisodeLooksSeriesAbsolute(ordered.mapNotNull { it.episode })
                     DetailsSeason(
                         number = season,
-                        episodes = episodes.sortedBy { it.episode }.map { episode ->
+                        // UI badge must be season-local (S2E9 → "9"), not series-wide absolute ("21").
+                        // Keep [DetailsEpisode.number] as raw meta for rare path that still need it.
+                        episodes = ordered.mapIndexed { index, episode ->
                             val seasonNumber = season
                             val episodeNumber = episode.episode!!
                             val episodeId = episode.id
+                            val displayNumber = seasonLocalDisplayNumber(
+                                videoId = episodeId,
+                                season = seasonNumber,
+                                metaEpisode = episodeNumber,
+                                seasonIndex0 = index,
+                                looksSeriesAbsolute = looksSeriesAbsolute,
+                            )
                             val watched = episodeId in localState.watchedIds ||
-                                (seasonNumber to episodeNumber) in completedKeys
+                                (seasonNumber to episodeNumber) in completedKeys ||
+                                (seasonNumber to displayNumber) in completedKeys
                             DetailsEpisode(
                                 id = episodeId,
                                 number = episodeNumber,
-                                // Absolute episode number from meta — not list index.
-                                // Index+1 mislabeled mid-season eps (e.g. S2E8 as "Episode 20").
-                                displayNumber = episodeNumber,
+                                displayNumber = displayNumber,
                                 title = episode.title.unescapeHtmlEntities(),
                                 releaseLabel = formatEpisodeReleaseLabel(episode.released) ?: episode.released,
                                 thumbnailUrl = episode.thumbnailUrl,
@@ -158,11 +170,19 @@ class DetailsDataSource(
                                 description = episode.description?.unescapeHtmlEntities()?.takeIf(String::isNotBlank),
                             )
                         },
-                        fullyWatched = episodes.all { ep ->
-                            val episodeNumber = ep.episode!!
+                        fullyWatched = ordered.mapIndexed { index, ep ->
+                            val absolute = ep.episode!!
+                            val display = seasonLocalDisplayNumber(
+                                videoId = ep.id,
+                                season = season,
+                                metaEpisode = absolute,
+                                seasonIndex0 = index,
+                                looksSeriesAbsolute = looksSeriesAbsolute,
+                            )
                             ep.id in localState.watchedIds ||
-                                (season to episodeNumber) in completedKeys
-                        },
+                                (season to absolute) in completedKeys ||
+                                (season to display) in completedKeys
+                        }.all { it },
                     )
                 }
                 .regularSeasonsThenSpecials(DetailsSeason::number)
