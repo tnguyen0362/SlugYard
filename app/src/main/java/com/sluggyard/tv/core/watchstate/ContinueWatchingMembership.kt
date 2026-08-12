@@ -30,6 +30,8 @@ data class CwNextUpSeed(
     val progressFraction: Double? = null,
     val origin: ProgressOrigin = ProgressOrigin.TRAKT,
     val title: String? = null,
+    val posterUrl: String? = null,
+    val addonId: String? = null,
 )
 
 /** One entry of a show's episode order; [releaseDate] gates unaired next-up when present. */
@@ -137,6 +139,8 @@ object ContinueWatchingMembership {
                     showId = seed.showId,
                     contentType = "series",
                     title = seed.title ?: seed.seriesKey,
+                    posterUrl = seed.posterUrl,
+                    addonId = seed.addonId,
                     season = next.season,
                     episode = next.episode,
                     lastActivityMs = seed.watchedAtMs,
@@ -173,6 +177,9 @@ object ContinueWatchingMembership {
     /**
      * The first episode strictly after the seed in [order]. If that episode is unaired and
      * [showUnaired] is off, the show is dropped rather than skipped ahead (fail-open).
+     *
+     * When [order] is empty (meta / Trakt unavailable), fail-open to the next episode number
+     * in the same season so ≥98% completion still surfaces Next Up instead of vanishing.
      */
     fun nextEpisodeAfter(
         order: List<CwEpisodeOrderItem>,
@@ -181,6 +188,10 @@ object ContinueWatchingMembership {
         showUnaired: Boolean,
         today: LocalDate = LocalDate.now(),
     ): CwEpisodeOrderItem? {
+        if (order.isEmpty()) {
+            if (season <= 0 || episode <= 0) return null
+            return CwEpisodeOrderItem(season = season, episode = episode + 1)
+        }
         val next = order.firstOrNull { item ->
             item.season > season || (item.season == season && item.episode > episode)
         } ?: return null

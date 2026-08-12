@@ -564,11 +564,6 @@ class PlayerSettingsDataStore @Inject constructor(
     private val subtitleOutlineColorKey = intPreferencesKey("subtitle_outline_color")
     private val subtitleOutlineWidthKey = intPreferencesKey("subtitle_outline_width")
 
-    // OpenSubtitles keys
-    private val openSubtitlesEnabledKey = booleanPreferencesKey("open_subtitles_enabled")
-    private val openSubtitlesApiKeyKey = stringPreferencesKey("open_subtitles_api_key")
-    private val openSubtitlesAutoDownloadKey = booleanPreferencesKey("open_subtitles_auto_download")
-
     // Buffer settings keys
     private val minBufferMsKey = intPreferencesKey("min_buffer_ms")
     private val maxBufferMsKey = intPreferencesKey("max_buffer_ms")
@@ -1395,15 +1390,6 @@ class PlayerSettingsDataStore @Inject constructor(
     suspend fun setSubtitleOutlineEnabled(enabled: Boolean) { store().edit { it[subtitleOutlineEnabledKey] = enabled } }
     suspend fun setSubtitleOutlineColor(color: Int) { store().edit { it[subtitleOutlineColorKey] = color } }
     suspend fun setSubtitleOutlineWidth(width: Int) { store().edit { it[subtitleOutlineWidthKey] = width.coerceIn(1, 5) } }
-
-    // OpenSubtitles settings functions
-    suspend fun setOpenSubtitlesEnabled(enabled: Boolean) { store().edit { it[openSubtitlesEnabledKey] = enabled } }
-    suspend fun setOpenSubtitlesApiKey(apiKey: String) { store().edit { it[openSubtitlesApiKeyKey] = apiKey } }
-    suspend fun setOpenSubtitlesAutoDownload(enabled: Boolean) { store().edit { it[openSubtitlesAutoDownloadKey] = enabled } }
-
-    val openSubtitlesEnabled: Flow<Boolean> = store().data.map { it[openSubtitlesEnabledKey] ?: false }
-    val openSubtitlesApiKey: Flow<String> = store().data.map { it[openSubtitlesApiKeyKey] ?: "" }
-    val openSubtitlesAutoDownload: Flow<Boolean> = store().data.map { it[openSubtitlesAutoDownloadKey] ?: false }
 
     suspend fun setUseForcedSubtitles(enabled: Boolean) {
         store().edit { prefs -> prefs[subtitleUseForcedSubtitlesKey] = enabled }

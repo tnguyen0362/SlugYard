@@ -1,10 +1,14 @@
 package com.sluggyard.tv.ui.app.streams
 
 /**
- * Track inventory learned after MPV/Exo actually opens a release — deeper than title tags,
- * free on later auto-picks for the same infoHash (season pack memory applies across episodes).
+ * Track inventory from real container truth — deeper than title tags, free on later
+ * auto-picks for the same infoHash (season pack memory applies across episodes).
  *
- * Never written from release titles. Only from real player track lists once they settle.
+ * Written from:
+ * - Player track lists after open ([observedReleaseTracksFromPlayer])
+ * - Pre-play Matroska CodecID probe ([MatroskaSubtitleCodecProbe]) when auto-pick resolves
+ *
+ * Never written from release titles alone.
  */
 data class ObservedReleaseTracks(
     /** Normalized language bases (eng, jpn, spa, …). Empty when unknown. */
@@ -40,8 +44,12 @@ data class ObservedReleaseTracks(
             languageBasesMatch(base, preferredBase)
         }
         val hasSoft = hasSoftsubTrack || hasAss || hasPgs || hasSrt
+        // CodecID-only probe (no Language tags): format ladder, never invent preferred-lang 5.
         val softsubFit = when {
             !hasSoft -> 1
+            subtitleLangBases.isEmpty() && hasAss -> 4
+            subtitleLangBases.isEmpty() && hasPgs -> 3
+            subtitleLangBases.isEmpty() && (hasSrt || hasSoft) -> 2
             preferred == null && hasAss -> 4
             preferred == null && hasPgs -> 3
             preferred == null -> 3

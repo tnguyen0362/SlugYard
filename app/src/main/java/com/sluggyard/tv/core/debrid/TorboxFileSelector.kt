@@ -60,6 +60,16 @@ class TorboxFileSelector @Inject constructor() {
                 return it
             }
             if (hasExplicitEpisodeTarget) {
+                // Instant/single-file torrents already point at this episode; name miss must not
+                // fail Play with "did not return a playable file" when only one video exists.
+                playable.singlePlayableOrNull()?.let {
+                    Log.d(
+                        TAG,
+                        "no episode file match patterns=$episodePatterns; " +
+                            "accepting sole playable name='${it.displayName().take(180)}'",
+                    )
+                    return it
+                }
                 Log.d(TAG, "no episode file match patterns=$episodePatterns; refusing index/size fallback")
                 return null
             }
@@ -68,6 +78,10 @@ class TorboxFileSelector @Inject constructor() {
         if (season != null && episode != null) {
             playable.bestDebridEpisodeMatch(season, episode) { it.displayName() }?.let {
                 Log.d(TAG, "selected method=episode-filename season=$season episode=$episode name='${it.displayName().take(180)}'")
+                return it
+            }
+            playable.singlePlayableOrNull()?.let {
+                Log.d(TAG, "no episode filename match; accepting sole playable name='${it.displayName().take(180)}'")
                 return it
             }
             Log.d(TAG, "no episode filename match for season=$season episode=$episode; refusing index/size fallback")

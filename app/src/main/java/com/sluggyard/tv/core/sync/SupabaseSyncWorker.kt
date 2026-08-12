@@ -1,6 +1,7 @@
 package com.sluggyard.tv.core.sync
 
 import android.content.Context
+import android.util.Log
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
@@ -24,12 +25,30 @@ class SupabaseSyncWorker(
     appContext: Context,
     workerParams: WorkerParameters,
 ) : CoroutineWorker(appContext, workerParams) {
-    override suspend fun doWork(): Result = when (
+    override suspend fun doWork(): Result {
         val result = syncCoordinatorFromApplication(applicationContext).synchronize()
-    ) {
-        is SyncResult.Success -> Result.success()
-        SyncResult.SessionExpired -> Result.failure()
-        is SyncResult.Failure -> if (result.kind.isTransient()) Result.retry() else Result.failure()
+        return when (result) {
+            is SyncResult.Success -> {
+                Log.i(
+                    TAG,
+                    "sync ok pulled=${result.value.pulledRecords} pushed=${result.value.pushedMutations} " +
+                        "retained=${result.value.retainedMutations}",
+                )
+                Result.success()
+            }
+            SyncResult.SessionExpired -> {
+                Log.w(TAG, "sync session expired")
+                Result.failure()
+            }
+            is SyncResult.Failure -> {
+                Log.w(TAG, "sync failed kind=${result.kind} transient=${result.kind.isTransient()}")
+                if (result.kind.isTransient()) Result.retry() else Result.failure()
+            }
+        }
+    }
+
+    private companion object {
+        const val TAG = "SupabaseSync"
     }
 }
 

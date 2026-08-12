@@ -354,8 +354,9 @@ class WatchProgressRepositoryImpl @Inject constructor(
                     // SlugYard/local mode: resolve episode order from the primary addon's meta
                     // episode list so next-up can advance without Trakt. Fail-open when unknown.
                     flow {
+                        val showId = StreamMergeUtils.deriveInlineMetaId(contentId).ifBlank { contentId }
                         emit(
-                            fetchContentMetadata(contentId = contentId, contentType = "series")
+                            fetchContentMetadata(contentId = showId, contentType = "series")
                                 ?.episodes
                                 ?.keys
                                 ?.sortedWith(compareBy({ it.first }, { it.second }))
@@ -402,8 +403,9 @@ class WatchProgressRepositoryImpl @Inject constructor(
                                     item.season != 0 &&
                                     !isMalformedNextUpSeedContentId(item.contentId)
                             }
-                            .groupBy { it.contentId }
-                            .mapNotNull { (_, episodes) ->
+                            .groupBy { StreamMergeUtils.deriveInlineMetaId(it.contentId) }
+                            .mapNotNull { (showId, episodes) ->
+                                if (showId.isBlank()) return@mapNotNull null
                                 val latest = episodes.maxWithOrNull(
                                     if (useFurthest) {
                                         compareBy<WatchedItem> { it.season ?: 0 }
@@ -416,7 +418,7 @@ class WatchProgressRepositoryImpl @Inject constructor(
                                     }
                                 ) ?: return@mapNotNull null
                                 WatchProgress(
-                                    contentId = latest.contentId,
+                                    contentId = showId,
                                     contentType = latest.contentType,
                                     name = latest.title,
                                     poster = null,

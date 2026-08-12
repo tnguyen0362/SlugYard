@@ -137,20 +137,30 @@ class DetailsDataSource(
                 .groupBy { it.season!! }
                 .toSortedMap()
                 .map { (season, episodes) ->
+                    val ordered = episodes.sortedBy { it.episode }
+                    val looksSeriesAbsolute = seasonEpisodeLooksSeriesAbsolute(ordered.mapNotNull { it.episode })
                     DetailsSeason(
                         number = season,
-                        episodes = episodes.sortedBy { it.episode }.map { episode ->
+                        // UI badge must be season-local (S2E9 → "9"), not series-wide absolute ("21").
+                        // Keep [DetailsEpisode.number] as raw meta for rare path that still need it.
+                        episodes = ordered.mapIndexed { index, episode ->
                             val seasonNumber = season
                             val episodeNumber = episode.episode!!
                             val episodeId = episode.id
+                            val displayNumber = seasonLocalDisplayNumber(
+                                videoId = episodeId,
+                                season = seasonNumber,
+                                metaEpisode = episodeNumber,
+                                seasonIndex0 = index,
+                                looksSeriesAbsolute = looksSeriesAbsolute,
+                            )
                             val watched = episodeId in localState.watchedIds ||
-                                (seasonNumber to episodeNumber) in completedKeys
+                                (seasonNumber to episodeNumber) in completedKeys ||
+                                (seasonNumber to displayNumber) in completedKeys
                             DetailsEpisode(
                                 id = episodeId,
                                 number = episodeNumber,
-                                // Absolute episode number from meta — not list index.
-                                // Index+1 mislabeled mid-season eps (e.g. S2E8 as "Episode 20").
-                                displayNumber = episodeNumber,
+                                displayNumber = displayNumber,
                                 title = episode.title.unescapeHtmlEntities(),
                                 releaseLabel = formatEpisodeReleaseLabel(episode.released) ?: episode.released,
                                 thumbnailUrl = episode.thumbnailUrl,
@@ -158,10 +168,10 @@ class DetailsDataSource(
                                 description = episode.description?.unescapeHtmlEntities()?.takeIf(String::isNotBlank),
                             )
                         },
-                        fullyWatched = episodes.all { ep ->
-                            val episodeNumber = ep.episode!!
+                        fullyWatched = ordered.all { ep ->
+                            val absolute = ep.episode!!
                             ep.id in localState.watchedIds ||
-                                (season to episodeNumber) in completedKeys
+                                (season to absolute) in completedKeys
                         },
                     )
                 }
@@ -242,4 +252,47 @@ class DetailsDataSource(
         const val WatchHubBudgetMs = 2_500L
         const val WatchedLookupBudgetMs = 2_000L
     }
+}
+
+/**
+ * True when episode numbers in a season look like continuous series-wide counters
+ * (e.g. S2 is 13..24) rather than season-local (1..N).
+ */
+internal fun seasonEpisodeLooksSeriesAbsolute(episodeNumbers: List<Int>): Boolean {
+    // Need at least two numbers to tell absolute (13..24) from season-local (1..N).
+    // A lone ep>1 must not renumber to 1 (e.g. sparse S2E2-only lists).
+    if (episodeNumbers.size < 2) return false
+    val min = episodeNumbers.min()
+    val max = episodeNumbers.max()
+    // Season-local packs usually start near 1; continuous packs jump high (S1 max + 1).
+    return min > 1 && max > episodeNumbers.size
+}
+
+/**
+ * Season-local number for UI badges / TorBox-facing SxEy.
+ * Prefer video-id `:season:episode`, then index renumber when meta is absolute, else meta.
+ */
+internal fun seasonLocalDisplayNumber(
+    videoId: String,
+    season: Int,
+    metaEpisode: Int,
+    seasonIndex0: Int,
+    looksSeriesAbsolute: Boolean,
+): Int {
+    val fromId = parseSeasonEpisodeFromVideoId(videoId)
+    if (fromId != null && fromId.first == season && fromId.second > 0) {
+        return fromId.second
+    }
+    if (looksSeriesAbsolute) return seasonIndex0 + 1
+    return metaEpisode.takeIf { it > 0 } ?: (seasonIndex0 + 1)
+}
+
+/** Parses trailing `:season:episode` from Stremio-style video ids (`tt123:2:9`, `kitsu:1:2:9`). */
+internal fun parseSeasonEpisodeFromVideoId(videoId: String): Pair<Int, Int>? {
+    val parts = videoId.trim().split(':')
+    if (parts.size < 3) return null
+    val season = parts[parts.lastIndex - 1].toIntOrNull() ?: return null
+    val episode = parts.last().toIntOrNull() ?: return null
+    if (season < 0 || episode <= 0) return null
+    return season to episode
 }

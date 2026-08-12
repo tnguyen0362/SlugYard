@@ -1,8 +1,12 @@
 package com.sluggyard.tv.ui.screens.player
 
+import com.sluggyard.tv.data.local.NextEpisodeThresholdMode
+import com.sluggyard.tv.data.repository.SkipInterval
 import com.sluggyard.tv.domain.model.Video
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PlayerNextEpisodeRulesTest {
@@ -17,6 +21,9 @@ class PlayerNextEpisodeRulesTest {
             episode = episode,
             overview = null
         )
+
+    private fun outro(startSec: Double, endSec: Double, type: String = "outro") =
+        SkipInterval(startTime = startSec, endTime = endSec, type = type, provider = "test")
 
     @Test
     fun `advances to next episode in same season`() {
@@ -66,5 +73,72 @@ class PlayerNextEpisodeRulesTest {
         val videos = listOf(ep(null, 5, "e5"), ep(null, 6, "e6"))
         val next = PlayerNextEpisodeRules.resolveNextEpisode(videos, currentSeason = null, currentEpisode = 6)
         assertNull(next)
+    }
+
+    @Test
+    fun `up next surfaces at outro start even when a long post-credits tail remains`() {
+        // 24 min file, ED 20:00–21:30, then 2.5 min junk — old logic waited for 95%.
+        val durationMs = 24 * 60_000L
+        val outroStartMs = 20 * 60_000L
+        assertTrue(
+            PlayerNextEpisodeRules.shouldShowNextEpisodeCard(
+                positionMs = outroStartMs,
+                durationMs = durationMs,
+                skipIntervals = listOf(outro(startSec = 20 * 60.0, endSec = 21.5 * 60.0)),
+                thresholdMode = NextEpisodeThresholdMode.PERCENTAGE,
+                thresholdPercent = 95f,
+                thresholdMinutesBeforeEnd = 2f,
+            )
+        )
+        assertFalse(
+            PlayerNextEpisodeRules.shouldShowNextEpisodeCard(
+                positionMs = outroStartMs - 5_000L,
+                durationMs = durationMs,
+                skipIntervals = listOf(outro(startSec = 20 * 60.0, endSec = 21.5 * 60.0)),
+                thresholdMode = NextEpisodeThresholdMode.PERCENTAGE,
+                thresholdPercent = 95f,
+                thresholdMinutesBeforeEnd = 2f,
+            )
+        )
+    }
+
+    @Test
+    fun `credits label is treated as an outro trigger`() {
+        val durationMs = 30 * 60_000L
+        assertTrue(
+            PlayerNextEpisodeRules.shouldShowNextEpisodeCard(
+                positionMs = 28 * 60_000L,
+                durationMs = durationMs,
+                skipIntervals = listOf(outro(startSec = 27 * 60.0, endSec = 30 * 60.0, type = "credits")),
+                thresholdMode = NextEpisodeThresholdMode.PERCENTAGE,
+                thresholdPercent = 95f,
+                thresholdMinutesBeforeEnd = 2f,
+            )
+        )
+    }
+
+    @Test
+    fun `without outro data the percent threshold still applies`() {
+        val durationMs = 20 * 60_000L
+        assertFalse(
+            PlayerNextEpisodeRules.shouldShowNextEpisodeCard(
+                positionMs = (durationMs * 0.90).toLong(),
+                durationMs = durationMs,
+                skipIntervals = emptyList(),
+                thresholdMode = NextEpisodeThresholdMode.PERCENTAGE,
+                thresholdPercent = 95f,
+                thresholdMinutesBeforeEnd = 2f,
+            )
+        )
+        assertTrue(
+            PlayerNextEpisodeRules.shouldShowNextEpisodeCard(
+                positionMs = (durationMs * 0.96).toLong(),
+                durationMs = durationMs,
+                skipIntervals = emptyList(),
+                thresholdMode = NextEpisodeThresholdMode.PERCENTAGE,
+                thresholdPercent = 95f,
+                thresholdMinutesBeforeEnd = 2f,
+            )
+        )
     }
 }

@@ -80,14 +80,36 @@ internal fun groupPlaybackCheckpoints(
     }
     .sortedByDescending(PlaybackCheckpoint::updatedAtEpochMs)
 
+/**
+ * Last episode that hit the 98% completion threshold for a series. Used so Continue Watching
+ * can advance to Next Up even when Watched-items / Trakt seeds are empty or lag.
+ */
+data class SeriesCompletionSeed(
+    val seriesKey: String,
+    val showId: String,
+    val season: Int,
+    val episode: Int,
+    val title: String,
+    val posterUrl: String? = null,
+    val addonId: String? = null,
+    val watchedAtMs: Long,
+    val contentGenres: String? = null,
+    val contentLanguage: String? = null,
+)
+
 interface PlaybackProgressRepository {
     val checkpoints: Flow<List<PlaybackCheckpoint>>
+    /** One row per series show id — newest completed episode seed. */
+    val seriesCompletionSeeds: Flow<List<SeriesCompletionSeed>>
     suspend fun save(checkpoint: PlaybackCheckpoint)
     suspend fun remove(contentId: String, season: Int? = null, episode: Int? = null)
 }
 
 private fun playbackProgressKey(profileId: String) = stringPreferencesKey("app_playback_progress_v2_$profileId")
+private fun seriesCompletionSeedsKey(profileId: String) =
+    stringPreferencesKey("app_playback_completion_seeds_v1_$profileId")
 private const val MAX_STORED_CHECKPOINTS = 100
+private const val MAX_STORED_COMPLETION_SEEDS = 40
 
 class PlaybackProgressStore(
     private val dataStore: DataStore<Preferences>,
@@ -105,6 +127,14 @@ class PlaybackProgressStore(
             .toList()
     }
 
+    override val seriesCompletionSeeds: Flow<List<SeriesCompletionSeed>> =
+        combine(dataStore.data, profiles.state) { preferences, profileState ->
+            preferences[seriesCompletionSeedsKey(profileState.activeProfile.id)]
+                ?.let(SeriesCompletionSeedCodec::decode)
+                .orEmpty()
+                .sortedByDescending(SeriesCompletionSeed::watchedAtMs)
+        }
+
     override suspend fun save(checkpoint: PlaybackCheckpoint) {
         if (!checkpoint.isPersistable()) return
         val profileId = profiles.state.first().activeProfile.id
@@ -118,9 +148,12 @@ class PlaybackProgressStore(
             val checkpointKey = progressKey(checkpoint.contentId, checkpoint.season, checkpoint.episode)
             when {
                 checkpoint.isResumable -> existing[checkpointKey] = checkpoint
-                // Completing (≥90%) clears CW. Sub-threshold exits must NOT wipe a longer resume —
-                // backing out at 5s used to delete a 40% checkpoint (user-reported CW disappear).
-                WatchStatePolicy.isCompleted(checkpoint.progressFraction) -> existing.remove(checkpointKey)
+                // Completing (≥98%) clears resume for that episode and records a next-up seed.
+                // Sub-threshold exits must NOT wipe a longer resume.
+                WatchStatePolicy.isCompleted(checkpoint.progressFraction) -> {
+                    existing.remove(checkpointKey)
+                    rememberSeriesCompletionSeed(preferences, profileId, checkpoint)
+                }
                 else -> Unit
             }
             val retained = existing.values
@@ -158,11 +191,70 @@ class PlaybackProgressStore(
                         (episode == null || it.episode == episode)
                 }
             preferences[key] = PlaybackProgressCodec.encode(remaining)
+            // User-driven remove from CW: also drop completion seed for that show so Next Up goes away.
+            if (season == null && episode == null) {
+                val showId = StreamMergeUtils.deriveInlineMetaId(contentId)
+                val seedsKey = seriesCompletionSeedsKey(profileId)
+                val seeds = preferences[seedsKey]
+                    ?.let(SeriesCompletionSeedCodec::decode)
+                    .orEmpty()
+                    .filterNot { it.seriesKey == showId || it.showId == showId || it.seriesKey == contentId }
+                preferences[seedsKey] = SeriesCompletionSeedCodec.encode(seeds)
+            }
         }
         syncBridge?.remove(
             profileId = cloudLinkedProfileIdOrNull(profileId) ?: return,
             progressKey = progressKey(contentId, season, episode),
             changedAtEpochMs = System.currentTimeMillis(),
+        )
+    }
+
+    private fun rememberSeriesCompletionSeed(
+        preferences: androidx.datastore.preferences.core.MutablePreferences,
+        profileId: String,
+        checkpoint: PlaybackCheckpoint,
+    ) {
+        val season = checkpoint.season ?: return
+        val episode = checkpoint.episode ?: return
+        if (season <= 0 || episode <= 0) return
+        val isSeries = checkpoint.parentType.equals("series", ignoreCase = true) ||
+            checkpoint.contentType.equals("series", ignoreCase = true) ||
+            checkpoint.contentType.equals("tv", ignoreCase = true) ||
+            checkpoint.contentType.equals("show", ignoreCase = true) ||
+            checkpoint.season != null
+        if (!isSeries) return
+        val showId = checkpoint.parentId?.takeIf { it.isNotBlank() }
+            ?: StreamMergeUtils.deriveInlineMetaId(checkpoint.contentId)
+        if (showId.isBlank()) return
+        val seed = SeriesCompletionSeed(
+            seriesKey = showId,
+            showId = showId,
+            season = season,
+            episode = episode,
+            title = checkpoint.title,
+            posterUrl = checkpoint.posterUrl,
+            addonId = checkpoint.addonId,
+            watchedAtMs = checkpoint.updatedAtEpochMs,
+            contentGenres = checkpoint.contentGenres,
+            contentLanguage = checkpoint.contentLanguage,
+        )
+        val seedsKey = seriesCompletionSeedsKey(profileId)
+        val byKey = (preferences[seedsKey]?.let(SeriesCompletionSeedCodec::decode).orEmpty())
+            .associateBy(SeriesCompletionSeed::seriesKey)
+            .toMutableMap()
+        val existing = byKey[showId]
+        // Prefer the furthest SxE; tie-break by most recent watch.
+        val keep = when {
+            existing == null -> seed
+            existing.season > seed.season ||
+                (existing.season == seed.season && existing.episode > seed.episode) -> existing
+            else -> seed
+        }
+        byKey[showId] = keep
+        preferences[seedsKey] = SeriesCompletionSeedCodec.encode(
+            byKey.values
+                .sortedByDescending(SeriesCompletionSeed::watchedAtMs)
+                .take(MAX_STORED_COMPLETION_SEEDS),
         )
     }
 }
@@ -194,6 +286,17 @@ object PlaybackProgressCodec {
             .take(MAX_STORED_CHECKPOINTS)
             .toList()
     }.getOrNull()
+}
+
+object SeriesCompletionSeedCodec {
+    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+
+    fun encode(seeds: List<SeriesCompletionSeed>): String =
+        json.encodeToString(StoredSeriesCompletionSeeds(seeds.map(StoredSeriesCompletionSeed::from)))
+
+    fun decode(raw: String): List<SeriesCompletionSeed> = runCatching {
+        json.decodeFromString<StoredSeriesCompletionSeeds>(raw).items.map(StoredSeriesCompletionSeed::toModel)
+    }.getOrDefault(emptyList())
 }
 
 private fun PlaybackCheckpoint.isPersistable(): Boolean =
@@ -269,6 +372,51 @@ private data class StoredPlaybackCheckpoint(
             updatedAtEpochMs = model.updatedAtEpochMs,
             season = model.season,
             episode = model.episode,
+            contentGenres = model.contentGenres,
+            contentLanguage = model.contentLanguage,
+        )
+    }
+}
+
+@Serializable
+private data class StoredSeriesCompletionSeeds(val items: List<StoredSeriesCompletionSeed> = emptyList())
+
+@Serializable
+private data class StoredSeriesCompletionSeed(
+    val seriesKey: String,
+    val showId: String,
+    val season: Int,
+    val episode: Int,
+    val title: String,
+    val posterUrl: String? = null,
+    val addonId: String? = null,
+    val watchedAtMs: Long,
+    val contentGenres: String? = null,
+    val contentLanguage: String? = null,
+) {
+    fun toModel() = SeriesCompletionSeed(
+        seriesKey = seriesKey,
+        showId = showId,
+        season = season,
+        episode = episode,
+        title = title,
+        posterUrl = posterUrl,
+        addonId = addonId,
+        watchedAtMs = watchedAtMs,
+        contentGenres = contentGenres,
+        contentLanguage = contentLanguage,
+    )
+
+    companion object {
+        fun from(model: SeriesCompletionSeed) = StoredSeriesCompletionSeed(
+            seriesKey = model.seriesKey,
+            showId = model.showId,
+            season = model.season,
+            episode = model.episode,
+            title = model.title,
+            posterUrl = model.posterUrl,
+            addonId = model.addonId,
+            watchedAtMs = model.watchedAtMs,
             contentGenres = model.contentGenres,
             contentLanguage = model.contentLanguage,
         )

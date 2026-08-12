@@ -53,19 +53,31 @@ import kotlinx.coroutines.launch
 
 data class DetailsEpisode(
     val id: String,
-    // The addon-reported episode number. This is what season/episode source lookups must use --
-    // addons index streams by their own numbering, which is occasionally absolute/global rather
-    // than reset per season (e.g. "episode 36" for what a viewer would call S02E01).
+    // Addon-reported episode field (may be season-local **or** continuous across seasons).
+    // Prefer [id] / [displayNumber] for viewer-facing SxEy and debrid season-local matching.
     val number: Int,
     val title: String,
     val releaseLabel: String?,
     val thumbnailUrl: String?,
     val watched: Boolean,
-    // 1-based position within this episode's season, used for the on-screen "N. Title" label so
-    // a season's first episode always reads "1." regardless of what the addon's raw number is.
+    // 1-based position within this episode's season (badge, a11y "Episode N", handoff SxEy).
+    // Never the series-wide absolute index when seasons are grouped.
     val displayNumber: Int = number,
     val description: String? = null,
-)
+) {
+    /**
+     * Episode number to use for season-scoped playback resolve (TorBox/file patterns, SxEy labels).
+     * Prefer TV-facing [displayNumber]; fall back to trailing `:e` on the video id; then meta [number].
+     */
+    fun playbackEpisodeNumber(forSeason: Int): Int {
+        val fromId = id.trim().split(':').takeIf { it.size >= 3 }?.let { parts ->
+            val seasonPart = parts[parts.lastIndex - 1].toIntOrNull()
+            val episodePart = parts.last().toIntOrNull()
+            if (seasonPart == forSeason && episodePart != null && episodePart > 0) episodePart else null
+        }
+        return fromId ?: displayNumber.takeIf { it > 0 } ?: number
+    }
+}
 
 data class DetailsSeason(
     val number: Int,

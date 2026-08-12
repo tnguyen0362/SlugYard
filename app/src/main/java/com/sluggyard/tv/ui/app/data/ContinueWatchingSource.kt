@@ -114,9 +114,11 @@ fun WatchProgress.toCwNextUpSeed(): CwNextUpSeed? {
     val seedEpisode = episode ?: return null
     if (seedSeason <= 0 || seedEpisode <= 0) return null
     if (contentId.isBlank()) return null
+    // Player often stores episode video ids (tt…:s:e). Group + meta lookup need the show id.
+    val showId = StreamMergeUtils.deriveInlineMetaId(contentId).ifBlank { contentId }
     return CwNextUpSeed(
-        seriesKey = contentId,
-        showId = contentId,
+        seriesKey = showId,
+        showId = showId,
         season = seedSeason,
         episode = seedEpisode,
         watchedAtMs = lastWatched.coerceAtLeast(0L),
@@ -126,9 +128,23 @@ fun WatchProgress.toCwNextUpSeed(): CwNextUpSeed? {
             WatchProgress.SOURCE_LOCAL -> ProgressOrigin.LOCAL
             else -> ProgressOrigin.TRAKT
         },
-        title = name.takeIf { it.isNotBlank() && it != contentId },
+        title = name.takeIf { it.isNotBlank() && it != contentId && it != showId },
     )
 }
+
+/** Local rewrite completion (≥98%) → next-up seed without waiting on Trakt/watched lists. */
+fun SeriesCompletionSeed.toCwNextUpSeed(): CwNextUpSeed = CwNextUpSeed(
+    seriesKey = seriesKey,
+    showId = showId,
+    season = season,
+    episode = episode,
+    watchedAtMs = watchedAtMs,
+    progressFraction = 1.0,
+    origin = ProgressOrigin.LOCAL,
+    title = title.takeIf { it.isNotBlank() && it != seriesKey },
+    posterUrl = posterUrl,
+    addonId = addonId,
+)
 
 /**
  * Trakt-mode source merge (plan A4): Trakt in-progress wins for representable series; local

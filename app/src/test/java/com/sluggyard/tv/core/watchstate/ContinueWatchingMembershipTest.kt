@@ -68,14 +68,31 @@ class ContinueWatchingMembershipTest {
     }
 
     @Test
-    fun `seed with no order available fails open with no tile`() {
+    fun `seed with no order advances to next episode number`() {
         val rows = ContinueWatchingMembership.build(
             resumeInputs = emptyList(),
             seeds = listOf(seed(season = 1, episode = 2)),
             episodeOrder = emptyMap(),
             dismissedShowIds = emptySet(),
         )
-        assertEquals(0, rows.size)
+        val row = rows.single() as CwRailRow.NextUp
+        assertEquals(1, row.season)
+        assertEquals(3, row.episode)
+    }
+
+    @Test
+    fun `completed at ninety eight becomes next episode tile without midstream resume`() {
+        // Same product rule: resume ≥98% is gone; seed S1E4 + order → Next Up S1E5.
+        val rows = ContinueWatchingMembership.build(
+            resumeInputs = listOf(resume("tt1", season = 1, episode = 4, fraction = 0.98)),
+            seeds = listOf(seed(season = 1, episode = 4)),
+            episodeOrder = mapOf("tt1" to order("1:1", "1:2", "1:3", "1:4", "1:5")),
+            dismissedShowIds = emptySet(),
+        )
+        assertEquals(1, rows.size)
+        val row = rows.single() as CwRailRow.NextUp
+        assertEquals(1, row.season)
+        assertEquals(5, row.episode)
     }
 
     @Test

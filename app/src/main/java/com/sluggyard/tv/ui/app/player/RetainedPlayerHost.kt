@@ -345,7 +345,9 @@ fun RetainedPlayerHost(
         // Same full-bleed prepare chrome as outside-player auto-pick (BuildingPlayerScreen).
         secondaryJob?.cancel()
         episodeHandoffPreparing = true
-        episodeHandoffTitle = "S${selectedSeason}E${selectedEpisode.number} · ${selectedEpisode.title}"
+        // Viewer-facing SxEy (never meta absolute, which can be "S2E21" when raw episode=21).
+        val playEpisode = selectedEpisode.playbackEpisodeNumber(selectedSeason)
+        episodeHandoffTitle = "S${selectedSeason}E$playEpisode · ${selectedEpisode.title}"
         episodeHandoffArtUrl = playPreparingArtUrl(
             selectedEpisode.thumbnailUrl,
             activeContext.posterUrl ?: latestPosterUrl.ifBlank { null },
@@ -359,7 +361,7 @@ fun RetainedPlayerHost(
             episodeSourceId = selectedEpisode.id,
             episodeSourceTitle = episodeHandoffTitle,
             episodeSourceSeason = selectedSeason,
-            episodeSourceEpisode = selectedEpisode.number,
+            episodeSourceEpisode = playEpisode,
             episodeSourceEpisodeTitle = selectedEpisode.title,
         )
         secondaryJob = scope.launch {

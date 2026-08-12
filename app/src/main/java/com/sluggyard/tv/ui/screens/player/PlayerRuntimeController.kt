@@ -72,7 +72,6 @@ class PlayerRuntimeController(
     internal val streamRepository: StreamRepository,
     internal val addonRepository: AddonRepository,
     internal val subtitleRepository: com.sluggyard.tv.domain.repository.SubtitleRepository,
-    internal val openSubtitlesRepository: com.sluggyard.tv.data.repository.OpenSubtitlesRepository,
     internal val parentalGuideRepository: ParentalGuideRepository,
     internal val traktScrobbleService: TraktScrobbleService,
     internal val traktEpisodeMappingService: TraktEpisodeMappingService,

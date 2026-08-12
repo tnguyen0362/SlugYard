@@ -151,12 +151,17 @@ internal object StreamScoringEngine {
             }
         }
         val winner = playPool.maxWithOrNull(rankComparator(context)) ?: return null
-        // During Finding (Instant-only), refuse mono PGS remuxes for anime so Dual/ASS can
-        // still land — not softsubFit==4 (that also blocked Instant ASS when preferred=null).
+        // During Finding (Instant-only), refuse weak anime Instant traps so Dual/ASS can still land:
+        // mono PGS remuxes and plain SRT WEB dumps (Angel Next Door Instant English SRT).
+        // softsubFit==4 alone is not the bar — that would also block Instant ASS when preferred=null.
         if (
             kind == ContentKind.ANIME &&
             !allowUncachedFallback &&
-            !isAcceptableAnimeInstantAutoStart(winner, rank(winner, context))
+            !isAcceptableAnimeInstantAutoStart(
+                winner,
+                rank(winner, context),
+                context.preferredSubtitleLanguage,
+            )
         ) {
             return null
         }
@@ -164,17 +169,35 @@ internal object StreamScoringEngine {
     }
 
     /**
-     * Instant-only Finding may start dual softpacks and ASS immediately. Wait only on
-     * **PGS mono** (Demon Slayer Instant chrome trap).
+     * Instant-only Finding may start dual softpacks and ASS (or known fansub groups) immediately.
+     * Wait on **PGS mono**, **plain SRT mono**, and **wrong-language Instant soft** (VOSTFR when
+     * preferred=en) so Eng Dual/ASS Instant can still land.
      */
     private fun isAcceptableAnimeInstantAutoStart(
         candidate: StreamCandidate,
         rank: Rank,
+        preferredSubtitleLanguage: String?,
     ): Boolean {
+        // Dual+soft already clears fansub packs; do not wait extra for those Instant hits.
         if (rank.effectiveDualFit >= 1) return true
+        val preferred = normalizePreferredSubtitle(preferredSubtitleLanguage)
+        // Conflicting localization Instant (softsubFit 0) must not auto-start while preferred
+        // is set — Angel Next Door locked on Tsundere VOSTFR French ASS over Eng Multi-Subs.
+        // Dual-only Instant (soft=1 with Dual-Audio) still starts so Kametsu-type CACHED duals
+        // keep beating UNKNOWN soft rows in Instant-only Finding.
+        if (preferred != null && rank.softsubFit == 0) return false
         val text = candidate.releaseText().lowercase()
-        if (PGS_SOFTSUB_FORMAT.containsMatchIn(text) && rank.dualFit == 0) return false
-        return true
+        // Prefer known ASS fansub groups (SubsPlease etc.) even when the title never says ASS.
+        if (isKnownAnimeSoftsubGroup(text)) return true
+        val ass = ASS_SOFTSUB_FORMAT.containsMatchIn(text)
+        val pgs = PGS_SOFTSUB_FORMAT.containsMatchIn(text)
+        val srt = SRT_SOFTSUB_FORMAT.containsMatchIn(text)
+        // Demon Slayer Instant Eng-PGS mono trap.
+        if (pgs && rank.dualFit == 0) return false
+        // Plain SRT/VTT mono Instant — hold for ASS dual/fansub while scrapers dump.
+        if (srt && !ass && rank.dualFit == 0) return false
+        if (rank.softsubFit >= 5) return true
+        return !srt
     }
 
     fun rankedCandidates(
@@ -271,10 +294,10 @@ internal object StreamScoringEngine {
      * 1 has Dual-Audio / Multi-Audio
      * 0 otherwise
      *
-     * When [ObservedReleaseTracks] exist for this infoHash, softsub/dual take max(title, observed).
+     * When [ObservedReleaseTracks] exist with soft inventory, softsubFit is replaced by observed
+     * (file/player truth). Title Multi-Subs must not stick above pure-SRT container truth.
      * [ListingReleaseProbe] lifts structured MediaInfo / file-path signals from free listing text
-     * (no network) under the same max — never overrides a clearer title conflict (score 0).
-     * Observed (post-play memory) still wins the floor when higher.
+     * (no network) under max with title — never overrides a clearer title conflict (score 0).
      *
      * Multi-Subs alone is NOT max score when a preference is set — A&C "Multi-Sub" packs
      * are often Latam/España-only and must not beat real Eng Dual packs or fall through
@@ -343,13 +366,29 @@ internal object StreamScoringEngine {
 
         val hash = candidate?.infoHash?.trim()?.lowercase().orEmpty()
         val observed = if (hash.isNotEmpty()) context.observedTracksByHash[hash] else null
-        // Real player inventory always wins floor max — title tags are best-effort only.
-        if (observed != null) {
+        // Container / player inventory is truth: replace softsubFit (do not only max-lift).
+        // Title "Multi-Subs" at 2–3 must not stay sticky when file is pure SRT.
+        if (observed != null && observed.hasSoftsubTrack) {
             val (obsSoft, obsDual) = observed.toTitleScaleSignals(
                 preferredSubtitleLanguage = context.preferredSubtitleLanguage,
                 animeLike = listingAnimeLike,
             )
-            if (obsSoft > softsubFit) {
+            // Never invent soft over a hard title conflict (wrong-lang score 0).
+            if (softsubFit > 0) {
+                softsubFit = obsSoft
+                usedObserved = true
+            }
+            if (listingAnimeLike && obsDual > dualFit) {
+                dualFit = obsDual
+                usedObserved = true
+            }
+        } else if (observed != null) {
+            // Dual-only / incomplete memory still lifts dual floor when higher.
+            val (obsSoft, obsDual) = observed.toTitleScaleSignals(
+                preferredSubtitleLanguage = context.preferredSubtitleLanguage,
+                animeLike = listingAnimeLike,
+            )
+            if (obsSoft > softsubFit && softsubFit > 0) {
                 softsubFit = obsSoft
                 usedObserved = true
             }
@@ -666,6 +705,8 @@ internal object StreamScoringEngine {
     ): Boolean {
         if (textMentionsLanguage(text, preferred)) return false
         val preferredBase = preferred.substringBefore('-').substringBefore('_').lowercase()
+        // French soft WEB packs almost never put "sub" in the title — VOSTFR *is* the pack signal.
+        if (preferredBase != "fr" && Regex("""\bvostfr\b""").containsMatchIn(text)) return true
         if (preferredBase != "es" && looksLikeSpanishFansubPack(text)) return true
         // Multi-language packaging is not an exclusive foreign pack.
         if (MULTI_SUBS_REGEX.containsMatchIn(text) || DUAL_AUDIO_REGEX.containsMatchIn(text)) {
@@ -684,7 +725,8 @@ internal object StreamScoringEngine {
             SOFTSUB_KEYWORD.containsMatchIn(text) ||
             EXPLICIT_SUB_REGEX.containsMatchIn(text) ||
             HARD_SUB_REGEX.containsMatchIn(text) ||
-            Regex("""\bnapisy\b""").containsMatchIn(text)
+            Regex("""\bnapisy\b""").containsMatchIn(text) ||
+            Regex("""\bvostfr\b""").containsMatchIn(text)
 
     /**
      * Size / exclusive-localization / digital-release gates, then preferred-language preference.
@@ -854,7 +896,7 @@ internal object StreamScoringEngine {
         "rigav1",
     )
 
-    private val MULTI_SUBS_REGEX = Regex("\\b(multi.?subs?|dual.?subs?|multiple.?subtitle)\\b")
+    private val MULTI_SUBS_REGEX = Regex("\\b(multi.?subs?|m.?subs?|msubs|dual.?subs?|multiple.?subtitle)\\b")
     private val EXPLICIT_SUB_REGEX = Regex("\\b(sub|subs|subtitle|subtitles|cc)\\b")
     private val ENG_SUB_REGEX = Regex("\\b(eng(?:lish)?\\s*subs?|subs?\\s*(?:eng|english))\\b")
     private val DUAL_AUDIO_REGEX = Regex("\\b(dual.?audio|multi.?audio)\\b")

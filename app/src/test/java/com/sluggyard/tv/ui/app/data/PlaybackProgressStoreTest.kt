@@ -40,6 +40,28 @@ class PlaybackProgressStoreTest {
     }
 
     @Test
+    fun `series completion at ninety eight records next up seed`() = runBlocking {
+        val store = PlaybackProgressStore(createDataStore(), FakeProfiles())
+        val mid = checkpoint(season = 1, episode = 4, updatedAt = 1L)
+            .copy(positionMs = 400L, durationMs = 1_000L, parentId = "tt1", parentType = "series")
+        store.save(mid)
+        store.save(
+            mid.copy(
+                positionMs = 980L,
+                durationMs = 1_000L,
+                updatedAtEpochMs = 2L,
+            ),
+        )
+
+        assertEquals(emptyList<PlaybackCheckpoint>(), store.checkpoints.first())
+        val seeds = store.seriesCompletionSeeds.first()
+        assertEquals(1, seeds.size)
+        assertEquals("tt1", seeds.single().showId)
+        assertEquals(1, seeds.single().season)
+        assertEquals(4, seeds.single().episode)
+    }
+
+    @Test
     fun `sub two percent progress is not persisted`() = runBlocking {
         val store = PlaybackProgressStore(createDataStore(), FakeProfiles())
         store.save(checkpoint(season = 1, episode = 1, updatedAt = 1L).copy(positionMs = 10L))
