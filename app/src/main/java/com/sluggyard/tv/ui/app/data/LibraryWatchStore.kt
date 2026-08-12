@@ -15,6 +15,7 @@ import com.sluggyard.tv.core.sync.model.CloudLibraryItem
 import com.sluggyard.tv.core.sync.model.CloudWatchedItem
 import com.sluggyard.tv.core.sync.model.SyncDomain
 import com.sluggyard.tv.core.sync.remote.SyncMutation
+import com.sluggyard.tv.core.watchstate.parseSeasonEpisodeFromVideoId
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
@@ -313,13 +314,14 @@ private fun LibraryWatchState.toCloudLibraryItems(profileId: Int): List<CloudLib
 private fun LibraryWatchState.toCloudWatchedItems(profileId: Int): List<CloudWatchedItem> {
     val now = System.currentTimeMillis()
     return watchedIds.map { id ->
+        val seasonEpisode = parseSeasonEpisodeFromVideoId(id)
         CloudWatchedItem(
             profileId = profileId,
             contentId = id,
-            contentType = "movie",
+            contentType = if (seasonEpisode != null) "series" else "movie",
             title = id,
-            season = null,
-            episode = null,
+            season = seasonEpisode?.first,
+            episode = seasonEpisode?.second,
             watchedAt = now,
             changedAt = now,
         )

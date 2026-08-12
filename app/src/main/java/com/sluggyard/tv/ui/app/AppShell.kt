@@ -116,6 +116,7 @@ import com.sluggyard.tv.core.watchstate.CwMembershipSettings
 import com.sluggyard.tv.core.watchstate.CwRailRow
 import com.sluggyard.tv.data.local.TraktAuthState
 import com.sluggyard.tv.data.local.WatchProgressSource
+import com.sluggyard.tv.domain.model.WatchProgress
 import com.sluggyard.tv.domain.repository.WatchProgressRepository
 import com.sluggyard.tv.core.sync.ProgressSyncBridge
 import com.sluggyard.tv.core.sync.ProviderCredentialSyncBridge
@@ -1519,6 +1520,34 @@ private fun AppContent(
             is DetailsLoadResult.Unavailable -> detailsMessage = result.message
         }
     }
+    // Playback completion mirrors into LibraryWatch; refresh badges without a full meta reload.
+    LaunchedEffect(destination, libraryWatch.watchedIds, detailsState?.id) {
+        val details = destination as? RootDestination.Details ?: return@LaunchedEffect
+        val state = detailsState ?: return@LaunchedEffect
+        if (!state.isSeries || state.id != details.id) return@LaunchedEffect
+        val completedKeys = runCatching {
+            val byShow = watchProgressRepository.getWatchedShowEpisodes()
+            val siblings = watchProgressRepository.getShowIdSiblings()[state.id].orEmpty() + state.id
+            siblings.flatMap { id -> byShow[id].orEmpty() }.toSet()
+        }.getOrDefault(emptySet())
+        val refreshed = state.copy(
+            seasons = state.seasons.map { season ->
+                val episodes = season.episodes.map { episode ->
+                    val watched = episode.id in libraryWatch.watchedIds ||
+                        (season.number to episode.number) in completedKeys ||
+                        (season.number to episode.displayNumber) in completedKeys
+                    episode.copy(watched = watched)
+                }
+                season.copy(
+                    episodes = episodes,
+                    fullyWatched = episodes.isNotEmpty() && episodes.all(DetailsEpisode::watched),
+                )
+            },
+        )
+        if (refreshed != state) {
+            detailsState = refreshed
+        }
+    }
     LaunchedEffect(detailsState?.id, detailsState?.isSeries, detailsState?.contentLanguage, destination) {
         val details = destination as? RootDestination.Details ?: return@LaunchedEffect
         val state = detailsState ?: return@LaunchedEffect
@@ -2736,11 +2765,31 @@ private fun AppContent(
                                               season = episode.season,
                                               episode = episode.episode,
                                           )
+                                          watchProgressRepository.markAsCompleted(
+                                              WatchProgress(
+                                                  contentId = state.id,
+                                                  contentType = "series",
+                                                  name = state.title,
+                                                  poster = state.posterUrl,
+                                                  backdrop = state.backdropUrl,
+                                                  logo = null,
+                                                  videoId = episode.id,
+                                                  season = episode.season,
+                                                  episode = episode.episode,
+                                                  episodeTitle = null,
+                                                  position = 1L,
+                                                  duration = 1L,
+                                                  lastWatched = System.currentTimeMillis(),
+                                                  progressPercent = 100f,
+                                              ),
+                                              syncRemoteToTrakt = true,
+                                          )
                                       }
                                 }
                             },
                              onEpisodeSelected = { seasonNumber, episode ->
                                  val details = destination as? RootDestination.Details
+                                  val playEpisode = episode.playbackEpisodeNumber(forSeason = seasonNumber)
                                   // Keep Details under Streams/WatchHub so exiting returns here.
                                   pushPlayOrWatchHub(
                                      type = "series",
@@ -2749,11 +2798,11 @@ private fun AppContent(
                                      posterUrl = state.posterUrl,
                                      backdropUrl = state.backdropUrl,
                                      season = seasonNumber,
-                                     episode = episode.number,
+                                     episode = playEpisode,
                                       addonId = details?.addonId,
                                       parentId = details?.id,
                                       parentType = details?.type,
-                                      resumePositionMs = resumeFor(episode.id, seasonNumber, episode.number),
+                                      resumePositionMs = resumeFor(episode.id, seasonNumber, playEpisode),
                                       contentGenres = state.genres.takeIf { it.isNotEmpty() }?.joinToString(","),
                                       contentLanguage = state.contentLanguage,
                                   )
@@ -2772,6 +2821,16 @@ private fun AppContent(
                                      updated.filter { next ->
                                          next.id == episode.id || (watched && next.watched)
                                       }.forEach { next ->
+                                          // Clear WatchedItems before LibraryWatch so the Details
+                                          // refresh effect cannot re-apply a stale completed key.
+                                          if (!next.watched && next.id == episode.id) {
+                                              watchProgressRepository.removeFromHistory(
+                                                  contentId = state.id,
+                                                  videoId = next.id,
+                                                  season = next.season,
+                                                  episode = next.episode,
+                                              )
+                                          }
                                           graph.libraryWatch.setWatched(
                                               id = next.id,
                                               watched = next.watched,
@@ -2780,6 +2839,27 @@ private fun AppContent(
                                               season = next.season,
                                               episode = next.episode,
                                           )
+                                          if (next.watched) {
+                                              watchProgressRepository.markAsCompleted(
+                                                  WatchProgress(
+                                                      contentId = state.id,
+                                                      contentType = "series",
+                                                      name = state.title,
+                                                      poster = state.posterUrl,
+                                                      backdrop = state.backdropUrl,
+                                                      logo = null,
+                                                      videoId = next.id,
+                                                      season = next.season,
+                                                      episode = next.episode,
+                                                      episodeTitle = null,
+                                                      position = 1L,
+                                                      duration = 1L,
+                                                      lastWatched = System.currentTimeMillis(),
+                                                      progressPercent = 100f,
+                                                  ),
+                                                  syncRemoteToTrakt = true,
+                                              )
+                                          }
                                       }
                                  }
                              },
@@ -3210,7 +3290,8 @@ private fun DetailsState.toWatchPolicyEpisodes() = seasons.flatMap { season ->
         com.sluggyard.tv.core.watchstate.DetailsEpisode(
             id = episode.id,
             season = season.number,
-            episode = episode.number,
+            // Catch-up marks by viewer-facing order (season-local), not series-absolute meta.
+            episode = episode.displayNumber.takeIf { it > 0 } ?: episode.number,
             watched = episode.watched,
         )
     }
