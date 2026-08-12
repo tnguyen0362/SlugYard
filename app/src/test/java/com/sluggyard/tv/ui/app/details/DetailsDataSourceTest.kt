@@ -10,6 +10,9 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
+import com.sluggyard.tv.core.watchstate.seasonEpisodeLooksSeriesAbsolute
+import com.sluggyard.tv.core.watchstate.seasonLocalDisplayNumber
+import com.sluggyard.tv.core.watchstate.parseSeasonEpisodeFromVideoId
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test

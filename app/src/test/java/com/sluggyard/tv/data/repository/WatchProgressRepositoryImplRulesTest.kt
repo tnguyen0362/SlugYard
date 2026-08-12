@@ -33,7 +33,8 @@ class WatchProgressRepositoryImplRulesTest {
         watchedItemsPreferences = mockk<WatchedItemsPreferences>(relaxed = true),
         metaRepository = mockk<MetaRepository>(relaxed = true),
         tmdbService = mockk<TmdbService>(relaxed = true),
-        profileManager = mockk<ProfileManager>(relaxed = true)
+        profileManager = mockk<ProfileManager>(relaxed = true),
+        libraryWatchRepository = mockk(relaxed = true),
     )
 
     private fun progress(
