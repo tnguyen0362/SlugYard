@@ -135,8 +135,12 @@ fun PlayerControls(
                 ),
             )
             .padding(
-                horizontal = SlugYardTvMetrics.ScreenHorizontalInset,
-                vertical = SlugYardTvMetrics.ScreenVerticalInset,
+                start = SlugYardTvMetrics.ScreenHorizontalInset,
+                end = SlugYardTvMetrics.ScreenHorizontalInset,
+                // Keep bottom chrome closer to the bezel — large vertical inset made the
+                // scrubber/action row float uncannily high over the video.
+                top = SlugYardTvMetrics.ScreenVerticalInset,
+                bottom = 20.dp,
             ),
     ) {
         Row(
@@ -224,7 +228,12 @@ fun PlayerControls(
                         maxLines = 2,
                     )
                 }
-                PauseRatingRow(imdbRating = state.imdbRating, tmdbRating = state.tmdbVoteAverage)
+                PauseRatingRow(
+                    imdbRating = state.imdbRating,
+                    tmdbRating = state.tmdbVoteAverage,
+                    season = state.currentSeason,
+                    episode = state.currentEpisode,
+                )
                 state.description?.takeIf { it.isNotBlank() }?.let {
                     OutlinedPlayerText(
                         text = it,
@@ -237,14 +246,38 @@ fun PlayerControls(
             }
         }
 
+        // Netflix-style bottom chrome: full-width scrubber, then a left-aligned action row.
         Column(
-            modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            modifier = Modifier.align(Alignment.BottomStart).fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            PlayerScrubber(
+                currentPositionMs = currentPositionMs,
+                durationMs = durationMs,
+                bufferedPositionMs = bufferedPositionMs,
+                previewPositionMs = state.pendingPreviewSeekPosition,
+                onSeekPreview = actions.onSeekPreview,
+                onSeekCommit = actions.onSeekCommit,
+                onConfirm = {
+                    // After a long scrub focus stays on the bar; OK used to do nothing
+                    // while the media Play/Pause key still worked — map Center/Enter
+                    // to play/pause (and commit any in-flight preview seek first).
+                    if (state.pendingPreviewSeekPosition != null) {
+                        actions.onSeekCommit()
+                    }
+                    actions.onPlayPause()
+                },
+                focusRequester = scrubberFocusRequester,
+                upFocusRequester = backFocusRequester,
+                downFocusRequester = playPauseFocusRequester,
                 modifier = Modifier.fillMaxWidth(),
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                // Top-align so play/pause sits on the same icon row as labeled
+                // controls (CenterVertically floated it between icon + caption).
+                verticalAlignment = Alignment.Top,
             ) {
                 PlayerIconButton(
                     icon = if (state.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
@@ -252,98 +285,65 @@ fun PlayerControls(
                     onClick = actions.onPlayPause,
                     emphasis = ButtonEmphasis.PRIMARY,
                     focusRequester = playPauseFocusRequester,
-                    upFocusRequester = backFocusRequester,
-                    downFocusRequester = subtitlesFocusRequester,
-                    rightFocusRequester = scrubberFocusRequester,
+                    upFocusRequester = scrubberFocusRequester,
+                    downFocusRequester = null,
+                    rightFocusRequester = subtitlesFocusRequester,
                 )
-                PlayerScrubber(
-                    currentPositionMs = currentPositionMs,
-                    durationMs = durationMs,
-                    bufferedPositionMs = bufferedPositionMs,
-                    previewPositionMs = state.pendingPreviewSeekPosition,
-                    onSeekPreview = actions.onSeekPreview,
-                    onSeekCommit = actions.onSeekCommit,
-                    onConfirm = {
-                        // After a long scrub focus stays on the bar; OK used to do nothing
-                        // while the media Play/Pause key still worked — map Center/Enter
-                        // to play/pause (and commit any in-flight preview seek first).
-                        if (state.pendingPreviewSeekPosition != null) {
-                            actions.onSeekCommit()
-                        }
-                        actions.onPlayPause()
-                    },
-                    focusRequester = scrubberFocusRequester,
-                    upFocusRequester = backFocusRequester,
-                    downFocusRequester = subtitlesFocusRequester,
+                PlayerLabeledIconButton(
+                    icon = Icons.Filled.Subtitles,
+                    label = selectedSubtitleLabel,
+                    onClick = actions.onSubtitles,
+                    focusRequester = subtitlesFocusRequester,
+                    upFocusRequester = scrubberFocusRequester,
                     leftFocusRequester = playPauseFocusRequester,
-                    modifier = Modifier.weight(1f),
+                    rightFocusRequester = audioFocusRequester,
                 )
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(26.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
+                PlayerLabeledIconButton(
+                    icon = Icons.Filled.Audiotrack,
+                    label = selectedAudioLabel,
+                    onClick = actions.onAudio,
+                    focusRequester = audioFocusRequester,
+                    upFocusRequester = scrubberFocusRequester,
+                    leftFocusRequester = subtitlesFocusRequester,
+                    rightFocusRequester = if (hasEpisodes) episodesFocusRequester else sourcesFocusRequester,
+                )
+                if (hasEpisodes) {
                     PlayerLabeledIconButton(
-                        icon = Icons.Filled.Subtitles,
-                        label = selectedSubtitleLabel,
-                        onClick = actions.onSubtitles,
-                        focusRequester = subtitlesFocusRequester,
+                        icon = Icons.AutoMirrored.Filled.PlaylistPlay,
+                        label = "Episodes",
+                        onClick = actions.onEpisodes,
+                        focusRequester = episodesFocusRequester,
                         upFocusRequester = scrubberFocusRequester,
-                        leftFocusRequester = playPauseFocusRequester,
-                        rightFocusRequester = audioFocusRequester,
-                    )
-                    PlayerLabeledIconButton(
-                        icon = Icons.Filled.Audiotrack,
-                        label = selectedAudioLabel,
-                        onClick = actions.onAudio,
-                        focusRequester = audioFocusRequester,
-                        upFocusRequester = scrubberFocusRequester,
-                        leftFocusRequester = subtitlesFocusRequester,
-                        rightFocusRequester = if (hasEpisodes) episodesFocusRequester else sourcesFocusRequester,
-                    )
-                    if (hasEpisodes) {
-                        PlayerLabeledIconButton(
-                            icon = Icons.AutoMirrored.Filled.PlaylistPlay,
-                            label = "Episodes",
-                            onClick = actions.onEpisodes,
-                            focusRequester = episodesFocusRequester,
-                            upFocusRequester = scrubberFocusRequester,
-                            leftFocusRequester = audioFocusRequester,
-                            rightFocusRequester = sourcesFocusRequester,
-                        )
-                    }
-                    PlayerLabeledIconButton(
-                        icon = Icons.Filled.Layers,
-                        label = "Sources",
-                        onClick = actions.onSources,
-                        focusRequester = sourcesFocusRequester,
-                        upFocusRequester = scrubberFocusRequester,
-                        leftFocusRequester = if (hasEpisodes) episodesFocusRequester else audioFocusRequester,
-                        rightFocusRequester = aspectRatioFocusRequester,
-                    )
-                    PlayerLabeledIconButton(
-                        icon = Icons.Filled.AspectRatio,
-                        label = stringResource(state.aspectMode.labelResId),
-                        onClick = actions.onToggleAspectRatio,
-                        focusRequester = aspectRatioFocusRequester,
-                        upFocusRequester = scrubberFocusRequester,
-                        leftFocusRequester = sourcesFocusRequester,
-                        rightFocusRequester = speedFocusRequester,
-                    )
-                    PlayerLabeledIconButton(
-                        icon = Icons.Filled.Speed,
-                        label = "${state.playbackSpeed}×",
-                        onClick = actions.onSpeed,
-                        focusRequester = speedFocusRequester,
-                        upFocusRequester = scrubberFocusRequester,
-                        leftFocusRequester = aspectRatioFocusRequester,
+                        leftFocusRequester = audioFocusRequester,
+                        rightFocusRequester = sourcesFocusRequester,
                     )
                 }
+                PlayerLabeledIconButton(
+                    icon = Icons.Filled.Layers,
+                    label = "Sources",
+                    onClick = actions.onSources,
+                    focusRequester = sourcesFocusRequester,
+                    upFocusRequester = scrubberFocusRequester,
+                    leftFocusRequester = if (hasEpisodes) episodesFocusRequester else audioFocusRequester,
+                    rightFocusRequester = aspectRatioFocusRequester,
+                )
+                PlayerLabeledIconButton(
+                    icon = Icons.Filled.AspectRatio,
+                    label = stringResource(state.aspectMode.labelResId),
+                    onClick = actions.onToggleAspectRatio,
+                    focusRequester = aspectRatioFocusRequester,
+                    upFocusRequester = scrubberFocusRequester,
+                    leftFocusRequester = sourcesFocusRequester,
+                    rightFocusRequester = speedFocusRequester,
+                )
+                PlayerLabeledIconButton(
+                    icon = Icons.Filled.Speed,
+                    label = "${state.playbackSpeed}×",
+                    onClick = actions.onSpeed,
+                    focusRequester = speedFocusRequester,
+                    upFocusRequester = scrubberFocusRequester,
+                    leftFocusRequester = aspectRatioFocusRequester,
+                )
             }
         }
     }
@@ -382,16 +382,16 @@ private fun PlayerScrubber(
         animationSpec = if (isScrubbing) tween(0) else tween(150),
         label = "scrubber progress",
     )
-    val trackHeight = if (isFocused) 8.dp else 4.dp
+    val trackHeight = if (isFocused) 5.dp else 3.dp
 
     Column(
         modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(16.dp)
+                .height(12.dp)
                 .focusRequester(focusRequester)
                 .then(
                     if (upFocusRequester != null || downFocusRequester != null || leftFocusRequester != null) {
@@ -476,8 +476,8 @@ private fun PlayerScrubber(
                 Box(
                     modifier = Modifier
                         .align(Alignment.CenterStart)
-                        .offset(x = trackWidth * animatedProgress - 7.dp)
-                        .size(14.dp)
+                        .offset(x = trackWidth * animatedProgress - 5.dp)
+                        .size(10.dp)
                         .clip(CircleShape)
                         .background(if (isScrubbing) SlugYardPalette.OnCanvas else SlugYardPalette.Accent),
                 )
@@ -544,22 +544,25 @@ private fun OutlinedPlayerText(
 }
 
 @Composable
-private fun PauseRatingRow(imdbRating: Float?, tmdbRating: Double?) {
-    val badges = buildList {
+private fun PauseRatingRow(
+    imdbRating: Float?,
+    tmdbRating: Double?,
+    season: Int? = null,
+    episode: Int? = null,
+) {
+    val seasonEpisode = if (season != null && episode != null) {
+        "S${season.toString().padStart(2, '0')}E${episode.toString().padStart(2, '0')}"
+    } else {
+        null
+    }
+    val ratingBadges = buildList {
         imdbRating?.takeIf { it > 0f }?.let { add("IMDb" to formatPlayerRating(it.toDouble())) }
         tmdbRating?.takeIf { it > 0.0 }?.let { add("TMDB" to formatPlayerRating(it)) }
     }
-    if (badges.isEmpty()) return
+    if (ratingBadges.isEmpty() && seasonEpisode == null) return
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-        badges.forEach { (source, value) ->
-            Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(Color.Black.copy(alpha = .58f))
-                    .padding(horizontal = 9.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(5.dp),
-            ) {
+        ratingBadges.forEach { (source, value) ->
+            PauseMetaBadge {
                 Text(
                     source,
                     style = MaterialTheme.typography.labelSmall,
@@ -574,7 +577,30 @@ private fun PauseRatingRow(imdbRating: Float?, tmdbRating: Double?) {
                 )
             }
         }
+        seasonEpisode?.let { label ->
+            PauseMetaBadge {
+                Text(
+                    label,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = Color.White,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        }
     }
+}
+
+@Composable
+private fun PauseMetaBadge(content: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(4.dp))
+            .background(Color.Black.copy(alpha = .58f))
+            .padding(horizontal = 9.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+        content = content,
+    )
 }
 
 private fun formatPlayerRating(value: Double): String = String.format(Locale.US, "%.1f", value)
@@ -618,9 +644,9 @@ private fun PlayerIconButton(
     val focused by interactions.collectIsFocusedAsState()
     val scale by animateFloatAsState(if (focused) 1.06f else 1f, animationSpec = tween(160), label = "$contentDescription focus scale")
     val diameter = when (emphasis) {
-        ButtonEmphasis.PRIMARY -> 44.dp
-        ButtonEmphasis.SECONDARY -> 36.dp
-        ButtonEmphasis.SUBORDINATE -> 32.dp
+        ButtonEmphasis.PRIMARY -> 24.dp
+        ButtonEmphasis.SECONDARY -> 24.dp
+        ButtonEmphasis.SUBORDINATE -> 24.dp
     }
     val shape = RoundedCornerShape(SlugYardTvMetrics.ButtonCornerRadius)
     val background = when {
@@ -670,7 +696,7 @@ private fun PlayerIconButton(
             imageVector = icon,
             contentDescription = null,
             tint = tint,
-            modifier = Modifier.size(if (emphasis == ButtonEmphasis.PRIMARY) 22.dp else 18.dp),
+            modifier = Modifier.size(14.dp),
         )
     }
 }
@@ -694,7 +720,7 @@ private fun PlayerLabeledIconButton(
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
         modifier = Modifier
             .then(focusRequester?.let { Modifier.focusRequester(it) } ?: Modifier)
             .then(
@@ -714,11 +740,11 @@ private fun PlayerLabeledIconButton(
                 onClick = onClick,
             )
             .semantics { contentDescription = label; role = Role.Button }
-            .padding(horizontal = 4.dp, vertical = 2.dp),
+            .padding(horizontal = 2.dp, vertical = 1.dp),
     ) {
         Box(
             modifier = Modifier
-                .size(42.dp)
+                .size(24.dp)
                 .clip(shape)
                 .background(if (focused) Color.White else SlugYardPalette.SurfaceElevated.copy(alpha = 0.9f), shape)
                 .border(
@@ -732,12 +758,12 @@ private fun PlayerLabeledIconButton(
                 imageVector = icon,
                 contentDescription = null,
                 tint = if (focused) Color(0xFF141414) else SlugYardPalette.OnCanvas,
-                modifier = Modifier.size(20.dp),
+                modifier = Modifier.size(14.dp),
             )
         }
         Text(
             shortLabel,
-            style = MaterialTheme.typography.labelMedium,
+            style = MaterialTheme.typography.labelSmall,
             fontWeight = if (focused) FontWeight.SemiBold else FontWeight.Medium,
             color = if (focused) Color.White else SlugYardPalette.OnCanvasMuted,
             maxLines = 1,

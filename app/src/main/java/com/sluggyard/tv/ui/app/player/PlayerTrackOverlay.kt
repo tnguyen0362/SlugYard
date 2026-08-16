@@ -52,16 +52,17 @@ import com.sluggyard.tv.ui.screens.player.PlayerSubtitleUtils
 import com.sluggyard.tv.ui.screens.player.PlayerTrackActions
 import com.sluggyard.tv.ui.screens.player.SUBTITLE_DELAY_STEP_MS
 import com.sluggyard.tv.ui.screens.player.TrackInfo
-import com.sluggyard.tv.ui.util.languageCodeToName
 import kotlin.math.abs
 
 private const val SubtitleOffKey = "off"
 private const val SubtitleFooterKey = "footer"
 
 internal fun audioTrackUiLabel(track: TrackInfo): String {
-    val language = com.sluggyard.tv.ui.screens.player.resolveAudioTrackLanguageCode(track.language, track.name)
-        ?.let(::languageCodeToName)
-        ?: "Unknown language"
+    val language = com.sluggyard.tv.ui.screens.player.trackLanguageDisplayName(
+        language = track.language,
+        label = track.name,
+        ordinal1Based = track.index + 1,
+    )
     val format = audioFormatLabel(track.codec)
     return listOfNotNull(language, format).joinToString(" · ")
 }
@@ -140,7 +141,11 @@ fun PlayerTrackOverlay(
             // across text tracks; colliding LazyColumn keys break TV focus traversal on those streams.
             val subtitleChoices = buildList {
                 state.subtitleTracks.forEachIndexed { ordinal, track ->
-                    val language = subtitleLanguageName(track.language, track.name)
+                    val language = com.sluggyard.tv.ui.screens.player.trackLanguageDisplayName(
+                        language = track.language,
+                        label = track.name,
+                        ordinal1Based = ordinal + 1,
+                    )
                     val format = subtitleCodecTag(track.codec, track.sampleMimeType, track.name)
                     val (title, detail) = PlayerSubtitleUtils.formatSubtitleTrackLabel(
                         languageDisplay = language,
@@ -517,15 +522,6 @@ private fun SubtitlePillRow(
                 fontWeight = FontWeight.Bold,
             )
         }
-    }
-}
-
-private fun subtitleLanguageName(language: String?, fallback: String): String {
-    language?.takeIf(String::isNotBlank)?.let { return languageCodeToName(it) }
-    return if (fallback.matches(Regex("[A-Za-z]{2,3}([_-][A-Za-z0-9]{2,4})?"))) {
-        languageCodeToName(fallback)
-    } else {
-        fallback
     }
 }
 

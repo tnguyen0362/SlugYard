@@ -79,7 +79,7 @@ fun NextEpisodeEndPromptOverlay(
                 .focusGroup()
                 .padding(
                     horizontal = SlugYardTheme.spacing.xxl,
-                    vertical = SlugYardTheme.spacing.xl
+                    vertical = SlugYardTheme.spacing.md
                 ),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(SlugYardTheme.spacing.lg)

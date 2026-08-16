@@ -229,7 +229,8 @@ internal fun PlayerRuntimeController.recomputeNextEpisode(resetVisibility: Boole
     val resolvedNext = PlayerNextEpisodeRules.resolveNextEpisode(
         videos = metaVideos,
         currentSeason = season,
-        currentEpisode = episode
+        currentEpisode = episode,
+        currentVideoId = currentVideoId,
     )
 
     nextEpisodeVideo = resolvedNext

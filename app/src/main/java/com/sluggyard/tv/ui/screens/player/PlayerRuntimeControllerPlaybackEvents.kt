@@ -170,14 +170,59 @@ internal fun PlayerRuntimeController.resetPostPlayStateAfterPlaybackEnded() {
         return
     }
 
+    // Guarantee Up next when a successor is known and the viewer did not dismiss —
+    // do not wipe the end of the file without a card.
+    if (!state.postPlayDismissedForCurrentEpisode &&
+        state.nextEpisode != null &&
+        nextEpisodeVideo != null
+    ) {
+        forceShowPostPlayOverlayAtEnd()
+        return
+    }
+
     resetPostPlayOverlayState(clearEpisode = false)
+}
+
+/**
+ * Surfaces the Up next / still-watching card at natural completion when it never
+ * appeared during the credits window (no IntroDB outro, late duration, etc.).
+ */
+private fun PlayerRuntimeController.forceShowPostPlayOverlayAtEnd() {
+    val state = _uiState.value
+    val next = state.nextEpisode ?: return
+    if (nextEpisodeVideo == null) return
+    if (state.postPlayMode != null) return
+
+    val shouldEnterStillWatching = shouldEnterStillWatchingPrompt(
+        stillWatchingEnabled = stillWatchingEnabledSetting,
+        autoPlayNextEpisodeEnabled = streamAutoPlayNextEpisodeEnabledSetting,
+        nextEpisodeHasAired = next.hasAired,
+        consecutiveAutoPlayCount = consecutiveAutoPlayCount,
+        threshold = stillWatchingEpisodeThresholdSetting,
+    )
+
+    if (shouldEnterStillWatching) {
+        enterStillWatchingPromptMode()
+        return
+    }
+
+    _uiState.update {
+        it.copy(
+            postPlayMode = PostPlayMode.AutoPlay(nextEpisode = next),
+            activeSkipInterval = null,
+        )
+    }
+    if (next.hasAired && streamAutoPlayNextEpisodeEnabledSetting) {
+        playNextEpisode()
+    }
 }
 
 internal fun shouldResetPostPlayStateAfterPlaybackEnded(
     state: PlayerUiState,
     hasInFlightNextEpisodeAutoPlay: Boolean
 ): Boolean {
-    if (state.postPlayMode?.blocksNaturalCompletion() == true) return false
+    // Keep any visible Up next / still-watching chrome through STATE_ENDED.
+    if (state.postPlayMode != null) return false
     if (hasInFlightNextEpisodeAutoPlay) return false
     return true
 }
@@ -825,6 +870,14 @@ internal fun PlayerRuntimeController.emitStopScrobbleForCurrentProgress() {
 internal fun PlayerRuntimeController.flushPlaybackSnapshotForSwitchOrExit() {
     emitStopScrobbleForCurrentProgress()
     saveWatchProgress()
+}
+
+internal fun PlayerRuntimeController.flushPlaybackSnapshotUnlessSuppressed() {
+    if (suppressNextPlaybackProgressFlush) {
+        suppressNextPlaybackProgressFlush = false
+        return
+    }
+    flushPlaybackSnapshotForSwitchOrExit()
 }
 
 internal fun PlayerRuntimeController.scheduleProgressSyncAfterSeek() {

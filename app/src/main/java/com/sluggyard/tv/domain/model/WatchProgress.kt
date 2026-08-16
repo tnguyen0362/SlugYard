@@ -34,7 +34,8 @@ data class WatchProgress(
         const val SOURCE_TRAKT_HISTORY = "trakt_history"
         const val SOURCE_TRAKT_SHOW_PROGRESS = "trakt_show_progress"
         const val STARTED_THRESHOLD = 0.02f
-        const val COMPLETED_THRESHOLD = 0.98f
+        /** Mark movie/episode watched once playback reaches this fraction (90%). */
+        const val COMPLETED_THRESHOLD = 0.90f
     }
 
     /**

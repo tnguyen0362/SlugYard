@@ -107,6 +107,7 @@ fun StreamsScreen(
     onStreamSelected: (StreamCandidate) -> Unit,
     onBack: () -> Unit,
     contentFocusRequester: FocusRequester? = null,
+    filtersEmptiedList: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     BackHandler(enabled = true, onBack = onBack)
@@ -117,15 +118,32 @@ fun StreamsScreen(
     val listState = rememberLazyListState()
     var seededInitialFocus by remember(title) { mutableStateOf(false) }
 
-    val listItems = remember(groups) {
+    val listItems = remember(groups, filtersEmptiedList) {
         buildList {
+            if (filtersEmptiedList) {
+                add(
+                    StreamListItem.Status(
+                        "No sources match your link filters. Open Settings → Sources to adjust.",
+                        Color(0xFFFFB74D),
+                    ),
+                )
+            }
             groups.forEach { group ->
                 add(StreamListItem.AddonHeader(group.addonName))
                 when (val state = group.state) {
                     StreamGroupState.Loading ->
                         add(StreamListItem.Status("Searching this source...",SlugYardPalette.OnCanvasMuted))
                     StreamGroupState.Empty ->
-                        add(StreamListItem.Status("No streams returned", SlugYardPalette.OnCanvasMuted))
+                        add(
+                            StreamListItem.Status(
+                                if (filtersEmptiedList) {
+                                    "Hidden by link filters"
+                                } else {
+                                    "No streams returned"
+                                },
+                                SlugYardPalette.OnCanvasMuted,
+                            ),
+                        )
                     is StreamGroupState.Error ->
                         add(StreamListItem.Status(state.message, SlugYardPalette.Danger))
                     is StreamGroupState.Content ->

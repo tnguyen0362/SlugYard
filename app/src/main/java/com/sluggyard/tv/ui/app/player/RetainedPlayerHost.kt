@@ -41,6 +41,8 @@ import com.sluggyard.tv.ui.app.streams.StreamsDataSource
 import com.sluggyard.tv.ui.app.streams.SubtitleDataSource
 import com.sluggyard.tv.ui.app.streams.SubtitleGroupState
 import com.sluggyard.tv.ui.app.streams.DigitalReleaseLookup
+import com.sluggyard.tv.ui.app.streams.StreamLinkFilterPolicy
+import com.sluggyard.tv.ui.app.streams.StreamLinkFilterSettings
 import com.sluggyard.tv.ui.app.streams.selectAutoPlayCandidate
 import com.sluggyard.tv.domain.model.Subtitle
 import com.sluggyard.tv.ui.screens.player.PlayerEvent
@@ -95,6 +97,7 @@ fun RetainedPlayerHost(
     configuredDebrid: suspend () -> DebridService?,
     digitalReleaseLookup: DigitalReleaseLookup? = null,
     streamBadgeRules: StreamBadgeRules = StreamBadgeRules(),
+    linkFilters: StreamLinkFilterSettings = StreamLinkFilterSettings(),
     onBack: () -> Unit,
 ) {
     val viewModel: PlayerViewModel = hiltViewModel()
@@ -143,6 +146,7 @@ fun RetainedPlayerHost(
     val parentType = activeContext.parentType
     val latestContext by rememberUpdatedState(activeContext)
     val latestStreamBadgeRules by rememberUpdatedState(streamBadgeRules)
+    val latestLinkFilters by rememberUpdatedState(linkFilters)
     var lastSavedPositionMs by remember(contentId, season, episode) { mutableLongStateOf(0L) }
     val latestTimeline by rememberUpdatedState(timeline)
     val latestTitle by rememberUpdatedState(title)
@@ -230,7 +234,8 @@ fun RetainedPlayerHost(
                 groups.collectLatest { next ->
                     // Badge regex packs must not run on main — that ANR'd Sources on Onn (~179% CPU).
                     val applied = withContext(Dispatchers.Default) {
-                        StreamBadgeApplicator.apply(next, latestStreamBadgeRules)
+                        val filtered = StreamLinkFilterPolicy.filterGroups(next, latestLinkFilters)
+                        StreamBadgeApplicator.apply(filtered, latestStreamBadgeRules)
                     }
                     secondaryState = secondaryState.copy(
                         sourceGroups = applied,
@@ -398,6 +403,7 @@ fun RetainedPlayerHost(
                     ),
                     // Full collect finished above — probes settled; allow debrid download fallback.
                     allowUncachedFallback = true,
+                    linkFilters = latestLinkFilters,
                 )
                 if (candidate == null) {
                     episodeHandoffPreparing = false
@@ -582,6 +588,7 @@ fun RetainedPlayerHost(
                         preferredSubtitleLanguage = playerState.subtitleStyle.preferredLanguage,
                     ),
                     allowUncachedFallback = true,
+                    linkFilters = latestLinkFilters,
                 ) ?: run {
                     episodeHandoffPreparing = false
                     openSources()

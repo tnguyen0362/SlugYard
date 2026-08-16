@@ -14,6 +14,7 @@ enum class SettingsCategory(
     Display("Display", "Frame rate, resolution, and aspect mode"),
     Subtitles("Subtitles", "Language, visibility, and subtitle style"),
     Audio("Audio", "Language, channels, and output behavior"),
+    Sources("Sources", "Link filters for Sources and auto-play"),
     About("About", "License, privacy, terms, and credits"),
 }
 
@@ -64,6 +65,7 @@ object SettingsPolicy {
         SettingsCategory.Display,
         SettingsCategory.Subtitles,
         SettingsCategory.Audio,
+        SettingsCategory.Sources,
         SettingsCategory.About,
     )
 

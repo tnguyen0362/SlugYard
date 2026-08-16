@@ -1003,11 +1003,16 @@ class StreamAutoPickerTest {
         // Movies are not size-penalized for being large — 102GB remux keeps full sizeFit.
         assertEquals(100, remuxRank.sizeFit)
         assertEquals(100, hugeRank.sizeFit)
-        // 4K remux still beats 1080p web on quality; size is not the decider.
         assertTrue(remuxRank.quality > webRank.quality)
+        // Ranking still prefers remux on quality; sizeFit is not crushed. Auto-pick with
+        // default 15GB link filters would hide the 42GB remux — pass Unlimited for this assert.
         assertEquals(
             remux,
-            selectAutoPlayCandidate(groups(remux, web), context),
+            selectAutoPlayCandidate(
+                groups(remux, web),
+                context,
+                linkFilters = StreamLinkFilterSettings(maxSizeGb = null),
+            ),
         )
     }
 

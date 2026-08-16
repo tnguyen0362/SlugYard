@@ -364,9 +364,9 @@ enum class NextEpisodeThresholdMode {
 
 /**
  * Lowest selectable "Up next" trigger point. Mirrors PlayerNextEpisodeRules.MIN_THRESHOLD_PERCENT;
- * 97% was too late on short episodes whose credits start earlier.
+ * 97%/95% was too late on short episodes / titles without IntroDB outro data.
  */
-const val MIN_NEXT_EPISODE_THRESHOLD_PERCENT = 95f
+const val MIN_NEXT_EPISODE_THRESHOLD_PERCENT = 90f
 
 enum class SubtitleOrganizationMode {
     NONE, BY_LANGUAGE, BY_ADDON

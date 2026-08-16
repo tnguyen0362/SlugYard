@@ -206,9 +206,13 @@ class MpvPlayerSurfaceView @JvmOverloads constructor(
         return mpv.getPropertyBoolean("core-idle") == true
     }
 
-    fun seekToMs(positionMs: Long) {
+    fun seekToMs(positionMs: Long, exact: Boolean = false) {
         if (!initialized) return
-        mpv.setPropertyDouble("time-pos", positionMs.coerceAtLeast(0L) / 1000.0)
+        val seconds = positionMs.coerceAtLeast(0L) / 1000.0
+        // Transport FF/RW uses keyframes so remuxes don't stall on an exact demux
+        // rebuild. Resume / precise restores still need absolute+exact.
+        val mode = if (exact) "absolute+exact" else "absolute+keyframes"
+        mpv.command("seek", seconds.toString(), mode)
     }
 
     fun currentPositionMs(): Long {
@@ -712,12 +716,11 @@ class MpvPlayerSurfaceView @JvmOverloads constructor(
         val availableMemory = runtime.maxMemory() - (runtime.totalMemory() - runtime.freeMemory())
 
         val (forwardBufferBytes, backBufferBytes, readAheadSecs) = when {
-            // Keep total cache below 96 MB even on roomy devices. A six-second
-            // forward window covers normal 4K bitrate bursts without delaying
-            // first frame or forcing the system to reclaim a video decoder.
-            availableMemory > 512 * 1024 * 1024 -> Triple(72L, 16L, 6)
-            availableMemory > 256 * 1024 * 1024 -> Triple(40L, 8L, 4)
-            else -> Triple(24L, 4L, 3)
+            // Forward window must clear the 10s transport FF step or every press
+            // lands past cache and stalls. Keep totals modest for TV RAM.
+            availableMemory > 512 * 1024 * 1024 -> Triple(96L, 24L, 15)
+            availableMemory > 256 * 1024 * 1024 -> Triple(64L, 16L, 12)
+            else -> Triple(40L, 8L, 10)
         }.let { (forwardMb, backMb, seconds) ->
             Triple(forwardMb * 1024L * 1024L, backMb * 1024L * 1024L, seconds)
         }

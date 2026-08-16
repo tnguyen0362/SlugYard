@@ -568,6 +568,9 @@ fun AppShell(
     val streamBadgeSettings by settingsFacade.streamBadgeSettings.collectAsState(
         initial = com.sluggyard.tv.core.streams.StreamBadgeSettings(),
     )
+    val streamLinkFilters by settingsFacade.streamLinkFilterSettings.collectAsState(
+        initial = com.sluggyard.tv.ui.app.streams.StreamLinkFilterSettings(),
+    )
     LaunchedEffect(Unit) {
         runCatching { settingsFacade.ensureDefaultStreamBadgePack() }
     }
@@ -683,6 +686,7 @@ fun AppShell(
                     },
                     digitalReleaseLookup = graph.digitalReleaseLookup,
                     streamBadgeRules = streamBadgeSettings.rules,
+                    linkFilters = streamLinkFilters,
                     onBack = {
                         graph.clearPlaybackSource(playbackKey)
                         navController.popBackStack()
@@ -843,6 +847,9 @@ private fun AppContent(
     )
     val streamBadgeSettings by settingsFacade.streamBadgeSettings.collectAsState(
         initial = com.sluggyard.tv.core.streams.StreamBadgeSettings(),
+    )
+    val streamLinkFilters by settingsFacade.streamLinkFilterSettings.collectAsState(
+        initial = com.sluggyard.tv.ui.app.streams.StreamLinkFilterSettings(),
     )
     val debridConnection by graph.debridRuntime.connection.collectAsState(initial = DebridConnection())
     val landscapePostersOnFocus by settingsFacade.layoutPreferences.modernLandscapePostersEnabled.collectAsState(initial = true)
@@ -1744,7 +1751,7 @@ private fun AppContent(
             streamDiscoveryComplete = true
             return@LaunchedEffect
         }
-        val softsubReady = isAnimeAutoPlayWait(streams) && hasLikelySoftsubCachedHint(streamGroups)
+        val softsubReady = isAnimeAutoPlayWait(streams) && hasLikelySoftsubCachedHint(streamGroups, streamLinkFilters)
         val animeWaitOnAio = !softsubReady &&
             isAnimeAutoPlayWait(streams) &&
             streamGroups.any { it.isAioStreamsGroup() && it.state is com.sluggyard.tv.ui.app.streams.StreamGroupState.Loading }
@@ -1778,13 +1785,14 @@ private fun AppContent(
     LaunchedEffect(streamsDiscoveryKey, playerSettings.subtitleStyle.preferredLanguage) {
         val streams = destination as? RootDestination.Streams ?: return@LaunchedEffect
         snapshotFlow {
-            val softsubReady = isAnimeAutoPlayWait(streams) && hasLikelySoftsubCachedHint(streamGroups)
+            val softsubReady = isAnimeAutoPlayWait(streams) && hasLikelySoftsubCachedHint(streamGroups, streamLinkFilters)
             val cachedReady = hasEligibleCachedAutoPlay(
                 streamGroups,
                 StreamScoringEngine.Context(
                     title = streams.title,
                     contentType = streams.type,
                 ),
+                linkFilters = streamLinkFilters,
             )
             softsubReady to cachedReady
         }
@@ -1804,16 +1812,27 @@ private fun AppContent(
         streamGroups,
         cacheWaitExpired,
         streamBadgeSettings.rules,
+        streamLinkFilters,
         destination,
     ) {
         // Auto-pick Finding never shows Sources — skip badge remap on the full dump.
         val streams = destination as? RootDestination.Streams
         if (streams?.autoPick == true) return@remember emptyList()
         val remapped = if (!cacheWaitExpired) streamGroups else remapCheckingCacheStates(streamGroups)
+        val filtered = com.sluggyard.tv.ui.app.streams.StreamLinkFilterPolicy.filterGroups(
+            remapped,
+            streamLinkFilters,
+        )
         // Skip Fusion badge regex on huge dumps in composition — player Sources applies badges
         // off-main; doing it here on every probe was part of the Sources ANR.
-        val total = remapped.sumOf { (it.state as? com.sluggyard.tv.ui.app.streams.StreamGroupState.Content)?.streams?.size ?: 0 }
-        if (total > 80) remapped else StreamBadgeApplicator.apply(remapped, streamBadgeSettings.rules)
+        val total = filtered.sumOf { (it.state as? com.sluggyard.tv.ui.app.streams.StreamGroupState.Content)?.streams?.size ?: 0 }
+        if (total > 80) filtered else StreamBadgeApplicator.apply(filtered, streamBadgeSettings.rules)
+    }
+    val sourcesEmptiedByFilters = remember(streamGroups, displayStreamGroups, streamLinkFilters, destination) {
+        val streams = destination as? RootDestination.Streams
+        if (streams == null || streams.autoPick) return@remember false
+        val remapped = if (!cacheWaitExpired) streamGroups else remapCheckingCacheStates(streamGroups)
+        com.sluggyard.tv.ui.app.streams.StreamLinkFilterPolicy.emptiedByFilters(remapped, displayStreamGroups)
     }
 
     fun resolveStreamCandidate(candidate: StreamCandidate, streams: RootDestination.Streams) {
@@ -2020,7 +2039,7 @@ private fun AppContent(
         val streams = destination as? RootDestination.Streams ?: return@LaunchedEffect
         if (!streams.autoPick) return@LaunchedEffect
         snapshotFlow {
-            val softsubReady = isAnimeAutoPlayWait(streams) && hasLikelySoftsubCachedHint(streamGroups)
+            val softsubReady = isAnimeAutoPlayWait(streams) && hasLikelySoftsubCachedHint(streamGroups, streamLinkFilters)
             val cachedReady = hasEligibleCachedAutoPlay(
                 streamGroups,
                 StreamScoringEngine.Context(
@@ -2035,6 +2054,7 @@ private fun AppContent(
                     language = streams.contentLanguage ?: detailsState?.contentLanguage,
                     preferredSubtitleLanguage = playerSettings.subtitleStyle.preferredLanguage,
                 ),
+                linkFilters = streamLinkFilters,
             )
             val aioBlocking = !discoveryHardCeilingReached &&
                 !softsubReady &&
@@ -2046,8 +2066,11 @@ private fun AppContent(
             val hasCachedAlready = streamGroups
                 .flatMap { (it.state as? com.sluggyard.tv.ui.app.streams.StreamGroupState.Content)?.streams.orEmpty() }
                 .any {
-                    it.cacheState == com.sluggyard.tv.core.streamresolution.StreamCacheState.CACHED ||
-                        (!it.directUrl.isNullOrBlank() && it.infoHash.isNullOrBlank())
+                    (
+                        it.cacheState == com.sluggyard.tv.core.streamresolution.StreamCacheState.CACHED ||
+                            (!it.directUrl.isNullOrBlank() && it.infoHash.isNullOrBlank())
+                        ) &&
+                        com.sluggyard.tv.ui.app.streams.StreamLinkFilterPolicy.allows(it, streamLinkFilters)
                 }
             // Movies: never stall Finding on TorBox checkcached. Anime may wait briefly for
             // softsub-bearing Instant rows to get their CACHED flag.
@@ -2202,6 +2225,7 @@ private fun AppContent(
                         excludedCandidateIds = snap.rejected,
                         preferLastPlayed = null,
                         allowUncachedFallback = allowUncached,
+                        linkFilters = streamLinkFilters,
                     )
                     if (candidate != null) return@withContext AutoPickOutcome.Play(candidate)
                     // Empty partial fanout often "completes" in ~0.3s with 0/0 scrapers — keep
@@ -2267,6 +2291,7 @@ private fun AppContent(
                                 excludedCandidateIds = autoPickRejectedIds,
                                 preferLastPlayed = null,
                                 allowUncachedFallback = allowUncached,
+                                linkFilters = streamLinkFilters,
                             )
                         }
                         if (candidate != null) {
@@ -2294,6 +2319,7 @@ private fun AppContent(
                                 excludedCandidateIds = autoPickRejectedIds,
                                 preferLastPlayed = null,
                                 allowUncachedFallback = true,
+                                linkFilters = streamLinkFilters,
                             )
                         }
                         resolved = if (candidate != null) {
@@ -3027,6 +3053,7 @@ private fun AppContent(
                              StreamsScreen(
                                  title = streams.title,
                                  groups = displayStreamGroups,
+                                 filtersEmptiedList = sourcesEmptiedByFilters,
                                   onStreamSelected = { candidate ->
                                       resolveStreamCandidate(candidate, streams)
                                   },
