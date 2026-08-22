@@ -3,8 +3,9 @@ package com.sluggyard.tv.core.watchstate
 import java.time.LocalDate
 
 const val STARTED_PROGRESS_FRACTION = 0.02
-const val COMPLETED_PROGRESS_FRACTION = 0.90
-const val PASSIVE_COMPLETION_SEED_FRACTION = 0.95
+/** Completion = 98% (shared constant tree). Reaching this ends the mid-stream row for that title. */
+const val COMPLETED_PROGRESS_FRACTION = 0.98
+const val PASSIVE_COMPLETION_SEED_FRACTION = 0.98
 
 /**
  * Absolute floor for "started". 2% of a 2h film is ~2.5 minutes, so a short sample never showed

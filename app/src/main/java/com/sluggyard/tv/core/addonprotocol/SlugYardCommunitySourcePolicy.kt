@@ -7,11 +7,11 @@ import com.sluggyard.tv.BuildConfig
  *
  * Provider-specific manifest URLs are generated only for the allowlisted content sources.
  * Torrent hashes returned by those sources are still resolved locally through the active
- * rewrite-owned provider transport. Torrentio stays provisioned even during a transient upstream
- * outage; endpoint availability is handled by the bounded transport, not by removing a source.
+ * rewrite-owned provider transport.
  *
- * PlayFlix is the **app** product name — not a separate Stremio stream pack. Content scrapers are
- * Torrentio, MediaFusion, Meteor, and optionally AIOStreams (real upstream names/logos).
+ * **PlayFlix** is the product-facing name for the **entire stream-scraper pack**:
+ * Torrentio, MediaFusion, Meteor, AIOStreams, and any other allowlisted scrapers.
+ * Users never see those upstream names in Settings — only "PlayFlix".
  */
 object SlugYardCommunitySourcePolicy {
     /** Present only when AIOSTREAMS_BASE_URL is set; keyless stub is never used for streams. */
@@ -26,17 +26,18 @@ object SlugYardCommunitySourcePolicy {
     const val PLAYFLIX_MANIFEST_URL =
         "https://mediafusionfortheweebs.midnightignite.me/manifest.json"
 
-    /** @deprecated Prefer real upstream [ManagedAddon.manifest] branding (MediaFusion). */
-    @Deprecated("PlayFlix is the app, not a stream pack name")
-    const val PLAYFLIX_DISPLAY_NAME = "MediaFusion"
+    /**
+     * Synthetic Settings/Community id for the PlayFlix scraper pack (not a real Stremio host).
+     * Install/uninstall routes provision or remove **all** content scrapers.
+     */
+    const val PLAYFLIX_PACK_ID = "playflix://scraper-pack"
 
-    /** @deprecated Use upstream manifest.version. */
-    @Deprecated("PlayFlix is the app, not a stream pack name")
-    const val PLAYFLIX_DISPLAY_VERSION = "1.1.0"
+    const val PLAYFLIX_DISPLAY_NAME = "PlayFlix"
 
-    /** @deprecated Use upstream manifest.description. */
-    @Deprecated("PlayFlix is the app, not a stream pack name")
-    const val PLAYFLIX_DISPLAY_DESCRIPTION = "Third-party scrape"
+    const val PLAYFLIX_DISPLAY_VERSION = "1.0"
+
+    const val PLAYFLIX_DISPLAY_DESCRIPTION =
+        "PlayFlix stream scrapers — Torrentio, MediaFusion, Meteor, and related sources"
 
     val bootstrapManifestUrls: List<String> = buildList {
         add("https://v3-cinemeta.strem.io/manifest.json")
@@ -70,15 +71,19 @@ object SlugYardCommunitySourcePolicy {
         }
 
     /**
-     * Optional Community catalog entries (manual install only). Empty — MediaFusion is a default
-     * pack scraper, not a separate "PlayFlix" community addon.
+     * Community list is built as a single PlayFlix pack card (see [playFlixPackCardModel]).
+     * Empty — individual scraper URLs are not community catalog rows.
      */
     val optionalCommunityManifestUrls: List<String> = emptyList()
 
     fun isWatchHubManifest(url: String): Boolean =
         "watchhub" in url.lowercase()
 
-    /** True for the bundled MediaFusion host URL (legacy name: PlayFlix manifest). */
+    /** True for the synthetic PlayFlix pack id used only in Settings cards. */
+    fun isPlayFlixPackIdentifier(url: String): Boolean =
+        url.trim().equals(PLAYFLIX_PACK_ID, ignoreCase = true)
+
+    /** True for the bundled MediaFusion host URL (one of the scrapers inside PlayFlix). */
     fun isPlayFlixManifest(url: String): Boolean {
         val normalized = url.trim().trimEnd('/').lowercase()
         val mediaFusion = PLAYFLIX_MANIFEST_URL.trimEnd('/').lowercase()
@@ -89,16 +94,19 @@ object SlugYardCommunitySourcePolicy {
     }
 
     /**
-     * Formerly used to strip MediaFusion from auto-pick. Always false — it is a real pack
-     * scraper like Torrentio/Meteor, not a separate "PlayFlix" source.
+     * Formerly used to strip MediaFusion from auto-pick. Always false — scrapers stay in
+     * stream selection under their technical identities; product branding is PlayFlix only in UI.
      */
     @Suppress("UNUSED_PARAMETER")
     fun isPlayFlixStreamAddon(addonId: String, addonName: String): Boolean = false
 
-    /** No optional community packs in the locked-down default set. */
     @Suppress("UNUSED_PARAMETER")
     fun isOptionalCommunityManifest(url: String): Boolean = false
 
+    /**
+     * Internal registry name helper. Scrapers are never listed alone in Settings — UI uses
+     * [playFlixPackCardModel] with [PLAYFLIX_DISPLAY_NAME].
+     */
     fun addonDisplayName(addon: ManagedAddon): String = addon.manifest.name
 
     fun addonDisplayVersion(addon: ManagedAddon): String? =
@@ -136,11 +144,12 @@ object SlugYardCommunitySourcePolicy {
         !isContentSourceManifest(url)
 
     /**
-     * Stream scrapers / torrent providers that should stay out of Addons Settings lists
-     * (same bucket as Torrentio / Meteor / MediaFusion / AIO).
+     * Stream scrapers / torrent providers that stay out of individual Settings rows —
+     * they are one PlayFlix pack.
      */
     fun isStreamScraperManifest(url: String): Boolean {
         if (isWatchHubManifest(url)) return false
+        if (isPlayFlixPackIdentifier(url)) return true
         val normalized = url.lowercase()
         return "torrentio" in normalized ||
             "comet" in normalized ||
@@ -150,15 +159,25 @@ object SlugYardCommunitySourcePolicy {
             isPlayFlixManifest(url)
     }
 
-    /** Catalog / meta / subtitle infrastructure; scrapers are hidden. */
+    /**
+     * Catalog / meta / subtitle / WatchHub only. Scrapers never appear as separate cards.
+     */
     fun isUserFacingSettingsAddon(addon: ManagedAddon): Boolean {
-        if (isStreamScraperManifest(addon.manifestUrl)) return false
+        if (isStreamScraperManifest(addon.manifestUrl) || isPlayFlixPackIdentifier(addon.manifestUrl)) {
+            return false
+        }
         if (isInfrastructureManifest(addon.manifestUrl)) return true
         val resources = addon.manifest.resources
         return AddonResource.CATALOG in resources ||
             AddonResource.META in resources ||
             AddonResource.SUBTITLES in resources
     }
+
+    /** True when any scraper in the PlayFlix pack is enabled in the registry. */
+    fun isPlayFlixPackInstalled(addons: List<ManagedAddon>): Boolean =
+        addons.any { addon ->
+            addon.enabled && isStreamScraperManifest(addon.manifestUrl)
+        }
 
     /**
      * Manifests to fetch for a provision pass.
@@ -175,9 +194,7 @@ object SlugYardCommunitySourcePolicy {
         }
 
     fun isPlayFlixInstalled(addons: List<ManagedAddon>): Boolean =
-        addons.any { addon ->
-            addon.enabled && isPlayFlixManifest(addon.manifestUrl)
-        }
+        isPlayFlixPackInstalled(addons)
 
     fun isWatchHubInstalled(addons: List<ManagedAddon>): Boolean =
         addons.any { addon ->

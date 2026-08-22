@@ -18,6 +18,7 @@ import com.sluggyard.tv.data.repository.parseContentIds
 import com.sluggyard.tv.data.repository.resolveEffectiveContentId
 import com.sluggyard.tv.data.repository.toTraktIds
 import com.sluggyard.tv.domain.model.WatchProgress
+import com.sluggyard.tv.ui.util.languageCodeToName
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.update
@@ -170,14 +171,59 @@ internal fun PlayerRuntimeController.resetPostPlayStateAfterPlaybackEnded() {
         return
     }
 
+    // Guarantee Up next when a successor is known and the viewer did not dismiss —
+    // do not wipe the end of the file without a card.
+    if (!state.postPlayDismissedForCurrentEpisode &&
+        state.nextEpisode != null &&
+        nextEpisodeVideo != null
+    ) {
+        forceShowPostPlayOverlayAtEnd()
+        return
+    }
+
     resetPostPlayOverlayState(clearEpisode = false)
+}
+
+/**
+ * Surfaces the Up next / still-watching card at natural completion when it never
+ * appeared during the credits window (no IntroDB outro, late duration, etc.).
+ */
+private fun PlayerRuntimeController.forceShowPostPlayOverlayAtEnd() {
+    val state = _uiState.value
+    val next = state.nextEpisode ?: return
+    if (nextEpisodeVideo == null) return
+    if (state.postPlayMode != null) return
+
+    val shouldEnterStillWatching = shouldEnterStillWatchingPrompt(
+        stillWatchingEnabled = stillWatchingEnabledSetting,
+        autoPlayNextEpisodeEnabled = streamAutoPlayNextEpisodeEnabledSetting,
+        nextEpisodeHasAired = next.hasAired,
+        consecutiveAutoPlayCount = consecutiveAutoPlayCount,
+        threshold = stillWatchingEpisodeThresholdSetting,
+    )
+
+    if (shouldEnterStillWatching) {
+        enterStillWatchingPromptMode()
+        return
+    }
+
+    _uiState.update {
+        it.copy(
+            postPlayMode = PostPlayMode.AutoPlay(nextEpisode = next),
+            activeSkipInterval = null,
+        )
+    }
+    if (next.hasAired && streamAutoPlayNextEpisodeEnabledSetting) {
+        playNextEpisode()
+    }
 }
 
 internal fun shouldResetPostPlayStateAfterPlaybackEnded(
     state: PlayerUiState,
     hasInFlightNextEpisodeAutoPlay: Boolean
 ): Boolean {
-    if (state.postPlayMode?.blocksNaturalCompletion() == true) return false
+    // Keep any visible Up next / still-watching chrome through STATE_ENDED.
+    if (state.postPlayMode != null) return false
     if (hasInFlightNextEpisodeAutoPlay) return false
     return true
 }
@@ -827,6 +873,14 @@ internal fun PlayerRuntimeController.flushPlaybackSnapshotForSwitchOrExit() {
     saveWatchProgress()
 }
 
+internal fun PlayerRuntimeController.flushPlaybackSnapshotUnlessSuppressed() {
+    if (suppressNextPlaybackProgressFlush) {
+        suppressNextPlaybackProgressFlush = false
+        return
+    }
+    flushPlaybackSnapshotForSwitchOrExit()
+}
+
 internal fun PlayerRuntimeController.scheduleProgressSyncAfterSeek() {
     seekProgressSyncJob?.cancel()
     seekProgressSyncJob = scope.launch {
@@ -1006,7 +1060,32 @@ fun PlayerRuntimeController.onEvent(event: PlayerEvent) {
         is PlayerEvent.OnSelectSubtitleTrack -> handleSelectSubtitleTrack(event.index)
         PlayerEvent.OnDisableSubtitles -> handleDisableSubtitles()
         is PlayerEvent.OnSelectAddonSubtitle -> handleSelectAddonSubtitle(event)
-        PlayerEvent.OnRetrySubtitleSearch -> refreshSubtitlesForCurrentEpisode()
+        PlayerEvent.OnRetrySubtitleSearch -> {
+            if (subtitleMode) {
+                rewriteSubtitleSearchHandler?.invoke()
+            } else {
+                refreshSubtitlesForCurrentEpisode()
+            }
+        }
+        PlayerEvent.OnOpenSubtitleLanguagePicker -> {
+            _uiState.update { it.copy(subtitleLanguagePickerOpen = !it.subtitleLanguagePickerOpen) }
+        }
+        is PlayerEvent.OnPickSubtitleLanguage -> {
+            val label = event.language
+                ?.takeIf(String::isNotBlank)
+                ?.let { languageCodeToName(it) }
+                ?: "All languages"
+            _uiState.update {
+                it.copy(
+                    subtitleSearchLanguageLabel = label,
+                    subtitleLanguagePickerOpen = false,
+                )
+            }
+            rewriteSubtitleLanguageHandler?.invoke(event.language?.takeIf(String::isNotBlank))
+        }
+        is PlayerEvent.OnPreferredAudioLayoutChanged -> {
+            scope.launch { runCatching { playerSettingsDataStore.setPreferredAudioLayout(event.layout) } }
+        }
         is PlayerEvent.OnSetPlaybackSpeed -> handleSetPlaybackSpeed(event.speed)
         PlayerEvent.OnToggleControls -> handleToggleControls()
         PlayerEvent.OnShowAudioOverlay -> showAudioOverlay()

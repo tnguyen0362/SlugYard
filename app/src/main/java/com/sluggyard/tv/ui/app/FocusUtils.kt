@@ -33,3 +33,18 @@ fun Modifier.verticalFocusExits(
     this.up = up ?: FocusRequester.Cancel
     this.down = down ?: FocusRequester.Cancel
 }
+
+/**
+ * Stop horizontal D-pad from leaving a poster shelf into the floating header/nav.
+ * First card cancels Left; last card cancels Right.
+ */
+fun Modifier.horizontalFocusBounds(
+    lockLeft: Boolean = false,
+    lockRight: Boolean = false,
+): Modifier {
+    if (!lockLeft && !lockRight) return this
+    return focusProperties {
+        if (lockLeft) left = FocusRequester.Cancel
+        if (lockRight) right = FocusRequester.Cancel
+    }
+}

@@ -36,6 +36,19 @@ class PostPlayResetRulesTest {
     }
 
     @Test
+    fun `ended playback does not reset while up next card is visible`() {
+        // Plain AutoPlay used to be wiped on STATE_ENDED — keep the card.
+        assertFalse(
+            shouldResetPostPlayStateAfterPlaybackEnded(
+                state = PlayerUiState(
+                    postPlayMode = PostPlayMode.AutoPlay(nextEpisode = nextInfo),
+                ),
+                hasInFlightNextEpisodeAutoPlay = false,
+            )
+        )
+    }
+
+    @Test
     fun `ended playback does not reset during next episode autoplay countdown`() {
         val state = PlayerUiState(
             postPlayMode = PostPlayMode.AutoPlay(

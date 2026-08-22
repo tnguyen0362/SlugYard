@@ -2,6 +2,19 @@ package com.sluggyard.tv.core.streamresolution
 
 import kotlinx.coroutines.CancellationException
 
+/**
+ * Outer safety net for manual / uncached debrid resolve (both the in-player Sources panel
+ * and the AppShell Streams route). Must exceed the largest internal wait across every
+ * [DebridManualResolver] implementation so slow-but-legitimate downloads surface the
+ * resolver's own phase message instead of being preempted by a smaller guard:
+ * TorBox polls download-ready up to 40s plus file-list up to 15s (DebridRuntime), and
+ * each API call is bounded by the shared client callTimeout (25s) — sequential worst
+ * case is ~55-80s. RealDebrid (20s) and Premiumize (fast) fit comfortably inside.
+ * Cached/Instant picks short-circuit far earlier, so they keep a fast fail guard.
+ */
+const val MANUAL_RESOLVE_TIMEOUT_MS = 90_000L
+const val CACHED_AUTO_PICK_RESOLVE_TIMEOUT_MS = 12_000L
+
 data class ManualStreamSelection(
     val id: String,
     val directUrl: String?,

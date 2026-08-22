@@ -124,8 +124,8 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Keep this greater than the previous SlugYard debug build so Android TV
         // can install the public beta as an in-place update.
-        versionCode = 1062
-        versionName = "0.1.0-beta"
+        versionCode = 1065
+        versionName = "0.1.1-beta"
 
         buildConfigField("String", "PARENTAL_GUIDE_API_URL", "\"${localProperties.getProperty("PARENTAL_GUIDE_API_URL", "")}\"")
         // Public IntroDB read API (https://introdb.app/docs/api). Override via local.properties if needed.

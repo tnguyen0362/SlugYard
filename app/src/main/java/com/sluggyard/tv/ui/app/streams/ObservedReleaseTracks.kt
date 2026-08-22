@@ -14,6 +14,10 @@ data class ObservedReleaseTracks(
     /** Normalized language bases (eng, jpn, spa, …). Empty when unknown. */
     val audioLangBases: Set<String> = emptySet(),
     val subtitleLangBases: Set<String> = emptySet(),
+    /** Audio codec IDs from container truth (A_AC3, A_EAC3, A_TRUEHD, A_DTS…). */
+    val audioCodecs: Set<String> = emptySet(),
+    /** Audio channel counts from container truth (2, 6, 8, …). Empty when unknown. */
+    val audioChannels: Set<Int> = emptySet(),
     val hasAss: Boolean = false,
     val hasPgs: Boolean = false,
     val hasSrt: Boolean = false,
@@ -21,6 +25,13 @@ data class ObservedReleaseTracks(
     val hasSoftsubTrack: Boolean = false,
     val observedAtMs: Long = 0L,
 ) {
+    /**
+     * Best audio layout from container truth: 2 → stereo, 6 → 5.1, 8+ → 7.1-class.
+     * Null when unknown / not probed.
+     */
+    val maxAudioChannels: Int?
+        get() = audioChannels.maxOrNull()?.takeIf { it > 0 }
+
     val dualAudio: Boolean
         get() = audioLangBases.size >= 2 ||
             (audioLangBases.contains("eng") && audioLangBases.contains("jpn")) ||

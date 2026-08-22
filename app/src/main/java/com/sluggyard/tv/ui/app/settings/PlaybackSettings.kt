@@ -22,9 +22,17 @@ import com.sluggyard.tv.data.local.AudioLanguageOption
 import com.sluggyard.tv.data.local.AudioOutputChannels
 import com.sluggyard.tv.data.local.FrameRateMatchingMode
 import com.sluggyard.tv.data.local.PlayerSettings
+import com.sluggyard.tv.data.local.PreferredAudioLayout
 import com.sluggyard.tv.ui.util.languageCodeToName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+
+private fun preferredAudioLayoutLabel(layout: PreferredAudioLayout): String = when (layout) {
+    PreferredAudioLayout.NONE -> "No preference"
+    PreferredAudioLayout.STEREO -> "Stereo"
+    PreferredAudioLayout.SURROUND_5_1 -> "5.1"
+    PreferredAudioLayout.SURROUND_7_1 -> "7.1+"
+}
 
 private fun languageOptionLabel(code: String): String = when (code) {
     "None" -> "None"
@@ -96,6 +104,17 @@ private fun subtitleColorArgb(label: String): Int = when (label) {
 internal fun AudioSettings(facade: SettingsFacade, player: PlayerSettings, scope: CoroutineScope) {
     SettingsGroup("Audio selection") {
         CycleRow("Preferred language", player.preferredAudioLanguage, listOf(AudioLanguageOption.DEVICE, AudioLanguageOption.DEFAULT, AudioLanguageOption.ORIGINAL) + AVAILABLE_SUBTITLE_LANGUAGES.map { it.code }, valueLabel = ::languageOptionLabel) { scope.launch { facade.setPreferredAudioLanguage(it) } }
+        CycleRow(
+            "Audio layout",
+            preferredAudioLayoutLabel(player.preferredAudioLayout),
+            PreferredAudioLayout.entries.map { preferredAudioLayoutLabel(it) },
+        ) { value ->
+            scope.launch {
+                facade.setPreferredAudioLayout(
+                    PreferredAudioLayout.entries.first { preferredAudioLayoutLabel(it) == value },
+                )
+            }
+        }
         CycleRow("Secondary language", player.secondaryPreferredAudioLanguage ?: "None", listOf("None", AudioLanguageOption.DEVICE, AudioLanguageOption.ORIGINAL) + AVAILABLE_SUBTITLE_LANGUAGES.map { it.code }, valueLabel = ::languageOptionLabel) { value -> scope.launch { facade.setSecondaryPreferredAudioLanguage(value.takeUnless { it == "None" }) } }
         ToggleRow("Downmix", "Convert multichannel audio to the selected output layout.", player.downmixEnabled) { scope.launch { facade.setDownmixEnabled(it) } }
         CycleRow("Output channels", player.audioOutputChannels.displayLabel, AudioOutputChannels.entries.map { it.displayLabel }) { value -> scope.launch { facade.setAudioOutputChannels(AudioOutputChannels.entries.first { it.displayLabel == value }) } }

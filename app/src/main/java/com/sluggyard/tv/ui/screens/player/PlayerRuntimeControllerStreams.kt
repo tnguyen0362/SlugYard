@@ -695,6 +695,18 @@ internal fun PlayerRuntimeController.switchToPlaybackSource(handoff: PlaybackHan
     val previousSeason = currentSeason
     val previousEpisode = currentEpisode
     val previousVideoId = currentVideoId
+    val episodeIdentityWillChange =
+        previousSeason != handoff.season ||
+            previousEpisode != handoff.episode ||
+            previousVideoId != handoff.contentId
+    // Flush while this controller still owns the *current* episode. The Rewrite
+    // next-episode path used to overwrite ids first, so saveWatchProgress wrote
+    // the ending timeline onto the next episode and never marked the one just
+    // finished (legacy beginHttpEpisodeStream flushes before swapping identity).
+    if (episodeIdentityWillChange) {
+        flushPlaybackSnapshotForSwitchOrExit()
+        suppressNextPlaybackProgressFlush = true
+    }
     contentId = handoff.contentId
     contentType = handoff.contentType
     currentVideoId = handoff.contentId
@@ -712,10 +724,7 @@ internal fun PlayerRuntimeController.switchToPlaybackSource(handoff: PlaybackHan
             currentEpisodeTitle = handoff.episodeTitle,
         )
     }
-    val episodeIdentityChanged =
-        previousSeason != handoff.season ||
-            previousEpisode != handoff.episode ||
-            previousVideoId != handoff.contentId
+    val episodeIdentityChanged = episodeIdentityWillChange
     if (episodeIdentityChanged) {
         // beginHttpSourceStream does not refresh episode-scoped metadata; mirror the legacy
         // switchToEpisodeStreamCommon path so Up Next, pause description, and IntroDB/AniSkip
@@ -804,7 +813,7 @@ private fun PlayerRuntimeController.beginHttpSourceStream(stream: Stream, url: S
     stopTorrentStream()
     nextEpisodeAutoPlayJob?.cancel()
     nextEpisodeAutoPlayJob = null
-    flushPlaybackSnapshotForSwitchOrExit()
+    flushPlaybackSnapshotUnlessSuppressed()
 
     val newHeaders = PlayerMediaSourceFactory.sanitizeHeaders(stream.behaviorHints?.proxyHeaders?.request)
     resetLoadingOverlayForNewStream()
@@ -918,7 +927,7 @@ private fun PlayerRuntimeController.switchToTorrentSourceStream(stream: Stream) 
     stopTorrentStream()
     nextEpisodeAutoPlayJob?.cancel()
     nextEpisodeAutoPlayJob = null
-    flushPlaybackSnapshotForSwitchOrExit()
+    flushPlaybackSnapshotUnlessSuppressed()
     resetLoadingOverlayForNewStream()
     releasePlayer(flushPlaybackState = false)
     resetAddonSubtitleStateForNewStream()

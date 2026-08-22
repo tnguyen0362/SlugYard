@@ -5,6 +5,7 @@ package com.sluggyard.tv.ui.screens.player
 import android.util.Log
 import androidx.media3.exoplayer.SeekParameters
 import com.sluggyard.tv.data.local.InternalPlayerEngine
+import com.sluggyard.tv.ui.util.languageCodeToName
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.update
@@ -374,12 +375,15 @@ private fun PlayerRuntimeController.applyMpvTrackSnapshot(snapshot: MpvTrackSnap
     }
 
     val audioTracks = effectiveSnapshot.audioTracks.mapIndexed { index, track ->
-        val language = resolveAudioTrackLanguageCode(track.language, track.name)
+        val language = resolveTrackLanguageCode(track.language, track.name)
         val codecSuffix = buildList {
             track.codec?.takeIf { it.isNotBlank() }?.let { add(it) }
             track.channelCount?.takeIf { it > 0 }?.let { add("${it}ch") }
         }.joinToString(" ")
-        val displayName = if (codecSuffix.isBlank()) track.name else "${track.name} ($codecSuffix)"
+        val baseName = track.name.takeIf { it.isNotBlank() && !isUnsetLanguageCode(it) }
+            ?: language?.let { languageCodeToName(it) }
+            ?: "Audio ${index + 1}"
+        val displayName = if (codecSuffix.isBlank()) baseName else "$baseName ($codecSuffix)"
         TrackInfo(
             index = index,
             name = displayName,
@@ -394,10 +398,13 @@ private fun PlayerRuntimeController.applyMpvTrackSnapshot(snapshot: MpvTrackSnap
     val internalSubtitleTracks = effectiveSnapshot.subtitleTracks
         .filterNot { it.isExternal }
         .mapIndexed { index, track ->
+            val language = resolveTrackLanguageCode(track.language, track.name)
             TrackInfo(
                 index = index,
-                name = track.name,
-                language = track.language,
+                name = track.name.takeIf { it.isNotBlank() && !isUnsetLanguageCode(it) }
+                    ?: language?.let { languageCodeToName(it) }
+                    ?: "Subtitle ${index + 1}",
+                language = language ?: track.language?.takeUnless { isUnsetLanguageCode(it) },
                 trackId = track.id.toString(),
                 codec = CustomDefaultTrackNameProvider.formatNameFromMime(track.codec)
                     ?: track.codec,
@@ -550,7 +557,7 @@ internal fun PlayerRuntimeController.applyPendingMpvSeekIfNeeded(
     val canSeekNow = durationMs > 0L || currentPositionMs > 0L || hasRenderedFirstFrame
     if (!canSeekNow) return
 
-    view.seekToMs(target)
+    view.seekToMs(target, exact = true)
     if (state.pendingSeekPosition != target) {
         _uiState.update { it.copy(pendingSeekPosition = target) }
     }
@@ -581,7 +588,7 @@ internal fun PlayerRuntimeController.seekPlaybackTo(
 ) {
     if (isUsingMpvEngine()) {
         mpvView?.let { view ->
-            view.seekToMs(positionMs)
+            view.seekToMs(positionMs, exact = false)
             // Keep subtitle delay sticky across FF/RW seeks.
             view.setSubtitleDelayMs(_uiState.value.subtitleDelayMs)
         }

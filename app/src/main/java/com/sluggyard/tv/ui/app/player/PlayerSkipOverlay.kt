@@ -81,7 +81,8 @@ fun PlayerSkipOverlay(
                     .align(Alignment.BottomStart)
                     .padding(
                         start = SlugYardTvMetrics.ScreenHorizontalInset,
-                        bottom = if (state.showControls) 118.dp else 34.dp,
+                        // Clear Netflix transport: bottom pad 20 + actions ~42 + gap 10 + scrubber ~30 ≈ 102.
+                        bottom = if (state.showControls) 108.dp else 24.dp,
                     )
                     // Keep D-pad Left/Right inside Skip ↔ Not now while the prompt is up.
                     .focusGroup(),
@@ -145,8 +146,8 @@ private fun SkipPromptButton(
     Box(
         modifier = modifier
             .graphicsLayer { scaleX = scale; scaleY = scale }
-            .widthIn(min = 132.dp)
-            .heightIn(min = 48.dp)
+            .widthIn(min = 112.dp)
+            .heightIn(min = 36.dp)
             .clip(shape)
             .background(background, shape)
             .border(
@@ -165,14 +166,14 @@ private fun SkipPromptButton(
                 contentDescription = label
                 role = Role.Button
             }
-            .padding(horizontal = 22.dp, vertical = 12.dp),
+            .padding(horizontal = 16.dp, vertical = 8.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             text = label,
             color = content,
             fontWeight = FontWeight.SemiBold,
-            style = androidx.compose.material3.MaterialTheme.typography.titleMedium,
+            style = androidx.compose.material3.MaterialTheme.typography.labelLarge,
         )
     }
 }

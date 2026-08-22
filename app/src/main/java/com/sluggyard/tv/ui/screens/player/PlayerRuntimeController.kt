@@ -42,6 +42,7 @@ import com.sluggyard.tv.data.repository.TraktScrobbleService
 import com.sluggyard.tv.domain.model.Video
 import com.sluggyard.tv.domain.model.Subtitle
 import com.sluggyard.tv.domain.model.WatchProgress
+import com.sluggyard.tv.ui.util.languageCodeToName
 import com.sluggyard.tv.domain.repository.AddonRepository
 import com.sluggyard.tv.domain.repository.MetaRepository
 import com.sluggyard.tv.domain.repository.StreamRepository
@@ -355,6 +356,11 @@ class PlayerRuntimeController(
     internal var lastSavedPosition: Long = 0L
     internal val saveThresholdMs = 5000L
     internal var hasMarkedCurrentEpisodeCompleted: Boolean = false
+    /**
+     * Set after flushing the *current* episode so a following source switch does not
+     * re-save that timeline under the next episode's identity.
+     */
+    internal var suppressNextPlaybackProgressFlush: Boolean = false
     internal var lastKnownDuration: Long = 0L
 
     internal var playbackStartedForParentalGuide = false
@@ -392,6 +398,9 @@ class PlayerRuntimeController(
     internal var lastActiveSkipType: String? = null
     internal var autoSubtitleSelected: Boolean = false
     internal var subtitleMode: Boolean = false
+    /** Rewrite player owns addon subtitle fetching; Search re-runs [SubtitleDataSource]. */
+    internal var rewriteSubtitleSearchHandler: (() -> Unit)? = null
+    internal var rewriteSubtitleLanguageHandler: ((String?) -> Unit)? = null
     internal var addonSubtitles: List<Subtitle> = emptyList()
     internal var addonSubtitleFetchJob: Job? = null
     internal var addonSubtitleFetchGeneration: Long = 0L

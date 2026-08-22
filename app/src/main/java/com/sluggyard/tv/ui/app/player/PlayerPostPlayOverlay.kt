@@ -90,13 +90,13 @@ fun PlayerPostPlayOverlay(
                     .align(Alignment.BottomEnd)
                     .padding(
                         end = SlugYardTvMetrics.ScreenHorizontalInset,
-                        bottom = 34.dp,
+                        bottom = 24.dp,
                     )
-                    .widthIn(min = 280.dp, max = 360.dp)
+                    .widthIn(min = 260.dp, max = 320.dp)
                     .background(SlugYardPalette.SurfaceElevated.copy(alpha = .94f), RoundedCornerShape(8.dp))
-                    .padding(16.dp)
+                    .padding(12.dp)
                     .focusGroup(),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 episode.thumbnail?.takeIf { it.isNotBlank() }?.let { thumbnail ->
                     AsyncImage(
@@ -104,7 +104,7 @@ fun PlayerPostPlayOverlay(
                         contentDescription = null,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(120.dp)
+                            .height(96.dp)
                             .clip(RoundedCornerShape(5.dp))
                             .background(SlugYardPalette.Surface),
                         contentScale = ContentScale.Crop,
@@ -204,8 +204,8 @@ private fun PostPlayActionButton(
     Box(
         modifier = modifier
             .graphicsLayer { scaleX = scale; scaleY = scale }
-            .widthIn(min = 120.dp)
-            .heightIn(min = 48.dp)
+            .widthIn(min = 104.dp)
+            .heightIn(min = 36.dp)
             .clip(shape)
             .background(background, shape)
             .border(
@@ -227,14 +227,14 @@ private fun PostPlayActionButton(
                 contentDescription = label
                 role = Role.Button
             }
-            .padding(horizontal = 18.dp, vertical = 12.dp),
+            .padding(horizontal = 14.dp, vertical = 8.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             text = label,
             color = content,
             fontWeight = FontWeight.SemiBold,
-            style = MaterialTheme.typography.titleMedium,
+            style = MaterialTheme.typography.labelLarge,
         )
     }
 }

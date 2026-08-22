@@ -258,6 +258,7 @@ data class PlayerSettings(
     val resolutionMatchingEnabled: Boolean = false,
     // Stream selection settings
     val streamAutoPlayMode: StreamAutoPlayMode = StreamAutoPlayMode.SCORED,
+    val preferredAudioLayout: PreferredAudioLayout = PreferredAudioLayout.NONE,
     val streamAutoPlaySource: StreamAutoPlaySource = StreamAutoPlaySource.ALL_SOURCES,
     val streamAutoPlaySelectedAddons: Set<String> = emptySet(),
     val streamAutoPlaySelectedPlugins: Set<String> = emptySet(),
@@ -346,6 +347,15 @@ enum class StreamAutoPlayMode {
     MANUAL, FIRST_STREAM, REGEX_MATCH, SCORED
 }
 
+/**
+ * Preferred audio layout for source ranking — SOFT preference: biases rank ties and
+ * labels sources, never hard-filters (a stereo-only release must still play when 5.1
+ * is preferred). Data comes from container-truth memory when available, title hints otherwise.
+ */
+enum class PreferredAudioLayout {
+    NONE, STEREO, SURROUND_5_1, SURROUND_7_1
+}
+
 enum class StreamAutoPlaySource {
     ALL_SOURCES, INSTALLED_ADDONS_ONLY, ENABLED_PLUGINS_ONLY
 }
@@ -364,9 +374,9 @@ enum class NextEpisodeThresholdMode {
 
 /**
  * Lowest selectable "Up next" trigger point. Mirrors PlayerNextEpisodeRules.MIN_THRESHOLD_PERCENT;
- * 97% was too late on short episodes whose credits start earlier.
+ * 97%/95% was too late on short episodes / titles without IntroDB outro data.
  */
-const val MIN_NEXT_EPISODE_THRESHOLD_PERCENT = 95f
+const val MIN_NEXT_EPISODE_THRESHOLD_PERCENT = 90f
 
 enum class SubtitleOrganizationMode {
     NONE, BY_LANGUAGE, BY_ADDON
@@ -483,6 +493,7 @@ class PlayerSettingsDataStore @Inject constructor(
     private val persistAudioAmplificationKey = booleanPreferencesKey("persist_audio_amplification")
     private val rememberAudioDelayPerDeviceKey = booleanPreferencesKey("remember_audio_delay_per_device")
     private val preferredAudioLanguageKey = stringPreferencesKey("preferred_audio_language")
+    private val preferredAudioLayoutKey = stringPreferencesKey("preferred_audio_layout")
     private val secondaryPreferredAudioLanguageKey = stringPreferencesKey("secondary_preferred_audio_language")
     private val loadingOverlayEnabledKey = booleanPreferencesKey("loading_overlay_enabled")
     private val showPlayerLoadingStatusKey = booleanPreferencesKey("show_player_loading_status")
@@ -814,6 +825,9 @@ class PlayerSettingsDataStore @Inject constructor(
             persistAudioAmplification = prefs[persistAudioAmplificationKey] ?: false,
             rememberAudioDelayPerDevice = prefs[rememberAudioDelayPerDeviceKey] ?: true,
             preferredAudioLanguage = normalizeSelectableLanguageCode(prefs[preferredAudioLanguageKey] ?: AudioLanguageOption.DEVICE),
+            preferredAudioLayout = prefs[preferredAudioLayoutKey]
+                ?.let { stored -> runCatching { PreferredAudioLayout.valueOf(stored) }.getOrNull() }
+                ?: PreferredAudioLayout.NONE,
             secondaryPreferredAudioLanguage = prefs[secondaryPreferredAudioLanguageKey]?.let(::normalizeSecondaryAudioLanguageCode),
             loadingOverlayEnabled = prefs[loadingOverlayEnabledKey] ?: true,
             showPlayerLoadingStatus = prefs[showPlayerLoadingStatusKey] ?: true,
@@ -965,6 +979,7 @@ class PlayerSettingsDataStore @Inject constructor(
             "player_snapshot_audio_subtitle",
             mapOf(
                 "audioLanguage" to settings.preferredAudioLanguage,
+                "audioLayout" to settings.preferredAudioLayout.name,
                 "secondaryAudio" to settings.secondaryPreferredAudioLanguage,
                 "audioChannels" to settings.audioOutputChannels,
                 "downmix" to settings.downmixEnabled,
@@ -1201,6 +1216,10 @@ class PlayerSettingsDataStore @Inject constructor(
 
     suspend fun setStreamAutoPlayMode(mode: StreamAutoPlayMode) {
         store().edit { prefs -> prefs[streamAutoPlayModeKey] = mode.name }
+    }
+
+    suspend fun setPreferredAudioLayout(layout: PreferredAudioLayout) {
+        store().edit { prefs -> prefs[preferredAudioLayoutKey] = layout.name }
     }
 
     suspend fun setStreamAutoPlaySource(source: StreamAutoPlaySource) {

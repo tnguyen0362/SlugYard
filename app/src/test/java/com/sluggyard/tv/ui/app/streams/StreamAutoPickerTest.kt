@@ -1003,11 +1003,16 @@ class StreamAutoPickerTest {
         // Movies are not size-penalized for being large — 102GB remux keeps full sizeFit.
         assertEquals(100, remuxRank.sizeFit)
         assertEquals(100, hugeRank.sizeFit)
-        // 4K remux still beats 1080p web on quality; size is not the decider.
         assertTrue(remuxRank.quality > webRank.quality)
+        // Ranking still prefers remux on quality; sizeFit is not crushed. Auto-pick with
+        // default 15GB link filters would hide the 42GB remux — pass Unlimited for this assert.
         assertEquals(
             remux,
-            selectAutoPlayCandidate(groups(remux, web), context),
+            selectAutoPlayCandidate(
+                groups(remux, web),
+                context,
+                linkFilters = StreamLinkFilterSettings(maxSizeGb = null),
+            ),
         )
     }
 
@@ -1305,6 +1310,96 @@ class StreamAutoPickerTest {
             AutoPickNoWinnerDecision.NoneAvailable,
             autoPickOutcomeWhenNoWinner(discoveryHardCeilingReached = true),
         )
+    }
+
+    @Test
+    fun unlabeledInstantWaitsWhenPreferredLanguageIsSet() {
+        val opaque = candidate("opaque", cacheState = StreamCacheState.CACHED, infoHash = "opaque-hash")
+            .copy(
+                title = "Movie.2024.1080p.WEB-DL.x264",
+                videoSizeBytes = 2L * 1024 * 1024 * 1024,
+                seeders = 800,
+            )
+        val context = StreamScoringEngine.Context(
+            title = "Movie",
+            contentType = "movie",
+            preferredSubtitleLanguage = "en",
+        )
+        assertEquals(1, StreamScoringEngine.rank(opaque, context).softsubFit)
+        assertNull(selectAutoPlayCandidate(groups(opaque), context))
+    }
+
+    @Test
+    fun unlabeledInstantLosesToLabeledUncachedWhenFallbackOpen() {
+        val opaque = candidate("opaque", cacheState = StreamCacheState.CACHED, infoHash = "opaque-hash")
+            .copy(
+                title = "Movie.2024.1080p.WEB-DL.x264",
+                videoSizeBytes = 2L * 1024 * 1024 * 1024,
+                seeders = 800,
+            )
+        val labeled = candidate("eng", cacheState = StreamCacheState.NOT_CACHED, infoHash = "eng-hash")
+            .copy(
+                title = "Movie.2024.1080p.WEB-DL.English.Softsubs",
+                videoSizeBytes = 1L * 1024 * 1024 * 1024,
+                seeders = 12,
+            )
+        val context = StreamScoringEngine.Context(
+            title = "Movie",
+            contentType = "movie",
+            preferredSubtitleLanguage = "en",
+        )
+        assertEquals(
+            labeled,
+            selectAutoPlayCandidate(
+                groups(opaque, labeled),
+                context,
+                allowUncachedFallback = true,
+            ),
+        )
+    }
+
+    @Test
+    fun unlabeledInstantStillAutoStartsWhenNoLanguagePreference() {
+        val opaque = candidate("opaque", cacheState = StreamCacheState.CACHED, infoHash = "opaque-hash")
+            .copy(
+                title = "Movie.2024.1080p.WEB-DL.x264",
+                videoSizeBytes = 2L * 1024 * 1024 * 1024,
+                seeders = 800,
+            )
+        val context = StreamScoringEngine.Context(title = "Movie", contentType = "movie")
+        assertEquals(opaque, selectAutoPlayCandidate(groups(opaque), context))
+    }
+
+    @Test
+    fun unlabeledInstantCanStartAtCeilingWhenNothingIsLabeled() {
+        val opaque = candidate("opaque", cacheState = StreamCacheState.CACHED, infoHash = "opaque-hash")
+            .copy(
+                title = "Movie.2024.1080p.WEB-DL.x264",
+                videoSizeBytes = 2L * 1024 * 1024 * 1024,
+                seeders = 800,
+            )
+        val context = StreamScoringEngine.Context(
+            title = "Movie",
+            contentType = "movie",
+            preferredSubtitleLanguage = "en",
+        )
+        assertEquals(
+            opaque,
+            selectAutoPlayCandidate(groups(opaque), context, allowUncachedFallback = true),
+        )
+    }
+
+    @Test
+    fun unlabeledInstantDoesNotCountAsSoftsubReady() {
+        val opaque = candidate("opaque", cacheState = StreamCacheState.CACHED, infoHash = "opaque-hash")
+            .copy(title = "Movie.2024.1080p.WEB-DL.x264")
+        val context = StreamScoringEngine.Context(
+            title = "Movie",
+            contentType = "movie",
+            preferredSubtitleLanguage = "en",
+        )
+        assertTrue(hasEligibleCachedAutoPlay(groups(opaque), context))
+        assertFalse(hasEligibleSoftsubAutoPlay(groups(opaque), context))
     }
 
     @Test

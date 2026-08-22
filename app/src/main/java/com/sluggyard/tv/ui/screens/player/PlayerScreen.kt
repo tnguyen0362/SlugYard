@@ -593,6 +593,15 @@ fun PlayerScreen(
                 if (panelOrDialogOpen) return@onKeyEvent false
 
                 if (keyEvent.nativeKeyEvent.action == KeyEvent.ACTION_UP) {
+                    when (keyEvent.nativeKeyEvent.keyCode) {
+                        // Hold-to-scrub: accumulate preview on DOWN repeats, commit once on UP
+                        // so we don't fire a 10s demux seek on every key-repeat tick.
+                        KeyEvent.KEYCODE_MEDIA_FAST_FORWARD,
+                        KeyEvent.KEYCODE_MEDIA_REWIND -> {
+                            viewModel.onEvent(PlayerEvent.OnCommitPreviewSeek)
+                            return@onKeyEvent true
+                        }
+                    }
                     // Left/Right no longer auto-seek; do not commit a preview seek on key-up.
                     return@onKeyEvent false
                 }
@@ -683,11 +692,11 @@ fun PlayerScreen(
                             true
                         }
                         KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> {
-                            viewModel.onEvent(PlayerEvent.OnSeekForward)
+                            viewModel.onEvent(PlayerEvent.OnPreviewSeekBy(10_000L))
                             true
                         }
                         KeyEvent.KEYCODE_MEDIA_REWIND -> {
-                            viewModel.onEvent(PlayerEvent.OnSeekBackward)
+                            viewModel.onEvent(PlayerEvent.OnPreviewSeekBy(-10_000L))
                             true
                         }
                         else -> false
@@ -789,12 +798,6 @@ fun PlayerScreen(
                 onReturnToDetails = returnToDetailsFromEndPrompt
             )
         }
-
-        val skipButtonBottomPadding by animateDpAsState(
-            targetValue = if (uiState.showControls) 122.dp else 30.dp,
-            animationSpec = tween(durationMillis = SlugYardMotion.tokens.durations.fast),
-            label = "skipButtonBottomPadding"
-        )
 
         skipOverlay(
             uiState,
@@ -1044,6 +1047,10 @@ fun PlayerScreen(
                 onDisableSubtitles = { viewModel.onEvent(PlayerEvent.OnDisableSubtitles) },
                 onSelectAddonSubtitle = { viewModel.onEvent(PlayerEvent.OnSelectAddonSubtitle(it)) },
                 onRetrySubtitleSearch = { viewModel.onEvent(PlayerEvent.OnRetrySubtitleSearch) },
+                onOpenSubtitleLanguagePicker = { viewModel.onEvent(PlayerEvent.OnOpenSubtitleLanguagePicker) },
+                onPickSubtitleLanguage = { language ->
+                    viewModel.onEvent(PlayerEvent.OnPickSubtitleLanguage(language))
+                },
                 onOpenSubtitleStyle = { viewModel.onEvent(PlayerEvent.OnOpenSubtitleStylePanel) },
                 onCloseSubtitleStyle = { viewModel.onEvent(PlayerEvent.OnDismissSubtitleStylePanel) },
                 onSetSubtitleSize = { viewModel.onEvent(PlayerEvent.OnSetSubtitleSize(it)) },

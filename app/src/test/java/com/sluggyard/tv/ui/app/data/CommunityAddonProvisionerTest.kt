@@ -139,7 +139,7 @@ class CommunityAddonProvisionerTest {
         override suspend fun fetchCatalog(manifestUrl: String, type: String, catalogId: String, extras: Map<String, String>): AddonTransportResult<JsonObject> = error("unused")
         override suspend fun fetchMeta(manifestUrl: String, type: String, id: String): AddonTransportResult<JsonObject> = error("unused")
         override suspend fun fetchStreams(manifestUrl: String, type: String, id: String): AddonTransportResult<JsonObject> = error("unused")
-        override suspend fun fetchSubtitles(manifestUrl: String, type: String, id: String): AddonTransportResult<JsonObject> = error("unused")
+        override suspend fun fetchSubtitles(manifestUrl: String, type: String, id: String, langs: String?): AddonTransportResult<JsonObject> = error("unused")
     }
 
     private class FakeRegistry : AddonRegistry {

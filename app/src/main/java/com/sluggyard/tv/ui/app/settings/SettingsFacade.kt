@@ -8,6 +8,7 @@ import com.sluggyard.tv.data.local.AudioOutputChannels
 import com.sluggyard.tv.data.local.CrashReportingPreferences
 import com.sluggyard.tv.data.local.DebridSettingsDataStore
 import com.sluggyard.tv.data.local.FrameRateMatchingMode
+import com.sluggyard.tv.data.local.PreferredAudioLayout
 import com.sluggyard.tv.data.local.LayoutPreferenceDataStore
 import com.sluggyard.tv.data.local.MDBListSettingsDataStore
 import com.sluggyard.tv.data.local.PlayerSettings
@@ -44,6 +45,7 @@ interface SettingsFacade {
     val layoutPreferences: LayoutPreferenceDataStore
     val playerSettings: Flow<PlayerSettings>
     val streamBadgeSettings: Flow<com.sluggyard.tv.core.streams.StreamBadgeSettings>
+    val streamLinkFilterSettings: Flow<com.sluggyard.tv.ui.app.streams.StreamLinkFilterSettings>
     val crashReportingEnabled: Flow<Boolean>
 
     val auth: SupabaseAuthGateway
@@ -77,10 +79,17 @@ interface SettingsFacade {
     suspend fun setSubtitleTextColor(color: Int)
     suspend fun setPreferredAudioLanguage(language: String)
     suspend fun setSecondaryPreferredAudioLanguage(language: String?)
+    suspend fun setPreferredAudioLayout(layout: PreferredAudioLayout)
     suspend fun setDownmixEnabled(enabled: Boolean)
     suspend fun setMaintainOriginalAudioOnDownmix(enabled: Boolean)
     suspend fun setTunnelingEnabled(enabled: Boolean)
     suspend fun setForceOpticalPassthrough(enabled: Boolean)
+
+    suspend fun setStreamLinkMaxResolution(value: com.sluggyard.tv.ui.app.streams.StreamLinkMaxResolution)
+    suspend fun setStreamLinkMaxSizeGb(value: Int?)
+    suspend fun setStreamLinkAllowRemux(enabled: Boolean)
+    suspend fun setStreamLinkAllowDolbyVision(enabled: Boolean)
+    suspend fun setStreamLinkCodec(value: com.sluggyard.tv.ui.app.streams.StreamLinkCodecFilter)
 
     suspend fun setCrashReportingEnabled(enabled: Boolean)
 
@@ -103,6 +112,7 @@ class DefaultSettingsFacade @Inject constructor(
     override val layoutPreferences: LayoutPreferenceDataStore,
     private val playerStore: PlayerSettingsDataStore,
     private val streamBadgeStore: com.sluggyard.tv.data.local.StreamBadgeSettingsDataStore,
+    private val streamLinkFilterStore: com.sluggyard.tv.data.local.StreamLinkFilterDataStore,
     private val streamBadgeImporter: com.sluggyard.tv.core.streams.StreamBadgeImporter,
     private val crashReportingPreferences: CrashReportingPreferences,
 ) : SettingsFacade {
@@ -114,6 +124,8 @@ class DefaultSettingsFacade @Inject constructor(
     override val playerSettings: Flow<PlayerSettings> = playerStore.playerSettings
     override val streamBadgeSettings: Flow<com.sluggyard.tv.core.streams.StreamBadgeSettings> =
         streamBadgeStore.settings
+    override val streamLinkFilterSettings: Flow<com.sluggyard.tv.ui.app.streams.StreamLinkFilterSettings> =
+        streamLinkFilterStore.settings
     override val crashReportingEnabled: Flow<Boolean> = crashReportingPreferences.enabled
 
     private suspend fun <T> trackSetting(
@@ -229,6 +241,9 @@ class DefaultSettingsFacade @Inject constructor(
     override suspend fun setSecondaryPreferredAudioLanguage(language: String?) =
         trackSetting("player.audio_secondary_language", language) { playerStore.setSecondaryPreferredAudioLanguage(language) }
 
+    override suspend fun setPreferredAudioLayout(layout: PreferredAudioLayout) =
+        trackSetting("player.audio_layout", layout.name) { playerStore.setPreferredAudioLayout(layout) }
+
     override suspend fun setDownmixEnabled(enabled: Boolean) =
         trackSetting("player.downmix", enabled) { playerStore.setDownmixEnabled(enabled) }
 
@@ -240,6 +255,26 @@ class DefaultSettingsFacade @Inject constructor(
 
     override suspend fun setForceOpticalPassthrough(enabled: Boolean) =
         trackSetting("player.optical_passthrough", enabled) { playerStore.setForceOpticalPassthrough(enabled) }
+
+    override suspend fun setStreamLinkMaxResolution(value: com.sluggyard.tv.ui.app.streams.StreamLinkMaxResolution) {
+        trackSetting("sources.max_resolution", value) { streamLinkFilterStore.setMaxResolution(value) }
+    }
+
+    override suspend fun setStreamLinkMaxSizeGb(value: Int?) {
+        trackSetting("sources.max_size_gb", value) { streamLinkFilterStore.setMaxSizeGb(value) }
+    }
+
+    override suspend fun setStreamLinkAllowRemux(enabled: Boolean) {
+        trackSetting("sources.allow_remux", enabled) { streamLinkFilterStore.setAllowRemux(enabled) }
+    }
+
+    override suspend fun setStreamLinkAllowDolbyVision(enabled: Boolean) {
+        trackSetting("sources.allow_dolby_vision", enabled) { streamLinkFilterStore.setAllowDolbyVision(enabled) }
+    }
+
+    override suspend fun setStreamLinkCodec(value: com.sluggyard.tv.ui.app.streams.StreamLinkCodecFilter) {
+        trackSetting("sources.codec", value) { streamLinkFilterStore.setCodec(value) }
+    }
 
     override suspend fun setCrashReportingEnabled(enabled: Boolean) =
         trackSetting("crash_reporting.enabled", enabled) { crashReportingPreferences.setEnabled(enabled) }

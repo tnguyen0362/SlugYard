@@ -40,7 +40,12 @@ interface StremioAddonGateway {
     ): AddonTransportResult<JsonObject>
     suspend fun fetchMeta(manifestUrl: String, type: String, id: String): AddonTransportResult<JsonObject>
     suspend fun fetchStreams(manifestUrl: String, type: String, id: String): AddonTransportResult<JsonObject>
-    suspend fun fetchSubtitles(manifestUrl: String, type: String, id: String): AddonTransportResult<JsonObject>
+    suspend fun fetchSubtitles(
+        manifestUrl: String,
+        type: String,
+        id: String,
+        langs: String? = null,
+    ): AddonTransportResult<JsonObject>
 }
 
 class StremioAddonTransport(
@@ -72,8 +77,13 @@ class StremioAddonTransport(
     override suspend fun fetchStreams(manifestUrl: String, type: String, id: String): AddonTransportResult<JsonObject> =
         getJson(StremioEndpointBuilder.streams(manifestUrl, type, id))
 
-    override suspend fun fetchSubtitles(manifestUrl: String, type: String, id: String): AddonTransportResult<JsonObject> =
-        getJson(StremioEndpointBuilder.subtitles(manifestUrl, type, id))
+    override suspend fun fetchSubtitles(
+        manifestUrl: String,
+        type: String,
+        id: String,
+        langs: String?,
+    ): AddonTransportResult<JsonObject> =
+        getJson(StremioEndpointBuilder.subtitles(manifestUrl, type, id, langs))
 
     private suspend fun getJson(url: String): AddonTransportResult<JsonObject> = withContext(Dispatchers.IO) {
         try {
@@ -115,7 +125,18 @@ object StremioEndpointBuilder {
 
     fun streams(manifestUrl: String, type: String, id: String): String = endpoint(manifestUrl, listOf("stream", type, id))
 
-    fun subtitles(manifestUrl: String, type: String, id: String): String = endpoint(manifestUrl, listOf("subtitles", type, id))
+    fun subtitles(
+        manifestUrl: String,
+        type: String,
+        id: String,
+        langs: String? = null,
+    ): String {
+        val base = endpoint(manifestUrl, listOf("subtitles", type, id))
+        val encoded = langs?.takeIf(String::isNotBlank) ?: return base
+        // OpenSubtitles-v3-style subtitle addons accept a comma-separated langs filter.
+        val separator = if ('?' in base) "&" else "?"
+        return base + separator + "langs=" + encoded
+    }
 
     private fun endpoint(manifestUrl: String, segments: List<String>): String {
         val manifest = URI(manifestUrl)
@@ -145,7 +166,7 @@ object StremioEndpointBuilder {
                 val value = byte.toInt() and 0xFF
                 val character = value.toChar()
                 if ((value in 0x30..0x39) || (value in 0x41..0x5A) ||
-                    (value in 0x61..0x7A) || character in "-_.=,") {
+                    (value in 0x61..0x7A) || character in "-_.=,:") {
                     append(character)
                 } else {
                     append("%")

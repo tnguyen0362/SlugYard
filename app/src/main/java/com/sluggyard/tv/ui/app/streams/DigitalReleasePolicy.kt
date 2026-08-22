@@ -58,6 +58,46 @@ object DigitalReleasePolicy {
         )
     }
 
+    /**
+     * Series gate decision. Series never use the movie theatrical ladder (a theatrical
+     * date stays NOT_YET for a year there, which gated every aired episode of a show
+     * shortly after its premiere). For TV: a past first air means episodes exist and
+     * their release sources are real; only a pre-release status with no/non-past air
+     * date is NOT_YET. Any aired status without a date is released (TMDB lags status
+     * flips around premiere day).
+     */
+    fun seriesStatus(
+        rawStatus: String?,
+        firstAirDate: String?,
+        clock: Clock = Clock.systemUTC(),
+    ): Status {
+        val status = rawStatus?.trim()?.lowercase()
+        val today = LocalDate.now(clock)
+        val firstAir = parseReleaseDate(firstAirDate)
+        if (status in NOT_YET_SERIES_STATUSES) {
+            // Pre-release marker, but TMDB keeps "in production" until premiere day:
+            // an already-aired past date wins (the status flip lags the premiere).
+            return if (firstAir == null || firstAir.isAfter(today)) Status.NOT_YET else Status.AVAILABLE
+        }
+        return when {
+            status in AIRED_SERIES_STATUSES -> Status.AVAILABLE
+            firstAir != null -> if (firstAir.isAfter(today)) Status.NOT_YET else Status.AVAILABLE
+            else -> Status.UNKNOWN
+        }
+    }
+
+    private val NOT_YET_SERIES_STATUSES = setOf(
+        "planned",
+        "in production",
+        "post production",
+    )
+    private val AIRED_SERIES_STATUSES = setOf(
+        "returning series",
+        "ended",
+        "canceled",
+        "cancelled",
+    )
+
     fun isEarlyReleaseJunk(text: String): Boolean =
         EARLY_RELEASE_JUNK.containsMatchIn(text.lowercase())
 

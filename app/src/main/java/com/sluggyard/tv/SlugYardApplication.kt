@@ -178,7 +178,7 @@ class SlugYardApplication : Application(), SingletonImageLoader.Factory {
                     // MediaCodec. A 33% image cache can starve the decoder
                     // during a hero + rail burst; keep artwork responsive
                     // without competing with video playback.
-                    .maxSizePercent(context, 0.20)
+                    .maxSizePercent(context, 0.28)
                     .build()
             }
             .diskCache {
@@ -204,9 +204,8 @@ class SlugYardApplication : Application(), SingletonImageLoader.Factory {
             .precision(coil3.size.Precision.EXACT)
             .allowHardware(true)
             .allowRgb565(false)
-            // Three bounded decodes let the first visible rail populate faster
-            // without flooding low-RAM Android TV devices.
-            .bitmapFactoryMaxParallelism(3)
+            // Home rails hold-Right warp needs parallel decode so landscape catch-up keeps pace.
+            .bitmapFactoryMaxParallelism(6)
             .build()
     }
 }

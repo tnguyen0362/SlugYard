@@ -23,6 +23,8 @@ object MatroskaSubtitleCodecProbe {
     private const val TAG = "SlugYardMkvProbe"
     /** Enough for Tracks on typical embeds; larger Speakers/Attachments may sit later — fail-open. */
     const val DEFAULT_BYTE_LIMIT = 1_048_576
+    /** Below this, missing CodecIDs may just mean Tracks sits later — fail-open. */
+    const val MIN_CONFIDENT_SCAN_BYTES = 64 * 1024
     private const val PROBE_TIMEOUT_MS = 12_000L
 
     /** Known Matroska CodecID payloads (substring match on header bytes). */
@@ -38,6 +40,10 @@ object MatroskaSubtitleCodecProbe {
         val hasPgs: Boolean = false,
         val hasOtherSoft: Boolean = false,
         val codecHits: List<String> = emptyList(),
+        /** Audio codec IDs found by the EBML walk (A_AAC, A_AC3, A_EAC3, A_TRUEHD, A_DTS…). */
+        val audioCodecs: Set<String> = emptySet(),
+        /** Audio channel counts found by the EBML walk (2, 6, 8, …). */
+        val audioChannels: Set<Int> = emptySet(),
         val bytesScanned: Int = 0,
         val error: String? = null,
     ) {
@@ -45,11 +51,29 @@ object MatroskaSubtitleCodecProbe {
             get() = hasAss || hasSrt || hasPgs || hasOtherSoft
 
         /**
+         * Highest audio channel count from container truth (2=stereo, 6=5.1, 8+=7.1-class).
+         * Null when unknown / non-EBML / fail-open.
+         */
+        val maxAudioChannels: Int?
+            get() = audioChannels.maxOrNull()
+
+
+        /**
          * True when we saw real soft CodecIDs — safe to demote this hash in auto-pick memory.
          * Non-EBML / empty headers are not confident (fail-open).
          */
         val confidentSoftInventory: Boolean
             get() = isEbml && hasAnySoft
+
+        /**
+         * EBML prefix with no subtitle CodecIDs after a real scan — the file has no
+         * softsubs. Empty / timed-out / tiny prefixes stay fail-open.
+         */
+        val confidentNoSoftsubs: Boolean
+            get() = isEbml &&
+                error == null &&
+                !hasAnySoft &&
+                bytesScanned >= MIN_CONFIDENT_SCAN_BYTES
     }
 
     fun scanPrefix(bytes: ByteArray): Inventory {
@@ -87,6 +111,14 @@ object MatroskaSubtitleCodecProbe {
                 hits += id
             }
         }
+        // Container-truth audio layout (codec + channel counts) — the EBML walk reads
+        // TrackEntry(TrackType audio) → CodecID + Audio/Channels. Fail-open on malformed
+        // structures: ranking just falls back to title heuristics.
+        val (audioCodecs, audioChannels) = if (isEbml) {
+            parseTrackAudio(bytes)
+        } else {
+            emptySet<String>() to emptySet<Int>()
+        }
         return Inventory(
             isEbml = isEbml,
             hasAss = hasAss,
@@ -94,8 +126,30 @@ object MatroskaSubtitleCodecProbe {
             hasPgs = hasPgs,
             hasOtherSoft = hasOther,
             codecHits = hits.toList(),
+            audioCodecs = audioCodecs,
+            audioChannels = audioChannels,
             bytesScanned = bytes.size,
         )
+    }
+
+    /**
+     * Auto-pick should skip a resolved file when header truth says it cannot provide
+     * dialogue subs the user asked for.
+     *
+     * - Preferred language set + EBML with **zero** subtitle CodecIDs: always reject.
+     *   Title heuristics cannot see unlabeled audio / empty subtitle tracks — this can.
+     * - Anime + pure SRT: keep waiting for ASS/PGS while retries remain.
+     * - Non-EBML / timeout / tiny prefix: fail-open.
+     */
+    fun shouldRejectAutoPick(
+        inventory: Inventory,
+        remainingResolveAttemptsAfterThis: Int,
+        requireDialogueSubs: Boolean,
+        rejectAnimePureSrt: Boolean,
+    ): Boolean {
+        if (requireDialogueSubs && inventory.confidentNoSoftsubs) return true
+        if (!rejectAnimePureSrt) return false
+        return shouldRejectAnimeAutoPick(inventory, remainingResolveAttemptsAfterThis)
     }
 
     /**
@@ -123,6 +177,8 @@ object MatroskaSubtitleCodecProbe {
         // Soft/ASS/PGS/SRT flags alone lift/lower softsubFit vs title Multi-Subs lies.
         return ObservedReleaseTracks(
             audioLangBases = emptySet(),
+            audioCodecs = inventory.audioCodecs,
+            audioChannels = inventory.audioChannels,
             subtitleLangBases = emptySet(),
             hasAss = inventory.hasAss,
             hasPgs = inventory.hasPgs,
@@ -189,7 +245,8 @@ object MatroskaSubtitleCodecProbe {
             Log.i(
                 TAG,
                 "scan bytes=${inv.bytesScanned} ebml=${inv.isEbml} ass=${inv.hasAss} " +
-                    "srt=${inv.hasSrt} pgs=${inv.hasPgs} hits=${inv.codecHits}",
+                    "srt=${inv.hasSrt} pgs=${inv.hasPgs} hits=${inv.codecHits} " +
+                    "audio=${inv.audioCodecs.joinToString(",")} ch=${inv.audioChannels.joinToString(",")}",
             )
             return inv
         } finally {
@@ -220,5 +277,190 @@ object MatroskaSubtitleCodecProbe {
             return true
         }
         return false
+    }
+
+    // ---- EBML audio walk ------------------------------------------------------
+    // Element IDs (Matroska spec): Segment 0x18538067, Tracks 0x1654AE6B,
+    // TrackEntry 0xAE, TrackType 0x83 (2=audio), CodecID 0x86, Audio 0xE1, Channels 0x9F.
+    private const val SEGMENT_ID = 0x18538067L
+    private const val TRACKS_ID = 0x1654AE6BL
+    private const val TRACK_ENTRY_ID = 0xAEL
+    private const val TRACK_TYPE_ID = 0x83L
+    private const val CODEC_ID_ID = 0x86L
+    private const val AUDIO_ID = 0xE1L
+    private const val CHANNELS_ID = 0x9FL
+
+    /**
+     * Bounded EBML walk over the fetched prefix: Segment → Tracks → TrackEntry
+     * (TrackType=audio) → CodecID string + Audio/Channels varint. Container-truth
+     * audio layout titles rarely state. Any malformed structure fails open to empty.
+     * Returns (audioCodecs, audioChannels) from TrackType 0x02 entries only.
+     */
+    internal fun parseTrackAudio(bytes: ByteArray): Pair<Set<String>, Set<Int>> {
+        val codecs = LinkedHashSet<String>()
+        val channels = LinkedHashSet<Int>()
+        if (bytes.size < 4) return codecs to channels
+        // Skip the EBML header element (ID 1A45DFA3 is fixed 4 bytes) to reach Segment.
+        // pos already points past that ID, so only the size vint + header payload remain.
+        var pos = 4
+        val headerSize = readVintSize(bytes, pos)
+        if (headerSize == null || headerSize.first < 0) return codecs to channels
+        pos += headerSize.second + headerSize.first
+        val (segIdLen, segId) = readElementId(bytes, pos) ?: return codecs to channels
+        if (segId != SEGMENT_ID) return codecs to channels
+        val segSize = readVintSize(bytes, pos + segIdLen)
+        val segPayloadStart = pos + segIdLen + (segSize?.second ?: 0)
+        // mkvmerge frequently leaves Segment size unknown — walk to the prefix end then.
+        val segEnd = if (segSize == null || segSize.first < 0) {
+            bytes.size
+        } else {
+            (segPayloadStart + segSize.first).coerceAtMost(bytes.size)
+        }
+        pos = segPayloadStart
+        while (pos + 2 <= segEnd) {
+            val (idLen, id) = readElementId(bytes, pos) ?: return codecs to channels
+            val size = readVintSize(bytes, pos + idLen) ?: return codecs to channels
+            val payloadStart = pos + idLen + size.second
+            val payloadEnd = payloadStart + size.first
+            if (size.first < 0 || payloadEnd > segEnd) return codecs to channels
+            if (id == TRACKS_ID) {
+                parseTracks(bytes, payloadStart, payloadEnd, codecs, channels)
+                return codecs to channels
+            }
+            pos = payloadEnd
+        }
+        return codecs to channels
+    }
+
+    private fun parseTracks(
+        bytes: ByteArray,
+        start: Int,
+        end: Int,
+        codecs: MutableSet<String>,
+        channels: MutableSet<Int>,
+    ) {
+        var pos = start
+        while (pos + 2 <= end) {
+            val (idLen, id) = readElementId(bytes, pos) ?: return
+            val size = readVintSize(bytes, pos + idLen) ?: return
+            val payloadStart = pos + idLen + size.second
+            val payloadEnd = payloadStart + size.first
+            if (size.first < 0 || payloadEnd > end) return
+            if (id == TRACK_ENTRY_ID) {
+                parseTrackEntry(bytes, payloadStart, payloadEnd, codecs, channels)
+            }
+            pos = payloadEnd
+        }
+    }
+
+    private fun parseTrackEntry(
+        bytes: ByteArray,
+        start: Int,
+        end: Int,
+        codecs: MutableSet<String>,
+        channels: MutableSet<Int>,
+    ) {
+        var pos = start
+        var trackType = -1
+        var codecId: String? = null
+        var audioStart = -1
+        var audioEnd = -1
+        while (pos + 2 <= end) {
+            val (idLen, id) = readElementId(bytes, pos) ?: return
+            val size = readVintSize(bytes, pos + idLen) ?: return
+            val payloadStart = pos + idLen + size.second
+            val payloadEnd = payloadStart + size.first
+            if (size.first < 0 || payloadEnd > end) return
+            when (id) {
+                TRACK_TYPE_ID -> if (size.first == 1) trackType = bytes[payloadStart].toInt() and 0xFF
+                CODEC_ID_ID -> if (size.first in 1..128) {
+                    codecId = String(bytes, payloadStart, size.first, StandardCharsets.UTF_8)
+                }
+                AUDIO_ID -> {
+                    audioStart = payloadStart
+                    audioEnd = payloadEnd
+                }
+            }
+            pos = payloadEnd
+        }
+        if (trackType != 2) return
+        codecId?.takeIf { it.isNotBlank() }?.let(codecs::add)
+        if (audioStart >= 0) {
+            parseAudioChannels(bytes, audioStart, audioEnd)
+                ?.takeIf { it > 0 }
+                ?.let(channels::add)
+        }
+    }
+
+    private fun parseAudioChannels(bytes: ByteArray, start: Int, end: Int): Int? {
+        var pos = start
+        while (pos + 2 <= end) {
+            val (idLen, id) = readElementId(bytes, pos) ?: return null
+            val size = readVintSize(bytes, pos + idLen) ?: return null
+            val payloadStart = pos + idLen + size.second
+            val payloadEnd = payloadStart + size.first
+            if (size.first < 0 || payloadEnd > end) return null
+            if (id == CHANNELS_ID && size.first in 1..4) {
+                var value = 0
+                for (i in 0 until size.first) {
+                    value = (value shl 8) or (bytes[payloadStart + i].toInt() and 0xFF)
+                }
+                return value
+            }
+            pos = payloadEnd
+        }
+        return null
+    }
+
+    /**
+     * EBML element ID: 1–4 bytes, length from the first byte's leading zero bits
+     * (0x1A45DFA3 → 4 bytes, 0xAE → 1 byte). Returns (idLength, id).
+     */
+    private fun readElementId(bytes: ByteArray, pos: Int): Pair<Int, Long>? {
+        if (pos >= bytes.size) return null
+        val first = bytes[pos].toInt() and 0xFF
+        if (first == 0) return null
+        var len = 1
+        var mask = 0x80
+        while (len < 4 && (first and mask) == 0) {
+            len++
+            mask = mask shr 1
+        }
+        if (pos + len > bytes.size) return null
+        var id = 0L
+        for (i in 0 until len) {
+            id = (id shl 8) or (bytes[pos + i].toInt().toLong() and 0xFFL)
+        }
+        return len to id
+    }
+
+    /**
+     * EBML size varint: length = 1 + leading zero bits of the first byte (up to 8 bytes),
+     * marker bit dropped. Returns (value, vintLength). Null when malformed or the value
+     * exceeds the bounded prefix; the all-ones "unknown size" marker returns -1 so callers
+     * can still skip the vint and decide legality (Segment unknown → walk to prefix end).
+     */
+    private fun readVintSize(bytes: ByteArray, pos: Int): Pair<Int, Int>? {
+        if (pos >= bytes.size) return null
+        val first = bytes[pos].toInt() and 0xFF
+        if (first == 0) return null
+        var len = 1
+        var probe = 0x80
+        while (len < 8 && (first and probe) == 0) {
+            len++
+            probe = probe shr 1
+        }
+        if (pos + len > bytes.size) return null
+        var raw = 0L
+        for (i in 0 until len) {
+            raw = (raw shl 8) or (bytes[pos + i].toInt().toLong() and 0xFFL)
+        }
+        // The marker bit sits at bit (7 * len) for a len-byte vint (e.g. len 8 → 0x01).
+        val markerBit = 1L shl (7 * len)
+        val value = raw and (markerBit - 1)
+        // All value bits set = "unknown size" (common for Segment/Clusters).
+        if (value == markerBit - 1) return -1 to len
+        if (value > Int.MAX_VALUE.toLong()) return null
+        return value.toInt() to len
     }
 }

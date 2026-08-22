@@ -9,6 +9,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -40,7 +41,10 @@ import com.sluggyard.tv.ui.app.streams.StreamGroupState
 import com.sluggyard.tv.ui.app.streams.StreamsDataSource
 import com.sluggyard.tv.ui.app.streams.SubtitleDataSource
 import com.sluggyard.tv.ui.app.streams.SubtitleGroupState
+import com.sluggyard.tv.ui.app.streams.stremioSubtitleLookupId
 import com.sluggyard.tv.ui.app.streams.DigitalReleaseLookup
+import com.sluggyard.tv.ui.app.streams.StreamLinkFilterPolicy
+import com.sluggyard.tv.ui.app.streams.StreamLinkFilterSettings
 import com.sluggyard.tv.ui.app.streams.selectAutoPlayCandidate
 import com.sluggyard.tv.domain.model.Subtitle
 import com.sluggyard.tv.ui.screens.player.PlayerEvent
@@ -64,6 +68,9 @@ private const val CHECKPOINT_POLL_INTERVAL_MS = 5_000L
 // NEXT_EPISODE_SEARCH_HARD_CAP_MS contract. A hung provider must not leave the
 // next-episode coroutine waiting indefinitely.
 private const val NEXT_EPISODE_SEARCH_HARD_CAP_MS = 120_000L
+// A subtitle sweep must never leave the overlay on an endless spinner; bounded
+// fanout per addon plus this ceiling keeps the whole search under ~20s.
+private const val SUBTITLE_SEARCH_TIMEOUT_MS = 20_000L
 private const val REWRITE_SUBTITLE_DIAGNOSTIC_TAG = "SubtitleDiag"
 
 private data class ActivePlaybackContext(
@@ -95,6 +102,7 @@ fun RetainedPlayerHost(
     configuredDebrid: suspend () -> DebridService?,
     digitalReleaseLookup: DigitalReleaseLookup? = null,
     streamBadgeRules: StreamBadgeRules = StreamBadgeRules(),
+    linkFilters: StreamLinkFilterSettings = StreamLinkFilterSettings(),
     onBack: () -> Unit,
 ) {
     val viewModel: PlayerViewModel = hiltViewModel()
@@ -141,8 +149,26 @@ fun RetainedPlayerHost(
     val addonId = activeContext.addonId
     val parentId = activeContext.parentId
     val parentType = activeContext.parentType
+    var subtitleSearchNonce by remember(contentId, season, episode) { mutableIntStateOf(0) }
+    /** null = search all languages; otherwise the ISO code to scope the search to. */
+    var subtitleSearchLang by remember(contentId, season, episode) { mutableStateOf<String?>(null) }
+    DisposableEffect(viewModel, contentId, season, episode) {
+        viewModel.setRewriteSubtitleSearchHandler {
+            viewModel.beginRewriteSubtitleSearch()
+            subtitleSearchNonce++
+        }
+        viewModel.setRewriteSubtitleLanguageHandler { language ->
+            subtitleSearchLang = language
+            subtitleSearchNonce++
+        }
+        onDispose {
+            viewModel.setRewriteSubtitleSearchHandler(null)
+            viewModel.setRewriteSubtitleLanguageHandler(null)
+        }
+    }
     val latestContext by rememberUpdatedState(activeContext)
     val latestStreamBadgeRules by rememberUpdatedState(streamBadgeRules)
+    val latestLinkFilters by rememberUpdatedState(linkFilters)
     var lastSavedPositionMs by remember(contentId, season, episode) { mutableLongStateOf(0L) }
     val latestTimeline by rememberUpdatedState(timeline)
     val latestTitle by rememberUpdatedState(title)
@@ -175,27 +201,75 @@ fun RetainedPlayerHost(
         )
     }
 
-    LaunchedEffect(contentId, contentType, season, episode) {
-        viewModel.setAddonSubtitles(emptyList())
-        subtitleDataSource.subtitleGroups(contentType, contentId).collect { groups ->
-            val tracks = groups.flatMap { group ->
-                    (group.state as? SubtitleGroupState.Content)?.tracks.orEmpty().map { track ->
-                        Subtitle(
-                            id = "rewrite:${group.addonId}:${track.id}",
-                            url = track.url,
-                            lang = track.language.orEmpty().ifBlank { "und" },
-                            addonName = group.addonName,
-                            addonLogo = null,
-                            format = track.format,
-                        )
-                    }
-                }.distinctBy(Subtitle::id)
-            Log.d(
-                REWRITE_SUBTITLE_DIAGNOSTIC_TAG,
-                "content=$contentId season=$season episode=$episode groups=${groups.size} " +
-                    "tracks=${tracks.joinToString(" | ") { "${it.id}:${it.lang}:${it.format ?: "unknown"}" }}",
+    LaunchedEffect(contentId, contentType, season, episode, subtitleSearchNonce, subtitleSearchLang) {
+        viewModel.setAddonSubtitles(emptyList(), stillLoading = true)
+        val lookupId = stremioSubtitleLookupId(
+            contentType = contentType,
+            contentId = contentId,
+            season = season,
+            episode = episode,
+        )
+        val preferred = playerState.subtitleStyle.preferredLanguage.takeUnless { it.isBlank() || it == "none" }
+        val scopedLangs = listOfNotNull(subtitleSearchLang ?: preferred)
+
+        suspend fun runSearch(langs: List<String>?): Pair<List<Subtitle>, Boolean> {
+            var tracksOut = emptyList<Subtitle>()
+            var finished = false
+            subtitleDataSource.subtitleGroups(contentType, lookupId, langs = langs).collect { groups ->
+                val stillLoading = groups.any { it.state is SubtitleGroupState.Loading }
+                val tracks = groups.flatMap { group ->
+                        (group.state as? SubtitleGroupState.Content)?.tracks.orEmpty().map { track ->
+                            Subtitle(
+                                id = "rewrite:${group.addonId}:${track.id}",
+                                url = track.url,
+                                lang = track.language.orEmpty().ifBlank { "und" },
+                                addonName = group.addonName,
+                                addonLogo = null,
+                                format = track.format,
+                            )
+                        }
+                    }.distinctBy(Subtitle::id)
+                tracksOut = tracks
+                finished = !stillLoading
+                Log.d(
+                    REWRITE_SUBTITLE_DIAGNOSTIC_TAG,
+                    "content=$lookupId langs=$langs season=$season episode=$episode groups=${groups.size} " +
+                        "loading=$stillLoading " +
+                        "tracks=${tracks.joinToString(" | ") { "${it.id}:${it.lang}:${it.format ?: "unknown"}" }}",
+                )
+                viewModel.setAddonSubtitles(tracks, stillLoading = stillLoading)
+            }
+            return tracksOut to finished
+        }
+
+        val scopedResult = withTimeoutOrNull(SUBTITLE_SEARCH_TIMEOUT_MS) { runSearch(scopedLangs) }
+        var timedOut = scopedResult == null
+        if (!timedOut && scopedResult!!.second) {
+            // Scoped search finished but found nothing — the addon either ignored langs= or
+            // has no rows in that language. Fall back once to a full (capped) fetch so the
+            // sheet never goes dead-empty; the UI still shows the language context above.
+            if (scopedResult.first.isEmpty() && scopedLangs.isNotEmpty()) {
+                Log.w(
+                    REWRITE_SUBTITLE_DIAGNOSTIC_TAG,
+                    "scoped search empty for langs=$scopedLangs — falling back to all languages",
+                )
+                val fallback = withTimeoutOrNull(SUBTITLE_SEARCH_TIMEOUT_MS) { runSearch(null) }
+                timedOut = fallback == null
+                if (!timedOut && fallback!!.first.isEmpty()) {
+                    viewModel.setAddonSubtitles(
+                        emptyList(),
+                        stillLoading = false,
+                        error = "No subtitles found for ${scopedLangs.joinToString(", ")}. Searched all languages too — none available.",
+                    )
+                }
+            }
+        }
+        if (timedOut) {
+            viewModel.setAddonSubtitles(
+                emptyList(),
+                stillLoading = false,
+                error = "Subtitle search timed out — some addons did not respond. Try again.",
             )
-            viewModel.setAddonSubtitles(tracks)
         }
     }
 
@@ -215,6 +289,7 @@ fun RetainedPlayerHost(
             selectedSourceAddon = if (forceRefresh) null else secondaryState.selectedSourceAddon,
             failedSourceIds = if (forceRefresh) emptySet() else secondaryState.failedSourceIds,
             preferredSubtitleLanguage = playerState.subtitleStyle.preferredLanguage,
+            preferredAudioLayout = playerState.preferredAudioLayout,
         )
         secondaryJob = scope.launch {
             try {
@@ -230,7 +305,8 @@ fun RetainedPlayerHost(
                 groups.collectLatest { next ->
                     // Badge regex packs must not run on main — that ANR'd Sources on Onn (~179% CPU).
                     val applied = withContext(Dispatchers.Default) {
-                        StreamBadgeApplicator.apply(next, latestStreamBadgeRules)
+                        val filtered = StreamLinkFilterPolicy.filterGroups(next, latestLinkFilters)
+                        StreamBadgeApplicator.apply(filtered, latestStreamBadgeRules)
                     }
                     secondaryState = secondaryState.copy(
                         sourceGroups = applied,
@@ -395,9 +471,11 @@ fun RetainedPlayerHost(
                             .orEmpty(),
                         language = viewModel.contentLanguage(),
                         preferredSubtitleLanguage = playerState.subtitleStyle.preferredLanguage,
+                        preferredAudioLayout = playerState.preferredAudioLayout,
                     ),
                     // Full collect finished above — probes settled; allow debrid download fallback.
                     allowUncachedFallback = true,
+                    linkFilters = latestLinkFilters,
                 )
                 if (candidate == null) {
                     episodeHandoffPreparing = false
@@ -580,8 +658,10 @@ fun RetainedPlayerHost(
                             .orEmpty(),
                         language = viewModel.contentLanguage(),
                         preferredSubtitleLanguage = playerState.subtitleStyle.preferredLanguage,
+                        preferredAudioLayout = playerState.preferredAudioLayout,
                     ),
                     allowUncachedFallback = true,
+                    linkFilters = latestLinkFilters,
                 ) ?: run {
                     episodeHandoffPreparing = false
                     openSources()
@@ -746,7 +826,13 @@ fun RetainedPlayerHost(
         externalSecondaryOpen = { secondaryState.panel != PlayerSecondaryPanel.HIDDEN },
         onDismissExternalSecondary = {
             secondaryJob?.cancel()
-            secondaryState = secondaryState.copy(panel = PlayerSecondaryPanel.HIDDEN)
+            sourceResolveJob?.cancel()
+            sourceResolveJob = null
+            secondaryState = secondaryState.copy(
+                panel = PlayerSecondaryPanel.HIDDEN,
+                sourceLoading = false,
+                resolvingSource = false,
+            )
         },
         controlsOverlay = { state, actions, playPauseFocusRequester, controlsTimeline ->
             PlayerControls(
@@ -764,7 +850,17 @@ fun RetainedPlayerHost(
                 actions = PlayerSecondaryActionsV2(
                     onDismiss = {
                         secondaryJob?.cancel()
-                        secondaryState = secondaryState.copy(panel = PlayerSecondaryPanel.HIDDEN)
+                        sourceResolveJob?.cancel()
+                        sourceResolveJob = null
+                        secondaryState = secondaryState.copy(
+                            panel = PlayerSecondaryPanel.HIDDEN,
+                            sourceLoading = false,
+                            resolvingSource = false,
+                        )
+                    },
+                    onAudioLayoutChange = { layout ->
+                        secondaryState = secondaryState.copy(preferredAudioLayout = layout)
+                        viewModel.onEvent(PlayerEvent.OnPreferredAudioLayoutChanged(layout))
                     },
                     onReloadSources = {
                         val episodePanel = secondaryState.panel == PlayerSecondaryPanel.EPISODE_SOURCES
