@@ -41,6 +41,10 @@ data class HomeCatalogState(
  * row in place. The sequence is stable: the saved order is resolved once, and subsequent network
  * completions only replace that row's state. An error is row-local and never erases a successful
  * sibling catalog.
+ *
+ * **Two-wave load:** Popular/Featured (Cinemeta + Metahub) finish first so their heavy art can
+ * warm before TMDB genre rails compete for the same concurrency budget. Genre shelves lag a
+ * little on purpose — first shelves matter most on TV cold start / fast D-pad.
  */
 fun loadHomeCatalogs(
     requestsInDefaultOrder: List<CatalogRequest>,
@@ -61,26 +65,58 @@ fun loadHomeCatalogs(
     emit(HomeCatalogState(rows.toList()))
     if (rows.isEmpty()) return@flow
 
-    val taskToKey = LinkedHashMap<String, HomeCatalogKey>()
-    val tasks = orderedKeys.mapNotNull { key ->
-        byKey[key]?.let { request ->
-            val taskKey = "${key.addonId}\u0000${key.catalogId}"
-            taskToKey[taskKey] = key
-            AddonFanoutTask(taskKey, load = request.load)
-        }
-    }
-    boundedAddonFanout(tasks, maxConcurrent).collect { outcome ->
-        val catalogKey = taskToKey[outcome.key] ?: return@collect
-        val index = rows.indexOfFirst { it.key == catalogKey }
-        if (index < 0) return@collect
-        val nextState = when (outcome) {
-            is AddonFanoutResult.Success -> {
-                if (outcome.value.isEmpty()) CatalogLoadState.Empty
-                else CatalogLoadState.Content(outcome.value)
+    fun tasksFor(keys: List<HomeCatalogKey>): Pair<List<AddonFanoutTask<List<HomePoster>>>, Map<String, HomeCatalogKey>> {
+        val taskToKey = LinkedHashMap<String, HomeCatalogKey>()
+        val tasks = keys.mapNotNull { key ->
+            byKey[key]?.let { request ->
+                val taskKey = "${key.addonId}\u0000${key.catalogId}"
+                taskToKey[taskKey] = key
+                AddonFanoutTask(taskKey, load = request.load)
             }
-            is AddonFanoutResult.Failure -> CatalogLoadState.Error(outcome.cause)
         }
-        rows[index] = rows[index].copy(loadState = nextState)
-        emit(HomeCatalogState(rows.toList()))
+        return tasks to taskToKey
     }
+
+    suspend fun collectWave(
+        keys: List<HomeCatalogKey>,
+        concurrency: Int,
+    ) {
+        if (keys.isEmpty()) return
+        val (tasks, taskToKey) = tasksFor(keys)
+        if (tasks.isEmpty()) return
+        boundedAddonFanout(tasks, concurrency.coerceAtLeast(1)).collect { outcome ->
+            val catalogKey = taskToKey[outcome.key] ?: return@collect
+            val index = rows.indexOfFirst { it.key == catalogKey }
+            if (index < 0) return@collect
+            val nextState = when (outcome) {
+                is AddonFanoutResult.Success -> {
+                    if (outcome.value.isEmpty()) CatalogLoadState.Empty
+                    else CatalogLoadState.Content(outcome.value)
+                }
+                is AddonFanoutResult.Failure -> CatalogLoadState.Error(outcome.cause)
+            }
+            rows[index] = rows[index].copy(loadState = nextState)
+            emit(HomeCatalogState(rows.toList()))
+        }
+    }
+
+    val priorityKeys = orderedKeys.filter { key ->
+        isPrimaryHomeShelfTitle(byKey[key]?.title.orEmpty())
+    }
+    val restKeys = orderedKeys.filter { key -> key !in priorityKeys.toSet() }
+
+    // Wave 1: only Popular/Featured (or empty when those titles are absent).
+    collectWave(
+        keys = priorityKeys,
+        concurrency = priorityKeys.size.coerceAtMost(maxConcurrent).coerceAtLeast(1),
+    )
+    // Wave 2: genre / TMDB / remaining addon catalogs.
+    collectWave(keys = restKeys, concurrency = maxConcurrent)
 }
+
+/** Cinemeta rails with heavy Metahub backdrops — load and warm before TMDB genre shelves. */
+fun isPrimaryHomeShelfTitle(title: String): Boolean {
+    val t = title.lowercase()
+    return "popular" in t || "featured" in t
+}
+

@@ -27,11 +27,13 @@ internal fun selectAutoPlayCandidate(
      * to an empty cached Sources state.
      */
     allowUncachedFallback: Boolean = false,
+    linkFilters: StreamLinkFilterSettings = StreamLinkFilterSettings(),
 ): StreamCandidate? {
     val candidates = groups
         .flatMap { group -> (group.state as? StreamGroupState.Content)?.streams.orEmpty() }
         .filter { it.isWellFormed() }
         .filterNot { it.id in excludedCandidateIds }
+        .filter { StreamLinkFilterPolicy.allows(it, linkFilters) }
         .distinctBy { it.dedupeKey() }
 
     preferLastPlayed?.let { cached ->
@@ -127,7 +129,7 @@ internal fun selectAutoPlayCandidate(
         AUTO_PICK_TAG,
         "winner src=${winner?.sourceLabel} cache=${winner?.cacheState} " +
             "soft=${winnerRank?.softsubFit} dual=${winnerRank?.dualFit} seeds=${winnerRank?.seeders} " +
-            "curator=${winnerRank?.curatorFit} observed=${winnerRank?.usedObservedTracks} " +
+            "curator=${winnerRank?.curatorFit} audio=${winnerRank?.audioFit} observed=${winnerRank?.usedObservedTracks} " +
             "title='${winner?.title?.replace('\n', ' ')?.take(160)}' " +
             "release='${winner?.releaseTextForLog()?.replace('\n', ' ')?.take(80)}'",
     )
@@ -203,10 +205,14 @@ private val SOFTSUB_HINT = Regex("""\b(?:soft\s*subs?|multi\s*subs?|ass|ssa|srt|
  * Cheap softsub readiness for Finding gates — keyword scan only.
  * Full [StreamScoringEngine.rank] belongs in the single-flight pick, not every scrape tick.
  */
-internal fun hasLikelySoftsubCachedHint(groups: List<StreamGroup>): Boolean =
+internal fun hasLikelySoftsubCachedHint(
+    groups: List<StreamGroup>,
+    linkFilters: StreamLinkFilterSettings = StreamLinkFilterSettings(),
+): Boolean =
     groups.asSequence()
         .flatMap { group -> (group.state as? StreamGroupState.Content)?.streams.orEmpty().asSequence() }
         .filter { it.isWellFormed() && it.isAutoPlayEligibleForLog() }
+        .filter { StreamLinkFilterPolicy.allows(it, linkFilters) }
         .any { candidate ->
             val text = candidate.releaseTextForLog().lowercase()
             if (RAW_HINT.containsMatchIn(text)) return@any false
@@ -228,13 +234,15 @@ internal fun hasEligibleSoftsubAutoPlay(
     groups: List<StreamGroup>,
     context: StreamScoringEngine.Context,
     minSoftsubFit: Int = 2,
+    linkFilters: StreamLinkFilterSettings = StreamLinkFilterSettings(),
 ): Boolean {
     // Fast path for readiness callers; full rank only when the cheap hint matches.
-    if (!hasLikelySoftsubCachedHint(groups)) return false
+    if (!hasLikelySoftsubCachedHint(groups, linkFilters)) return false
     val cached = groups
         .asSequence()
         .flatMap { group -> (group.state as? StreamGroupState.Content)?.streams.orEmpty().asSequence() }
         .filter { it.isWellFormed() && it.isAutoPlayEligibleForLog() }
+        .filter { StreamLinkFilterPolicy.allows(it, linkFilters) }
         .sortedWith(
             compareByDescending<StreamCandidate> { it.seeders ?: 0 }
                 .thenByDescending { autoPickQualityHint(it.title) },
@@ -251,11 +259,16 @@ internal fun hasEligibleSoftsubAutoPlay(
 internal fun hasEligibleCachedAutoPlay(
     groups: List<StreamGroup>,
     context: StreamScoringEngine.Context,
+    linkFilters: StreamLinkFilterSettings = StreamLinkFilterSettings(),
 ): Boolean =
     groups
         .asSequence()
         .flatMap { group -> (group.state as? StreamGroupState.Content)?.streams.orEmpty().asSequence() }
-        .any { it.isWellFormed() && it.isAutoPlayEligibleForLog() }
+        .any {
+            it.isWellFormed() &&
+                it.isAutoPlayEligibleForLog() &&
+                StreamLinkFilterPolicy.allows(it, linkFilters)
+        }
 
 /** Lightweight title quality hint used only to pick which rows enter the score cap. */
 private fun autoPickQualityHint(title: String): Int {
@@ -272,7 +285,7 @@ private fun autoPickQualityHint(title: String): Int {
  * Cheap admission sort for the anime score cap — keyword + memory only, never full [StreamScoringEngine.rank]
  * (that path used to freeze Finding on Onn when applied to whole dumps every tick).
  *
- * Order: observed dual/ASS memory → Dual-Audio token → softsub tokens → SeaDex curator →
+ * Order: observed dual/ASS memory → Dual-Audio token / listing dual → softsub tokens → SeaDex →
  * Instant → seeders (survivability) → res.
  */
 private fun animeScorePoolAdmissionOrder(
@@ -299,7 +312,21 @@ private fun animeScorePoolAdmissionOrder(
         return b
     }
 
+    fun listingBoost(c: StreamCandidate): Int {
+        val (soft, dual) = ListingReleaseProbe.inferTrackFits(
+            releaseBlob = releaseBlob(c),
+            preferredSubtitleLanguage = context.preferredSubtitleLanguage,
+            animeLike = true,
+        )
+        var b = 0
+        if (dual == 1) b += 3
+        if (soft >= 4) b += 2
+        else if (soft >= 2) b += 1
+        return b
+    }
+
     return compareByDescending<StreamCandidate> { memoryBoost(it) }
+        .thenByDescending { listingBoost(it) }
         .thenByDescending { dualHint.containsMatchIn(releaseBlob(it)) }
         .thenByDescending { softHint.containsMatchIn(releaseBlob(it)) }
         .thenByDescending { it.isCuratedSeaDexSource() }

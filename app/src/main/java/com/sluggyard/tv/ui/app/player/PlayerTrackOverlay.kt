@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -43,8 +44,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.sluggyard.tv.data.local.AVAILABLE_SUBTITLE_LANGUAGES
+import com.sluggyard.tv.data.local.SubtitleLanguage
 import com.sluggyard.tv.ui.design.SlugYardPalette
 import com.sluggyard.tv.ui.design.SlugYardTvMetrics
+import com.sluggyard.tv.ui.util.languageCodeToName
 import com.sluggyard.tv.ui.app.ButtonStyle
 import com.sluggyard.tv.ui.app.TvButton
 import com.sluggyard.tv.ui.screens.player.PlayerUiState
@@ -52,16 +56,17 @@ import com.sluggyard.tv.ui.screens.player.PlayerSubtitleUtils
 import com.sluggyard.tv.ui.screens.player.PlayerTrackActions
 import com.sluggyard.tv.ui.screens.player.SUBTITLE_DELAY_STEP_MS
 import com.sluggyard.tv.ui.screens.player.TrackInfo
-import com.sluggyard.tv.ui.util.languageCodeToName
 import kotlin.math.abs
 
 private const val SubtitleOffKey = "off"
 private const val SubtitleFooterKey = "footer"
 
 internal fun audioTrackUiLabel(track: TrackInfo): String {
-    val language = com.sluggyard.tv.ui.screens.player.resolveAudioTrackLanguageCode(track.language, track.name)
-        ?.let(::languageCodeToName)
-        ?: "Unknown language"
+    val language = com.sluggyard.tv.ui.screens.player.trackLanguageDisplayName(
+        language = track.language,
+        label = track.name,
+        ordinal1Based = track.index + 1,
+    )
     val format = audioFormatLabel(track.codec)
     return listOfNotNull(language, format).joinToString(" · ")
 }
@@ -79,6 +84,26 @@ private fun audioFormatLabel(codec: String?): String? {
         "aac" in normalized -> "AAC"
         "pcm" in normalized -> "PCM"
         else -> normalized.substringAfterLast('/').replace('-', ' ').uppercase()
+    }
+}
+
+/** Surface the layout a channel count implies (5.1, 7.1…) instead of a bare count. */
+private fun audioTrackLayoutDetail(channelCount: Int?, codec: String?): String? {
+    val layout = when (channelCount) {
+        1 -> "Mono"
+        2 -> "Stereo"
+        3 -> "2.1"
+        4 -> "4.0"
+        5 -> "5.0"
+        6 -> "5.1"
+        7 -> "6.1"
+        8 -> "7.1"
+        else -> null
+    }
+    return if (layout != null) {
+        listOfNotNull(layout, audioFormatLabel(codec)).joinToString(" · ")
+    } else {
+        channelCount?.takeIf { it > 0 }?.let { "$it channels" }
     }
 }
 
@@ -129,6 +154,13 @@ fun PlayerTrackOverlay(
             modifier = modifier,
             closeFocusRequester = closeFocusRequester,
             headerTrailing = {
+                if (!state.isLoadingAddonSubtitles) {
+                    TvButton(
+                        label = if (state.addonSubtitles.isNotEmpty()) "Search again" else "Search subtitles",
+                        onClick = actions.onRetrySubtitleSearch,
+                        style = ButtonStyle.Secondary,
+                    )
+                }
                 TvButton(
                     label = "Style",
                     onClick = actions.onOpenSubtitleStyle,
@@ -140,7 +172,11 @@ fun PlayerTrackOverlay(
             // across text tracks; colliding LazyColumn keys break TV focus traversal on those streams.
             val subtitleChoices = buildList {
                 state.subtitleTracks.forEachIndexed { ordinal, track ->
-                    val language = subtitleLanguageName(track.language, track.name)
+                    val language = com.sluggyard.tv.ui.screens.player.trackLanguageDisplayName(
+                        language = track.language,
+                        label = track.name,
+                        ordinal1Based = ordinal + 1,
+                    )
                     val format = subtitleCodecTag(track.codec, track.sampleMimeType, track.name)
                     val (title, detail) = PlayerSubtitleUtils.formatSubtitleTrackLabel(
                         languageDisplay = language,
@@ -189,17 +225,29 @@ fun PlayerTrackOverlay(
                 }
             }.sortedWith(compareBy<SubtitleChoice> { it.language.lowercase() }.thenBy { it.title })
 
-            // Off + tracks + search footer share one LazyColumn so D-pad can scroll the full list.
-            // A focusable Search button *below* the list stole Down before focusGroup could scroll.
-            SubtitleChoiceList(
+    // Off + tracks share one LazyColumn so D-pad can scroll the full list.
+    // Search lives in the sheet header so Italian/embedded rows cannot bury it.
+    // The language chip sits above the list: default = preferred subtitle language,
+    // one click opens the picker and re-runs the search scoped to that language
+    // (OpenSubtitles-v3 addons filter server-side via langs=).
+    SubtitleLanguageBar(
+        label = state.subtitleSearchLanguageLabel
+            ?: state.subtitleStyle.preferredLanguage
+                .takeUnless { it.isBlank() || it == "none" }
+                ?.let { languageCodeToName(it) }
+            ?: "All languages",
+        selectable = !state.isLoadingAddonSubtitles,
+        pickerOpen = state.subtitleLanguagePickerOpen,
+        onTogglePicker = actions.onOpenSubtitleLanguagePicker,
+        onPick = actions.onPickSubtitleLanguage,
+    )
+    SubtitleChoiceList(
                 choices = subtitleChoices,
                 subtitlesOff = subtitlesOff,
                 onDisableSubtitles = actions.onDisableSubtitles,
                 listFocusRequester = listFocusRequester,
                 isLoadingAddonSubtitles = state.isLoadingAddonSubtitles,
-                hasAddonSubtitleResults = state.addonSubtitles.isNotEmpty(),
                 addonSubtitlesError = state.addonSubtitlesError,
-                onRetrySubtitleSearch = actions.onRetrySubtitleSearch,
             )
         }
         state.showSubtitleStylePanel -> TrackSheet("Subtitle style", actions.onCloseSubtitleStyle, modifier, closeFocusRequester) {
@@ -363,10 +411,100 @@ private fun ColumnScope.TrackList(
         itemsIndexed(tracks, key = { _, track -> track.index }) { index, track ->
             TrackRow(
                 title = audioTrackUiLabel(track),
-                detail = track.channelCount?.takeIf { it > 0 }?.let { "$it channels" },
+                detail = audioTrackLayoutDetail(track.channelCount, track.codec),
                 selected = track.index == selected || track.isSelected,
                 onClick = { onSelected(track.index) },
                 focusRequester = listFocusRequester.takeIf { index == selectedIndex },
+            )
+        }
+    }
+}
+
+/**
+ * Language scope for addon subtitle searches. Defaults to the preferred subtitle
+ * language; opens a chip grid that re-runs the search server-side (langs=)
+ * instead of fetching every language from every addon.
+ */
+@Composable
+private fun ColumnScope.SubtitleLanguageBar(
+    label: String,
+    selectable: Boolean,
+    pickerOpen: Boolean,
+    onTogglePicker: () -> Unit,
+    onPick: (String?) -> Unit,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+    ) {
+        Text(
+            "Language",
+            style = MaterialTheme.typography.titleSmall,
+            color = SlugYardPalette.OnCanvasMuted,
+        )
+        SubtitleLangChip(
+            label = label,
+            enabled = selectable,
+            selected = pickerOpen,
+            onClick = onTogglePicker,
+        )
+        Text(
+            if (selectable) "Change and search" else "Searching…",
+            style = MaterialTheme.typography.bodySmall,
+            color = SlugYardPalette.OnCanvasMuted,
+            modifier = Modifier.weight(1f),
+        )
+    }
+    if (pickerOpen) {
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            item(key = "all") {
+                SubtitleLangChip(
+                    label = "All languages",
+                    selected = label == "All languages",
+                    onClick = { onPick(null) },
+                )
+            }
+            items(AVAILABLE_SUBTITLE_LANGUAGES.take(24), key = SubtitleLanguage::code) { option ->
+                SubtitleLangChip(
+                    label = option.name,
+                    selected = label == option.name,
+                    onClick = { onPick(option.code) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SubtitleLangChip(
+    label: String,
+    enabled: Boolean = true,
+    selected: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val background = when {
+        selected -> SlugYardPalette.Accent
+        else -> SlugYardPalette.SurfaceElevated
+    }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .clip(RoundedCornerShape(16.dp))
+            .background(background)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 6.dp),
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (selected) Color.Black else SlugYardPalette.OnCanvas,
+        )
+        if (selected) {
+            Text(
+                " ▾",
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (selected) Color.Black else SlugYardPalette.OnCanvas,
             )
         }
     }
@@ -388,9 +526,7 @@ private fun ColumnScope.SubtitleChoiceList(
     onDisableSubtitles: () -> Unit,
     listFocusRequester: FocusRequester,
     isLoadingAddonSubtitles: Boolean,
-    hasAddonSubtitleResults: Boolean,
     addonSubtitlesError: String?,
-    onRetrySubtitleSearch: () -> Unit,
 ) {
     val listState = rememberLazyListState()
     val selectedChoiceIndex = choices.indexOfFirst(SubtitleChoice::selected)
@@ -442,12 +578,6 @@ private fun ColumnScope.SubtitleChoiceList(
                     val searchError = addonSubtitlesError?.takeIf(String::isNotBlank)
                     if (searchError != null) TrackStatus(searchError)
                     if (choices.isEmpty()) TrackStatus("No subtitles found automatically")
-                    TvButton(
-                        label = if (hasAddonSubtitleResults) "Search again" else "Search subtitles",
-                        onClick = onRetrySubtitleSearch,
-                        style = ButtonStyle.Secondary,
-                        fillMaxWidth = true,
-                    )
                 }
             }
         }
@@ -517,15 +647,6 @@ private fun SubtitlePillRow(
                 fontWeight = FontWeight.Bold,
             )
         }
-    }
-}
-
-private fun subtitleLanguageName(language: String?, fallback: String): String {
-    language?.takeIf(String::isNotBlank)?.let { return languageCodeToName(it) }
-    return if (fallback.matches(Regex("[A-Za-z]{2,3}([_-][A-Za-z0-9]{2,4})?"))) {
-        languageCodeToName(fallback)
-    } else {
-        fallback
     }
 }
 

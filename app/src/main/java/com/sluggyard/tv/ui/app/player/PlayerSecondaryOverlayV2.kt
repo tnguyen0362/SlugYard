@@ -57,6 +57,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import com.sluggyard.tv.core.streamresolution.StreamCacheState
+import com.sluggyard.tv.data.local.PreferredAudioLayout
 import com.sluggyard.tv.ui.components.StreamBadgeChips
 import com.sluggyard.tv.ui.design.SlugYardPalette
 import com.sluggyard.tv.ui.design.SlugYardTvMetrics
@@ -92,6 +93,8 @@ data class PlayerSecondaryState(
     val failedSourceIds: Set<String> = emptySet(),
     val digitalReleaseStatus: DigitalReleasePolicy.Status? = null,
     val preferredSubtitleLanguage: String? = null,
+    /** Preferred audio layout for ranking the Sources list (Stereo / 5.1 / 7.1+). */
+    val preferredAudioLayout: PreferredAudioLayout = PreferredAudioLayout.NONE,
     val episodeLoading: Boolean = false,
     val episodeError: String? = null,
     val seasons: List<Int> = emptyList(),
@@ -109,6 +112,7 @@ data class PlayerSecondaryActionsV2(
     val onReloadSources: () -> Unit,
     val onSelectSourceAddon: (String?) -> Unit,
     val onSelectSource: (StreamCandidate) -> Unit,
+    val onAudioLayoutChange: (PreferredAudioLayout) -> Unit = {},
     val onBackToEpisodes: () -> Unit,
     val onReloadEpisodes: () -> Unit,
     val onSelectSeason: (Int) -> Unit,
@@ -239,6 +243,11 @@ private fun ColumnScope.SourceContent(
         }
     }
 
+    AudioLayoutStrip(
+        current = state.preferredAudioLayout,
+        onSelect = actions.onAudioLayoutChange,
+    )
+
     // Keep the last ranked list visible while re-ranking. Identity ignores cache-state churn
     // (probe spam) so we don't re-sort hundreds of rows on every TorBox tick.
     var candidates by remember(state.panel) { mutableStateOf<List<StreamCandidate>>(emptyList()) }
@@ -264,6 +273,7 @@ private fun ColumnScope.SourceContent(
         state.title,
         state.contentType,
         state.preferredSubtitleLanguage,
+        state.preferredAudioLayout,
         state.digitalReleaseStatus,
     ) {
         val next = withContext(Dispatchers.Default) {
@@ -291,6 +301,7 @@ private fun ColumnScope.SourceContent(
                     title = state.title,
                     contentType = state.contentType,
                     preferredSubtitleLanguage = state.preferredSubtitleLanguage,
+                    preferredAudioLayout = state.preferredAudioLayout,
                     digitalReleaseStatus = state.digitalReleaseStatus,
                 ),
             )
@@ -546,3 +557,38 @@ private fun SourceAddonChip(
 private val SoftYardAccentFill = Color(0xFFF2C94C)
 private val SoftYardChipLabel = Color(0xFFF5F5F1)
 private val SoftYardChipBorder = Color(0xFF6B6B6B)
+
+/**
+ * In-Sources audio preference strip. Re-ranks the list live via
+ * preferredAudioLayout (no refetch) and persists through the settings event.
+ */
+@Composable
+private fun AudioLayoutStrip(
+    current: PreferredAudioLayout,
+    onSelect: (PreferredAudioLayout) -> Unit,
+) {
+    val options = listOf(
+        PreferredAudioLayout.NONE to "Any",
+        PreferredAudioLayout.STEREO to "Stereo",
+        PreferredAudioLayout.SURROUND_5_1 to "5.1",
+        PreferredAudioLayout.SURROUND_7_1 to "7.1+",
+    )
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 8.dp),
+    ) {
+        Text(
+            "Audio",
+            style = MaterialTheme.typography.labelLarge,
+            color = SoftYardChipLabel,
+        )
+        options.forEach { (layout, label) ->
+            SourceAddonChip(
+                label = label,
+                selected = current == layout,
+                onClick = { onSelect(layout) },
+            )
+        }
+    }
+}

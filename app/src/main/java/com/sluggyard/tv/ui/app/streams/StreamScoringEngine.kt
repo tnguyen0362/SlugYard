@@ -2,6 +2,7 @@ package com.sluggyard.tv.ui.app.streams
 
 import com.sluggyard.tv.core.debrid.StreamTextSizeParser
 import com.sluggyard.tv.core.streamresolution.StreamCacheState
+import com.sluggyard.tv.data.local.PreferredAudioLayout
 
 /**
  * Rewrite stream auto-pick.
@@ -35,6 +36,12 @@ internal object StreamScoringEngine {
          */
         val digitalReleaseStatus: DigitalReleasePolicy.Status? = null,
         /**
+         * User audio-layout preference (Stereo / 5.1 / 7.1+). SOFT signal only: a low-rank
+         * tiebreak that never gates auto-play or removes candidates. Container truth
+         * (observed memory) overrides title hints; unknown = neutral.
+         */
+        val preferredAudioLayout: PreferredAudioLayout? = null,
+        /**
          * Play-once inventory by lowercase infoHash. Overlay on title heuristics — free
          * second-screen signal after the user has opened that release once.
          */
@@ -56,6 +63,8 @@ internal object StreamScoringEngine {
         val seeders: Int,
         val decodeFit: Int,
         val quality: Int,
+        /** Audio-layout preference fit — soft tiebreak only: 3 exact, 2 compatible surround, 1 neutral, 0 mismatch. */
+        val audioFit: Int = 1,
         val sizeFit: Int,
         /** True when softsub/dual came from observed memory rather than title alone. */
         val usedObservedTracks: Boolean = false,
@@ -79,6 +88,7 @@ internal object StreamScoringEngine {
                 { it.seeders },
                 { it.decodeFit },
                 { it.quality },
+                { it.audioFit },
                 { it.sizeFit },
             )
             // K/J drama: subs matter; dual does not.
@@ -88,6 +98,7 @@ internal object StreamScoringEngine {
                 { it.softsubFit },
                 { it.seeders },
                 { it.quality },
+                { it.audioFit },
                 { it.sizeFit },
             )
             // Movies / live / mainstream: softsub language fit before seeders/quality so a
@@ -99,6 +110,7 @@ internal object StreamScoringEngine {
                 { it.softsubFit },
                 { it.seeders },
                 { it.quality },
+                { it.audioFit },
                 { it.sizeFit },
             )
         }
@@ -127,17 +139,33 @@ internal object StreamScoringEngine {
 
         val safePool = playable.filterNot { it.isKnownUnsupportedDolbyVision() }.ifEmpty { playable }
         val instantPool = safePool.filter { it.isInstantOrCachedAutoPlay() }
-        // Mainstream: Instant hard gate. Anime: Instant is a rank key only — when uncached
-        // fallback is open, Dual+ASS uncached is allowed to beat Instant Eng-PGS mono.
-        val cachePool = when {
-            kind == ContentKind.ANIME && allowUncachedFallback -> {
-                val combined = safePool.filter {
-                    it.isInstantOrCachedAutoPlay() || it.isUncachedDebridAutoPlayEligible()
-                }
-                combined.ifEmpty { emptyList() }
+        val preferred = normalizePreferredSubtitle(context.preferredSubtitleLanguage)
+        // Instant with a real softsub/lang signal (fit >= 2). Opaque Instant WEB (fit 1) is
+        // not a language winner — titles like "Movie.1080p.WEB-DL" say nothing about dialogue.
+        val labeledInstant = if (preferred != null) {
+            instantPool.filter { rank(it, context).softsubFit >= 2 }
+        } else {
+            emptyList()
+        }
+        val uncachedEligible = {
+            safePool.filter { it.isUncachedDebridAutoPlayEligible() }
+        }
+        val combinedInstantAndUncached = {
+            safePool.filter {
+                it.isInstantOrCachedAutoPlay() || it.isUncachedDebridAutoPlayEligible()
             }
+        }
+        // Mainstream: Instant hard gate only when Instant rows actually look playable for
+        // the preferred language. Otherwise Finding used to auto-start the first TorBox
+        // cached WEB (unlabeled audio, no subs) and never score an Eng-tagged uncached row.
+        val cachePool = when {
+            kind == ContentKind.ANIME && allowUncachedFallback ->
+                combinedInstantAndUncached().ifEmpty { emptyList() }
+            preferred != null && labeledInstant.isNotEmpty() -> labeledInstant
+            preferred != null && instantPool.isNotEmpty() && allowUncachedFallback ->
+                combinedInstantAndUncached().ifEmpty { emptyList() }
             instantPool.isNotEmpty() -> instantPool
-            allowUncachedFallback -> safePool.filter { it.isUncachedDebridAutoPlayEligible() }
+            allowUncachedFallback -> uncachedEligible()
             else -> emptyList()
         }
         // Size / language / digital gates apply to the Instant pool first. If Instant rows all
@@ -145,12 +173,13 @@ internal object StreamScoringEngine {
         // debrid-startable rows instead of returning null while better scrapers may still arrive.
         var playPool = gatedPlayPool(cachePool, context, kind)
         if (playPool.isEmpty() && allowUncachedFallback) {
-            val uncachedPool = safePool.filter { it.isUncachedDebridAutoPlayEligible() }
+            val uncachedPool = uncachedEligible()
             if (uncachedPool.isNotEmpty()) {
                 playPool = gatedPlayPool(uncachedPool, context, kind)
             }
         }
         val winner = playPool.maxWithOrNull(rankComparator(context)) ?: return null
+        val winnerRank = rank(winner, context)
         // During Finding (Instant-only), refuse weak anime Instant traps so Dual/ASS can still land:
         // mono PGS remuxes and plain SRT WEB dumps (Angel Next Door Instant English SRT).
         // softsubFit==4 alone is not the bar — that would also block Instant ASS when preferred=null.
@@ -159,9 +188,21 @@ internal object StreamScoringEngine {
             !allowUncachedFallback &&
             !isAcceptableAnimeInstantAutoStart(
                 winner,
-                rank(winner, context),
+                winnerRank,
                 context.preferredSubtitleLanguage,
             )
+        ) {
+            return null
+        }
+        // Opaque Instant (softsubFit 1: no softsub / language token) must not auto-start
+        // while scrapers are still running. Conflicting tagged Instant (fit 0) is a different
+        // path — exclusive packs already empty the pool; origin-tagged Multi-Subs still play.
+        // MKV header probe rejects the ceiling case where the file has zero subtitle tracks.
+        if (
+            kind != ContentKind.ANIME &&
+            preferred != null &&
+            !allowUncachedFallback &&
+            winnerRank.softsubFit == 1
         ) {
             return null
         }
@@ -230,6 +271,7 @@ internal object StreamScoringEngine {
             seeders = seederFit(candidate),
             decodeFit = decodeFit(text, animeEpisode),
             quality = qualityFit(text, animeEpisode, context.digitalReleaseStatus),
+            audioFit = audioFitOf(candidate, context),
             sizeFit = sizeFit(candidate, context, episodeLike),
             usedObservedTracks = tracks.usedObserved,
         )
@@ -245,11 +287,13 @@ internal object StreamScoringEngine {
             ContentKind.ANIME ->
                 r.effectiveDualFit * 10_000_000 + r.softsubFit * 1_000_000 + r.curatorFit * 200_000 +
                     r.cacheFit * 100_000 + r.seeders * 1_000 + r.decodeFit * 100 +
-                    r.quality * 10 + r.sizeFit
+                    r.quality * 10 + r.audioFit * 4 + r.sizeFit
             ContentKind.K_DRAMA, ContentKind.J_DRAMA ->
-                r.softsubFit * 1_000_000 + r.seeders * 1_000 + r.quality * 10 + r.sizeFit
+                r.softsubFit * 1_000_000 + r.seeders * 1_000 + r.quality * 10 +
+                    r.audioFit * 4 + r.sizeFit
             ContentKind.MAINSTREAM, ContentKind.LIVE ->
-                r.softsubFit * 1_000_000 + r.seeders * 1_000 + r.quality * 10 + r.sizeFit
+                r.softsubFit * 1_000_000 + r.seeders * 1_000 + r.quality * 10 +
+                    r.audioFit * 4 + r.sizeFit
         }
     }
 
@@ -267,6 +311,10 @@ internal object StreamScoringEngine {
     }
 
     fun contentKind(context: Context): ContentKind = classify(context)
+
+    /** True when settings asked for a real subtitle language (not empty / "none"). */
+    fun hasPreferredLanguage(preferredSubtitleLanguage: String?): Boolean =
+        normalizePreferredSubtitle(preferredSubtitleLanguage) != null
 
     fun filterForDisplay(candidates: List<StreamCandidate>): List<StreamCandidate> =
         candidates.filterNot { it.isExcludedResolution() }
@@ -457,6 +505,55 @@ internal object StreamScoringEngine {
         } else {
             movieSizeScore(sizeGb, expected)
         }
+    }
+
+    /**
+     * Audio-layout preference fit — SOFT signal only. Never gates (no filter in [choose]);
+     * it breaks rank ties below quality. Container truth (observed memory) wins when present;
+     * otherwise best-effort release-title hints; unknown = neutral 1.
+     */
+    private fun audioFitOf(candidate: StreamCandidate, context: Context): Int {
+        val preferred = context.preferredAudioLayout ?: return 1
+        val hash = candidate.infoHash?.trim()?.lowercase().orEmpty()
+        val observed = if (hash.isNotEmpty()) context.observedTracksByHash[hash] else null
+        val truthChannels = observed?.maxAudioChannels
+        if (truthChannels != null) {
+            return layoutFit(preferred, truthChannels)
+        }
+        val titleChannels = titleLayoutChannels(candidate.releaseText().lowercase())
+        return if (titleChannels != null) layoutFit(preferred, titleChannels) else 1
+    }
+
+    /**
+     * Channel count → layout match: 2 → stereo, 6 → 5.1, 8+ → 7.1-class. Mono is an explicit
+     * mismatch for every preference; surround families (5.1 ↔ 7.1) are compatible; stereo vs
+     * any surround is a mismatch.
+     */
+    private fun layoutFit(preferred: PreferredAudioLayout, channels: Int): Int {
+        if (channels <= 1) return 0
+        val layout = when {
+            channels == 2 -> PreferredAudioLayout.STEREO
+            channels <= 6 -> PreferredAudioLayout.SURROUND_5_1
+            else -> PreferredAudioLayout.SURROUND_7_1
+        }
+        return when {
+            layout == preferred -> 3
+            preferred != PreferredAudioLayout.STEREO && layout != PreferredAudioLayout.STEREO -> 2
+            else -> 0
+        }
+    }
+
+    /**
+     * Channel-layout hints from the release name. Lossless/object tiers (Atmos, TrueHD,
+     * DTS-HD MA, DTS:X) are 7.1-class; explicit 5.1/7.1 tokens; stereo/2.0. Null when the
+     * title says nothing (neutral). Callers pass lowercased text.
+     */
+    private fun titleLayoutChannels(text: String): Int? = when {
+        AUDIO_ATMOS_LOSSLESS_REGEX.containsMatchIn(text) -> 8
+        AUDIO_7_1_REGEX.containsMatchIn(text) -> 8
+        AUDIO_5_1_REGEX.containsMatchIn(text) -> 6
+        AUDIO_STEREO_REGEX.containsMatchIn(text) -> 2
+        else -> null
     }
 
     private fun classify(context: Context): ContentKind {
@@ -790,7 +887,7 @@ internal object StreamScoringEngine {
             "pt" -> listOf("portuguese", "portugues", "brazilian", "brasil", "pt-br", "ptbr")
             "fr" -> listOf("french", "vostfr")
             "de" -> listOf("german", "deutsch")
-            "it" -> listOf("italian", "italiano")
+            "it" -> listOf("italian", "italiano", "ita")
             "ru" -> listOf("russian", "русский")
             "ar" -> listOf("arabic")
             "hi" -> listOf("hindi")
@@ -900,6 +997,17 @@ internal object StreamScoringEngine {
     private val EXPLICIT_SUB_REGEX = Regex("\\b(sub|subs|subtitle|subtitles|cc)\\b")
     private val ENG_SUB_REGEX = Regex("\\b(eng(?:lish)?\\s*subs?|subs?\\s*(?:eng|english))\\b")
     private val DUAL_AUDIO_REGEX = Regex("\\b(dual.?audio|multi.?audio)\\b")
+    /** Lossless/object audio tiers — 7.1-class regardless of base channel count. */
+    private val AUDIO_ATMOS_LOSSLESS_REGEX = Regex(
+        "\\b(atmos|truehd|dts[\\s._-]?x|dts[\\s._-]?hd[\\s._-]?ma|" +
+            "dolby[\\s._-]?digital[\\s._-]?plus[\\s._-]?atmos)\\b",
+    )
+    /** Explicit 7.1-class tokens (incl. 7.1.4 / 7.1.2 height layouts). */
+    private val AUDIO_7_1_REGEX = Regex("\\b(7\\.1(?:\\.\\d+)?|7ch|dd7\\.1)\\b")
+    /** Explicit 5.1 tokens. */
+    private val AUDIO_5_1_REGEX = Regex("\\b(5\\.1(?:\\.\\d+)?|5ch|dd5\\.1|dts[\\s._-]?5\\.1)\\b")
+    /** Stereo tokens. */
+    private val AUDIO_STEREO_REGEX = Regex("\\b(2\\.0|stereo|2ch)\\b")
     private val HARD_SUB_REGEX = Regex("\\b(hardsub|hard.?subs?|burned.?in)\\b")
     private val RAW_REGEX = Regex("\\b(raw|no.?subs?|unsubbed)\\b")
     private val SOFTSUB_KEYWORD = Regex("\\b(softsub|soft.?subs?|ass|ssa)\\b")

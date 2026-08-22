@@ -137,12 +137,27 @@ internal fun PlayerRuntimeController.enableSubtitleMode() {
     subtitleMode = true
 }
 
-internal fun PlayerRuntimeController.setAddonSubtitles(subtitles: List<Subtitle>) {
+internal fun PlayerRuntimeController.setAddonSubtitles(
+    subtitles: List<Subtitle>,
+    stillLoading: Boolean = false,
+    error: String? = null,
+) {
     addonSubtitles = subtitles
     _uiState.update {
         it.copy(
             addonSubtitles = filterToVisibleAddonSubtitles(subtitles),
-            isLoadingAddonSubtitles = false,
+            isLoadingAddonSubtitles = stillLoading,
+            addonSubtitlesError = error,
+        )
+    }
+}
+
+internal fun PlayerRuntimeController.beginRewriteSubtitleSearch() {
+    addonSubtitleFetchJob?.cancel()
+    addonSubtitleFetchJob = null
+    _uiState.update {
+        it.copy(
+            isLoadingAddonSubtitles = true,
             addonSubtitlesError = null,
         )
     }
@@ -493,6 +508,7 @@ private fun PlayerRuntimeController.pushSettingsToUiState(
     _uiState.update { s ->
         s.copy(
             subtitleStyle = settings.subtitleStyle,
+            preferredAudioLayout = settings.preferredAudioLayout,
             loadingOverlayEnabled = settings.loadingOverlayEnabled,
             showPlayerLoadingStatus = settings.showPlayerLoadingStatus,
             playbackIssueReportsEnabled = settings.playbackIssueReportsEnabled,

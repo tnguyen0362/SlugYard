@@ -12,6 +12,7 @@ import com.sluggyard.tv.data.local.InternalPlayerEngine
 import com.sluggyard.tv.data.local.LibassRenderType
 import com.sluggyard.tv.data.local.StreamAutoPlayMode
 import com.sluggyard.tv.data.local.SubtitleStyleSettings
+import com.sluggyard.tv.data.local.PreferredAudioLayout
 import com.sluggyard.tv.data.repository.SkipInterval
 import com.sluggyard.tv.domain.model.MetaCastMember
 import com.sluggyard.tv.domain.model.Stream
@@ -127,9 +128,14 @@ data class PlayerUiState(
     val showMoreDialog: Boolean = false,
     // Subtitle style settings
     val subtitleStyle: SubtitleStyleSettings = SubtitleStyleSettings(),
+    /** Preferred audio layout for source ranking (Stereo / 5.1 / 7.1+); NONE = no preference. */
+    val preferredAudioLayout: PreferredAudioLayout = PreferredAudioLayout.NONE,
     // Addon subtitles
     val addonSubtitles: List<Subtitle> = emptyList(),
     val isLoadingAddonSubtitles: Boolean = false,
+    /** Comma-joined display label for the active subtitle search language (null = All). */
+    val subtitleSearchLanguageLabel: String? = null,
+    val subtitleLanguagePickerOpen: Boolean = false,
     val selectedAddonSubtitle: Subtitle? = null,
     val addonSubtitlesError: String? = null,
     val installedSubtitleAddonOrder: List<String> = emptyList(),
@@ -366,6 +372,9 @@ data class PlayerTrackActions(
     val onDisableSubtitles: () -> Unit,
     val onSelectAddonSubtitle: (Subtitle) -> Unit,
     val onRetrySubtitleSearch: () -> Unit,
+    val onOpenSubtitleLanguagePicker: () -> Unit = {},
+    /** null = search all languages. */
+    val onPickSubtitleLanguage: (String?) -> Unit = {},
     val onOpenSubtitleStyle: () -> Unit,
     val onCloseSubtitleStyle: () -> Unit,
     val onSetSubtitleSize: (Int) -> Unit,
@@ -396,6 +405,9 @@ sealed class PlayerEvent {
     data object OnDisableSubtitles : PlayerEvent()
     data class OnSelectAddonSubtitle(val subtitle: Subtitle) : PlayerEvent()
     data object OnRetrySubtitleSearch : PlayerEvent()
+    data object OnOpenSubtitleLanguagePicker : PlayerEvent()
+    data class OnPickSubtitleLanguage(val language: String?) : PlayerEvent()
+    data class OnPreferredAudioLayoutChanged(val layout: PreferredAudioLayout) : PlayerEvent()
     data class OnSetPlaybackSpeed(val speed: Float) : PlayerEvent()
     data object OnToggleControls : PlayerEvent()
     data object OnShowAudioOverlay : PlayerEvent()

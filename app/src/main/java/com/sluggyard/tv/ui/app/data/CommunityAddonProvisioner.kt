@@ -105,12 +105,17 @@ class CommunityAddonProvisioner(
 
     suspend fun uninstallByManifestUrl(manifestUrl: String) {
         provisionMutex.withLock {
+            val normalized = manifestUrl.trim()
+            if (SlugYardCommunitySourcePolicy.isPlayFlixPackIdentifier(normalized)) {
+                uninstallPlayFlixPackLocked()
+                return@withLock
+            }
             val current = registry.state.first()
             val match = current.addons.firstOrNull {
-                it.manifestUrl.equals(manifestUrl.trim(), ignoreCase = true) ||
+                it.manifestUrl.equals(normalized, ignoreCase = true) ||
                     (
                         SlugYardCommunitySourcePolicy.isPlayFlixManifest(it.manifestUrl) &&
-                            SlugYardCommunitySourcePolicy.isPlayFlixManifest(manifestUrl)
+                            SlugYardCommunitySourcePolicy.isPlayFlixManifest(normalized)
                         )
             } ?: return@withLock
             registry.dispatch(
@@ -120,7 +125,24 @@ class CommunityAddonProvisioner(
         }
     }
 
-    /** Use upstream branding (MediaFusion, Torrentio, …) — PlayFlix is the app name only. */
+    /** Removes every stream scraper in the PlayFlix pack (Torrentio, MediaFusion, Meteor, …). */
+    suspend fun uninstallPlayFlixPack() {
+        provisionMutex.withLock { uninstallPlayFlixPackLocked() }
+    }
+
+    private suspend fun uninstallPlayFlixPackLocked() {
+        val scrapers = registry.state.first().addons.filter {
+            SlugYardCommunitySourcePolicy.isStreamScraperManifest(it.manifestUrl)
+        }
+        for (addon in scrapers) {
+            registry.dispatch(
+                com.sluggyard.tv.core.addonprotocol.AddonRegistryAction.Remove(addon.manifest.id),
+            )
+            registry.bindConfiguredManifestUrl(addon.manifestUrl, null)
+        }
+    }
+
+    /** Technical manifests keep upstream ids; Settings UI shows the pack as PlayFlix only. */
     private fun displayAwareManifest(
         @Suppress("UNUSED_PARAMETER") registryUrl: String,
         manifest: com.sluggyard.tv.core.addonprotocol.AddonManifestContract,

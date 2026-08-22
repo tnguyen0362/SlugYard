@@ -8,12 +8,12 @@ import org.junit.Test
 class WatchStatePolicyTest {
 
     @Test
-    fun `two and ninety percent are the inclusive global boundaries`() {
+    fun `two and ninety-eight percent are the inclusive global boundaries`() {
         assertFalse(WatchStatePolicy.isStartedButIncomplete(0.019))
         assertTrue(WatchStatePolicy.isStartedButIncomplete(0.02))
-        assertTrue(WatchStatePolicy.isStartedButIncomplete(0.899))
-        assertFalse(WatchStatePolicy.isStartedButIncomplete(0.90))
-        assertTrue(WatchStatePolicy.isCompleted(0.90))
+        assertTrue(WatchStatePolicy.isStartedButIncomplete(0.979))
+        assertFalse(WatchStatePolicy.isStartedButIncomplete(0.98))
+        assertTrue(WatchStatePolicy.isCompleted(0.98))
     }
 
     @Test

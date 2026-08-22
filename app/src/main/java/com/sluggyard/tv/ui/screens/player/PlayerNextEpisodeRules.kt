@@ -1,5 +1,7 @@
 package com.sluggyard.tv.ui.screens.player
 
+import com.sluggyard.tv.core.watchstate.parseSeasonEpisodeFromVideoId
+import com.sluggyard.tv.core.watchstate.seasonEpisodeLooksSeriesAbsolute
 import com.sluggyard.tv.data.local.NextEpisodeThresholdMode
 import com.sluggyard.tv.data.repository.SkipInterval
 import com.sluggyard.tv.domain.model.Video
@@ -19,31 +21,24 @@ import java.time.ZoneId
 object PlayerNextEpisodeRules {
 
     /**
-     * Returns the episode that follows [currentEpisode] (within [currentSeason]
-     * when non-null), or `null` when there is no successor.
+     * Returns the episode that follows the current one, or `null` when there is no successor.
+     *
+     * Prefer [currentVideoId] (Stremio `show:S:E`) over meta `episode` numbers so season-local
+     * player numbering still finds absolute-numbered anime metas (S2E9 vs meta 21).
      */
     fun resolveNextEpisode(
         videos: List<Video>,
         currentSeason: Int?,
-        currentEpisode: Int
+        currentEpisode: Int,
+        currentVideoId: String? = null,
     ): Video? {
-        // Absolute-numbered content (e.g. some anime via Kitsu) carries no season;
-        // order by episode number alone and advance to the next one.
-        if (currentSeason == null) {
-            val ordered = videos
-                .filter { it.episode != null }
-                .sortedWith(compareBy<Video>({ it.season ?: 0 }, { it.episode ?: 0 }))
-            val idx = ordered.indexOfFirst { it.episode == currentEpisode }
-            return if (idx < 0) null else ordered.getOrNull(idx + 1)
-        }
+        val ordered = orderedVideos(videos)
+        if (ordered.isEmpty()) return null
 
-        val ordered = videos
-            .filter { it.season != null && it.episode != null }
-            .sortedWith(compareBy<Video> { it.season ?: Int.MAX_VALUE }.thenBy { it.episode ?: Int.MAX_VALUE })
+        indexOfCurrentEpisode(ordered, currentSeason, currentEpisode, currentVideoId)
+            ?.let { idx -> return ordered.getOrNull(idx + 1) }
 
-        val idx = ordered.indexOfFirst { it.season == currentSeason && it.episode == currentEpisode }
-        if (idx < 0) return null
-        return ordered.getOrNull(idx + 1)
+        return null
     }
 
     /**
@@ -52,7 +47,8 @@ object PlayerNextEpisodeRules {
      * When outro / ending / credits skip-intervals are available, the card fires at
      * the earliest credits start so it arrives with (and then replaces) Skip outro —
      * Netflix-style up-next, not a late percentage-only card while ED is already up.
-     * Without outro data the user threshold is applied against file duration.
+     * Without outro data the user threshold is applied, plus a remaining-time floor so
+     * titles missing IntroDB/AniSkip still surface Up next before the file ends.
      */
     fun shouldShowNextEpisodeCard(
         positionMs: Long,
@@ -85,7 +81,17 @@ object PlayerNextEpisodeRules {
         }
 
         if (durationMs <= 0L) return false
-        return crossesUserThreshold(thresholdMode, thresholdPercent, thresholdMinutesBeforeEnd, positionMs, durationMs)
+        if (crossesUserThreshold(thresholdMode, thresholdPercent, thresholdMinutesBeforeEnd, positionMs, durationMs)) {
+            return true
+        }
+        // No IntroDB/AniSkip outro: still guarantee Up next before the file ends.
+        // Use the larger of a fixed floor and a short percentage of runtime so both
+        // short anime and long dramas get a visible window.
+        val remainingMs = durationMs - positionMs
+        val dynamicFloorMs = (durationMs * NO_OUTRO_REMAINING_FRACTION)
+            .toLong()
+            .coerceIn(NO_OUTRO_REMAINING_FALLBACK_MS, NO_OUTRO_REMAINING_FALLBACK_MAX_MS)
+        return remainingMs in 0L..dynamicFloorMs
     }
 
     /** True for ending/credits segment labels from IntroDB / AniSkip / libass chapters. */
@@ -122,6 +128,54 @@ object PlayerNextEpisodeRules {
         return !aired.isAfter(LocalDate.now(clock))
     }
 
+    private fun orderedVideos(videos: List<Video>): List<Video> =
+        videos
+            .filter { it.episode != null }
+            .sortedWith(
+                compareBy<Video> { it.season ?: Int.MAX_VALUE }
+                    .thenBy { it.episode ?: Int.MAX_VALUE },
+            )
+
+    private fun indexOfCurrentEpisode(
+        ordered: List<Video>,
+        currentSeason: Int?,
+        currentEpisode: Int,
+        currentVideoId: String?,
+    ): Int? {
+        val videoId = currentVideoId?.trim()?.takeIf { it.isNotEmpty() }
+        if (videoId != null) {
+            val byId = ordered.indexOfFirst { it.id == videoId }
+            if (byId >= 0) return byId
+        }
+
+        if (currentSeason == null) {
+            val byEpisode = ordered.indexOfFirst { it.episode == currentEpisode }
+            return byEpisode.takeIf { it >= 0 }
+        }
+
+        val byMeta = ordered.indexOfFirst {
+            it.season == currentSeason && it.episode == currentEpisode
+        }
+        if (byMeta >= 0) return byMeta
+
+        // Player often carries season-local numbers from `:S:E` while meta.episode is absolute.
+        val byIdEpisode = ordered.indexOfFirst { video ->
+            val parsed = parseSeasonEpisodeFromVideoId(video.id) ?: return@indexOfFirst false
+            parsed.first == currentSeason && parsed.second == currentEpisode
+        }
+        if (byIdEpisode >= 0) return byIdEpisode
+
+        val seasonEps = ordered.filter { it.season == currentSeason }
+        if (seasonEpisodeLooksSeriesAbsolute(seasonEps.mapNotNull { it.episode }) &&
+            currentEpisode in 1..seasonEps.size
+        ) {
+            val target = seasonEps[currentEpisode - 1]
+            return ordered.indexOfFirst { it.id == target.id }.takeIf { it >= 0 }
+        }
+
+        return null
+    }
+
     private fun crossesUserThreshold(
         mode: NextEpisodeThresholdMode,
         percent: Float,
@@ -140,10 +194,20 @@ object PlayerNextEpisodeRules {
     }
 
     /**
-     * Earliest point in a file the "Up next" prompt may fire. 97% left no room on short
-     * episodes, where the credits routinely start before the last 3%.
+     * Earliest selectable percent threshold. Credits on short eps often start before 97%.
      */
-    const val MIN_THRESHOLD_PERCENT = 95f
+    const val MIN_THRESHOLD_PERCENT = 90f
+
+    /**
+     * When IntroDB/AniSkip has no outro, open Up next at least this far from the end.
+     */
+    const val NO_OUTRO_REMAINING_FALLBACK_MS = 120_000L
+
+    /** Cap for the duration-relative no-outro floor (long movies / episodes). */
+    const val NO_OUTRO_REMAINING_FALLBACK_MAX_MS = 180_000L
+
+    /** Share of runtime used for the no-outro floor (clamped to min/max above). */
+    const val NO_OUTRO_REMAINING_FRACTION = 0.08
 
     val OUTRO_SEGMENT_TYPES = setOf("outro", "ed", "mixed-ed", "credits", "ending")
 

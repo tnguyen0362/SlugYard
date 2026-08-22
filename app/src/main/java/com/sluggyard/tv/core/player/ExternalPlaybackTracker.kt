@@ -653,7 +653,8 @@ class ExternalPlaybackTracker @Inject constructor(
             val nextVideo = PlayerNextEpisodeRules.resolveNextEpisode(
                 videos = meta.videos,
                 currentSeason = season,
-                currentEpisode = episode
+                currentEpisode = episode,
+                currentVideoId = metadata.videoId,
             )
             val nextEpisode = nextVideo?.episode
             if (nextVideo == null || nextEpisode == null) {

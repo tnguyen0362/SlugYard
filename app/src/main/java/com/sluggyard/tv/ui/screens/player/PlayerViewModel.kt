@@ -184,6 +184,26 @@ class PlayerViewModel @Inject constructor(
         controller.enableSubtitleMode()
     }
 
+    fun setRewriteSubtitleSearchHandler(handler: (() -> Unit)?) {
+        controller.rewriteSubtitleSearchHandler = handler
+    }
+
+    fun setRewriteSubtitleLanguageHandler(handler: ((String?) -> Unit)?) {
+        controller.rewriteSubtitleLanguageHandler = handler
+    }
+
+    fun setAddonSubtitles(
+        subtitles: List<Subtitle>,
+        stillLoading: Boolean = false,
+        error: String? = null,
+    ) {
+        controller.setAddonSubtitles(subtitles, stillLoading, error)
+    }
+
+    fun beginRewriteSubtitleSearch() {
+        controller.beginRewriteSubtitleSearch()
+    }
+
     fun configureLaunch(source: ResolvedPlaybackSource) {
         controller.configureLaunch(source)
     }
@@ -191,10 +211,6 @@ class PlayerViewModel @Inject constructor(
     fun contentGenres(): String? = controller.effectiveContentGenres()
 
     fun contentLanguage(): String? = controller.contentLanguage
-
-    fun setAddonSubtitles(subtitles: List<Subtitle>) {
-        controller.setAddonSubtitles(subtitles)
-    }
 
     fun consumePendingExitReason() {
         controller.consumePendingExitReason()

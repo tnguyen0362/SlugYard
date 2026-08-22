@@ -9,10 +9,11 @@ object StreamPresentation {
         val seeds = candidate.seeders?.takeIf { it > 0 }?.let { "$it seeds" }
         val source = candidate.sourceLabel.takeIf { it.isNotBlank() }
         val language = languageHint(candidate)
+        val audio = audioLayoutHint(candidate)
         val detail = candidate.detailLabel
             ?.takeIf { it.isNotBlank() && it != candidate.title }
             ?.takeIf { language == null || !it.contains(language, ignoreCase = true) }
-        return listOfNotNull(source, size, seeds, language, detail).joinToString(" · ")
+        return listOfNotNull(source, size, seeds, language, audio, detail).joinToString(" · ")
     }
 
     /** Best-effort language / audio tag from title/detail for Sources rows. */
@@ -28,6 +29,29 @@ object StreamPresentation {
             Regex("\\beng(?:lish)?\\b", RegexOption.IGNORE_CASE).containsMatchIn(text) -> "Eng"
             Regex("\\b(?:esp|spa|spanish|latino)\\b", RegexOption.IGNORE_CASE).containsMatchIn(text) -> "Esp"
             Regex("\\bjpn|japanese\\b", RegexOption.IGNORE_CASE).containsMatchIn(text) -> "Jpn"
+            else -> null
+        }
+    }
+
+    /** Best-effort audio-layout chip from title/detail/filename — Atmos > 7.1 > 5.1 > Stereo. */
+    fun audioLayoutHint(candidate: StreamCandidate): String? {
+        val text = buildString {
+            append(candidate.title)
+            append(' ')
+            append(candidate.detailLabel.orEmpty())
+            append(' ')
+            append(candidate.streamDescription.orEmpty())
+            append(' ')
+            append(candidate.filename.orEmpty())
+        }
+        return when {
+            Regex(
+                "\\b(atmos|truehd|dts[\\s._-]?x|dts[\\s._-]?hd[\\s._-]?ma)\\b",
+                RegexOption.IGNORE_CASE,
+            ).containsMatchIn(text) -> "Atmos"
+            Regex("\\b7\\.1(?:\\s*\\.\\s*\\d+)?\\b", RegexOption.IGNORE_CASE).containsMatchIn(text) -> "7.1"
+            Regex("\\b5\\.1(?:\\s*\\.\\s*\\d+)?\\b", RegexOption.IGNORE_CASE).containsMatchIn(text) -> "5.1"
+            Regex("\\b(2\\.0|stereo)\\b", RegexOption.IGNORE_CASE).containsMatchIn(text) -> "Stereo"
             else -> null
         }
     }

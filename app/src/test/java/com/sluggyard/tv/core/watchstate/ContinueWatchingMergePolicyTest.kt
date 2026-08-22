@@ -23,9 +23,9 @@ class ContinueWatchingMergePolicyTest {
     }
 
     @Test
-    fun `passive seed needs 95 percent completion`() {
-        assertEquals(null, ContinueWatchingMergePolicy.selectEpisodeSeed(listOf(seed(1, 2, 3L, 0.94, ProgressOrigin.PASSIVE_TRAKT)), false))
-        assertTrue(ContinueWatchingMergePolicy.selectEpisodeSeed(listOf(seed(1, 2, 3L, 0.95, ProgressOrigin.PASSIVE_TRAKT)), false) != null)
+    fun `passive seed needs 98 percent completion`() {
+        assertEquals(null, ContinueWatchingMergePolicy.selectEpisodeSeed(listOf(seed(1, 2, 3L, 0.97, ProgressOrigin.PASSIVE_TRAKT)), false))
+        assertTrue(ContinueWatchingMergePolicy.selectEpisodeSeed(listOf(seed(1, 2, 3L, 0.98, ProgressOrigin.PASSIVE_TRAKT)), false) != null)
     }
 
     private fun entry(id: String, origin: ProgressOrigin, time: Long, representable: Boolean = true) = ContinueWatchingEntry(

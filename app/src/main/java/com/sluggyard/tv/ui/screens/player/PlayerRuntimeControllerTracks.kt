@@ -319,9 +319,11 @@ private fun PlayerRuntimeController.scanAudioGroup(
 
         val codec = CustomDefaultTrackNameProvider.formatNameFromMime(format.sampleMimeType)
         val channels = CustomDefaultTrackNameProvider.getChannelLayoutName(format.channelCount)
-        val language = resolveAudioTrackLanguageCode(format.language, format.label)
+        val language = resolveTrackLanguageCode(format.language, format.label)
         val langDisplay = language?.let { languageCodeToName(it) }
-        val baseName = format.label ?: langDisplay
+        val baseName = format.label
+            ?.takeIf { it.isNotBlank() && !isUnsetLanguageCode(it) }
+            ?: langDisplay
             ?: context.getString(com.sluggyard.tv.R.string.player_track_audio_fallback, audioTracks.size + 1)
         val suffix = listOfNotNull(codec, channels).joinToString(" ")
         val displayName = if (suffix.isNotEmpty()) "$baseName ($suffix)" else baseName
@@ -356,11 +358,14 @@ private fun PlayerRuntimeController.scanTextGroup(
         val nameHintsForced = texts.any { it.contains("forced", ignoreCase = true) }
         val songsAndSigns = PlayerSubtitleUtils.isSignsAndSongsTrack(texts)
 
+        val resolvedLanguage = resolveTrackLanguageCode(format.language, format.label)
+        val rawLabel = format.label?.takeIf { it.isNotBlank() && !isUnsetLanguageCode(it) }
         subtitleTracks += TrackInfo(
             index = subtitleTracks.size,
-            name = format.label ?: format.language
+            name = rawLabel
+                ?: resolvedLanguage?.let { languageCodeToName(it) }
                 ?: context.getString(com.sluggyard.tv.R.string.player_track_subtitle_fallback, subtitleTracks.size + 1),
-            language = format.language,
+            language = resolvedLanguage ?: format.language?.takeUnless { isUnsetLanguageCode(it) },
             trackId = format.id,
             codec = CustomDefaultTrackNameProvider.formatNameFromMime(format.sampleMimeType)
                 ?: CustomDefaultTrackNameProvider.formatNameFromMime(format.codecs)

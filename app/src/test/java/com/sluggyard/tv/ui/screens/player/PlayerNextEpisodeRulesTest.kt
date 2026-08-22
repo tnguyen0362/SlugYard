@@ -55,7 +55,6 @@ class PlayerNextEpisodeRulesTest {
 
     @Test
     fun `absolute numbering advances by episode when the caller has no season`() {
-        // Season-less anime: the caller has no season but the meta videos still carry one.
         val videos = listOf(ep(1, 5), ep(1, 6), ep(1, 7))
         val next = PlayerNextEpisodeRules.resolveNextEpisode(videos, currentSeason = null, currentEpisode = 6)
         assertEquals("s1e7", next?.id)
@@ -76,8 +75,39 @@ class PlayerNextEpisodeRulesTest {
     }
 
     @Test
+    fun `video id match wins when player season-local number disagrees with absolute meta`() {
+        // Meta S2 uses absolute 13/21; player was launched with :2:9 / episode=9.
+        val videos = listOf(
+            ep(2, 13, "tt1:2:1"),
+            ep(2, 21, "tt1:2:9"),
+            ep(2, 22, "tt1:2:10"),
+        )
+        val next = PlayerNextEpisodeRules.resolveNextEpisode(
+            videos = videos,
+            currentSeason = 2,
+            currentEpisode = 9,
+            currentVideoId = "tt1:2:9",
+        )
+        assertEquals("tt1:2:10", next?.id)
+    }
+
+    @Test
+    fun `id-encoded season episode finds current without currentVideoId exact match`() {
+        val videos = listOf(
+            ep(2, 13, "tt1:2:1"),
+            ep(2, 21, "tt1:2:9"),
+            ep(2, 22, "tt1:2:10"),
+        )
+        val next = PlayerNextEpisodeRules.resolveNextEpisode(
+            videos = videos,
+            currentSeason = 2,
+            currentEpisode = 9,
+        )
+        assertEquals("tt1:2:10", next?.id)
+    }
+
+    @Test
     fun `up next surfaces at outro start even when a long post-credits tail remains`() {
-        // 24 min file, ED 20:00–21:30, then 2.5 min junk — old logic waited for 95%.
         val durationMs = 24 * 60_000L
         val outroStartMs = 20 * 60_000L
         assertTrue(
@@ -118,11 +148,38 @@ class PlayerNextEpisodeRulesTest {
     }
 
     @Test
-    fun `without outro data the percent threshold still applies`() {
+    fun `without outro data percent threshold still applies`() {
         val durationMs = 20 * 60_000L
         assertFalse(
             PlayerNextEpisodeRules.shouldShowNextEpisodeCard(
-                positionMs = (durationMs * 0.90).toLong(),
+                positionMs = (durationMs * 0.85).toLong(),
+                durationMs = durationMs,
+                skipIntervals = emptyList(),
+                thresholdMode = NextEpisodeThresholdMode.PERCENTAGE,
+                thresholdPercent = 90f,
+                thresholdMinutesBeforeEnd = 2f,
+            )
+        )
+        assertTrue(
+            PlayerNextEpisodeRules.shouldShowNextEpisodeCard(
+                positionMs = (durationMs * 0.91).toLong(),
+                durationMs = durationMs,
+                skipIntervals = emptyList(),
+                thresholdMode = NextEpisodeThresholdMode.PERCENTAGE,
+                thresholdPercent = 90f,
+                thresholdMinutesBeforeEnd = 2f,
+            )
+        )
+    }
+
+    @Test
+    fun `without outro data remaining-time floor surfaces up next before late percent`() {
+        // 60 min file → 8% floor clamps to 180s max; 95% is at 57:00.
+        val durationMs = 60 * 60_000L
+        val nearEndMs = durationMs - 150_000L
+        assertTrue(
+            PlayerNextEpisodeRules.shouldShowNextEpisodeCard(
+                positionMs = nearEndMs,
                 durationMs = durationMs,
                 skipIntervals = emptyList(),
                 thresholdMode = NextEpisodeThresholdMode.PERCENTAGE,
@@ -130,13 +187,14 @@ class PlayerNextEpisodeRulesTest {
                 thresholdMinutesBeforeEnd = 2f,
             )
         )
-        assertTrue(
+        assertFalse(
             PlayerNextEpisodeRules.shouldShowNextEpisodeCard(
-                positionMs = (durationMs * 0.96).toLong(),
+                positionMs = durationMs - 200_000L,
                 durationMs = durationMs,
                 skipIntervals = emptyList(),
                 thresholdMode = NextEpisodeThresholdMode.PERCENTAGE,
-                thresholdPercent = 95f,
+                // Keep percent gate above this playhead so only the remaining-time floor is tested.
+                thresholdPercent = 99f,
                 thresholdMinutesBeforeEnd = 2f,
             )
         )

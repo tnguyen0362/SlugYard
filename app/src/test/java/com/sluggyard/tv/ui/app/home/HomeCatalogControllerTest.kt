@@ -44,6 +44,40 @@ class HomeCatalogControllerTest {
         assertTrue(final.rows[1].loadState is CatalogLoadState.Content)
     }
 
+    @Test
+    fun `priority shelves finish before secondary wave starts`() = runTest {
+        val popular = CatalogRequest(
+            key = HomeCatalogKey("cinemeta", "top"),
+            title = "Popular",
+            load = {
+                delay(80)
+                listOf(HomePoster(id = "p1", title = "P", imageUrl = null))
+            },
+        )
+        val genre = CatalogRequest(
+            key = HomeCatalogKey("tmdb", "genre_action"),
+            title = "Action",
+            load = {
+                delay(0)
+                listOf(HomePoster(id = "a1", title = "A", imageUrl = null))
+            },
+        )
+
+        val mid = loadHomeCatalogs(
+            requestsInDefaultOrder = listOf(popular, genre),
+            savedOrder = emptyList(),
+            maxConcurrent = 2,
+        ).toList().first { emission ->
+            emission.rows.any { it.loadState is CatalogLoadState.Content }
+        }
+
+        val popularState = mid.rows.first { it.title == "Popular" }.loadState
+        val genreState = mid.rows.first { it.title == "Action" }.loadState
+        assertTrue(popularState is CatalogLoadState.Content)
+        // Genre must not leapfrog Popular: wave 2 has not started while wave 1 is exclusive.
+        assertTrue(genreState is CatalogLoadState.Loading)
+    }
+
     private fun request(addonId: String, catalogId: String, delayMs: Long): CatalogRequest {
         val key = HomeCatalogKey(addonId, catalogId)
         return CatalogRequest(

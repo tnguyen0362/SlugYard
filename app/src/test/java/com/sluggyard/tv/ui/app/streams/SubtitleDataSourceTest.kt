@@ -11,6 +11,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -24,7 +25,7 @@ class SubtitleDataSourceTest {
                 override suspend fun fetchCatalog(manifestUrl: String, type: String, catalogId: String, extras: Map<String, String>) = error("unused")
                 override suspend fun fetchMeta(manifestUrl: String, type: String, id: String) = error("unused")
                 override suspend fun fetchStreams(manifestUrl: String, type: String, id: String) = error("unused")
-                override suspend fun fetchSubtitles(manifestUrl: String, type: String, id: String): AddonTransportResult<JsonObject> =
+                override suspend fun fetchSubtitles(manifestUrl: String, type: String, id: String, langs: String?): AddonTransportResult<JsonObject> =
                     if (manifestUrl.contains("bad")) AddonTransportResult.NetworkFailure(IllegalStateException()) else {
                         AddonTransportResult.Success(Json.parseToJsonElement("""{"subtitles":[{"lang":"en","url":"https://sub"}]}""").jsonObject)
                     }
@@ -35,6 +36,22 @@ class SubtitleDataSourceTest {
 
         assertTrue(final.first { it.addonId == "good" }.state is SubtitleGroupState.Content)
         assertTrue(final.first { it.addonId == "bad" }.state is SubtitleGroupState.Error)
+    }
+
+    @Test
+    fun `series subtitle lookup id includes season and episode`() {
+        assertEquals(
+            "tt0944947:1:2",
+            stremioSubtitleLookupId("series", "tt0944947", season = 1, episode = 2),
+        )
+        assertEquals(
+            "tt0944947:1:2",
+            stremioSubtitleLookupId("series", "tt0944947:1:2", season = 1, episode = 2),
+        )
+        assertEquals(
+            "tt0111161",
+            stremioSubtitleLookupId("movie", "tt0111161", season = null, episode = null),
+        )
     }
 
     private fun addon(id: String) = ManagedAddon(

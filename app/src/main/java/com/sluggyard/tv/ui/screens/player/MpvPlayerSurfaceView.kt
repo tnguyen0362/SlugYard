@@ -8,6 +8,7 @@ import com.sluggyard.tv.data.local.AudioOutputChannels
 import com.sluggyard.tv.data.local.MpvHardwareDecodeMode
 import com.sluggyard.tv.data.local.SubtitleStyleSettings
 import `is`.xyz.mpv.BaseMPVView
+import `is`.xyz.mpv.MPV
 import `is`.xyz.mpv.MPVNode
 import `is`.xyz.mpv.Utils
 import java.util.Locale
@@ -75,7 +76,20 @@ class MpvPlayerSurfaceView @JvmOverloads constructor(
         Utils.copyAssets(context)
         cachePausePropertySupported = null
         initialize(configDir = context.filesDir.path, cacheDir = context.cacheDir.path)
+        attachMpvLogObserver()
         initialized = true
+    }
+
+    private fun attachMpvLogObserver() {
+        runCatching {
+            mpv.addLogObserver(object : MPV.LogObserver {
+                override fun logMessage(prefix: String, level: Int, text: String) {
+                    // mpv diagnostics (cache underruns, demux stalls) forwarded to
+                    // logcat; grep SlugYardMpv to see the exact starvation line.
+                    Log.w(MPV_DIAG_TAG, "[$prefix] $text")
+                }
+            })
+        }.onFailure { Log.w(TAG, "Failed to attach mpv log observer: ${it.message}") }
     }
 
     fun setMedia(url: String, headers: Map<String, String>, startPositionMs: Long = 0L) {
@@ -206,9 +220,13 @@ class MpvPlayerSurfaceView @JvmOverloads constructor(
         return mpv.getPropertyBoolean("core-idle") == true
     }
 
-    fun seekToMs(positionMs: Long) {
+    fun seekToMs(positionMs: Long, exact: Boolean = false) {
         if (!initialized) return
-        mpv.setPropertyDouble("time-pos", positionMs.coerceAtLeast(0L) / 1000.0)
+        val seconds = positionMs.coerceAtLeast(0L) / 1000.0
+        // Transport FF/RW uses keyframes so remuxes don't stall on an exact demux
+        // rebuild. Resume / precise restores still need absolute+exact.
+        val mode = if (exact) "absolute+exact" else "absolute+keyframes"
+        mpv.command("seek", seconds.toString(), mode)
     }
 
     fun currentPositionMs(): Long {
@@ -711,13 +729,20 @@ class MpvPlayerSurfaceView @JvmOverloads constructor(
         val runtime = Runtime.getRuntime()
         val availableMemory = runtime.maxMemory() - (runtime.totalMemory() - runtime.freeMemory())
 
+        // mpv stops prefetching at the SMALLER of the seconds clock
+        // (cache-secs / demuxer-readahead-secs) and the byte budget
+        // (demuxer-max-bytes). v1062 ran a 6s window (72 MB budget was
+        // unreachable); v1063 raised it to 15s, but the clock still truncated the
+        // budget at every realistic bitrate (~15s of 40 Mbps data is 75 MB < 96 MB).
+        // A 6-15s window empties in seconds of CDN jitter → paused-for-cache →
+        // 'buffering' regardless of connection speed. Fix: pick read-ahead seconds
+        // large enough that the BYTE budget is the binding constraint (RAM bound).
+        // First frame needs only the first few MB, so this does not delay start,
+        // and the FF-10s transport step lands well inside the window.
         val (forwardBufferBytes, backBufferBytes, readAheadSecs) = when {
-            // Keep total cache below 96 MB even on roomy devices. A six-second
-            // forward window covers normal 4K bitrate bursts without delaying
-            // first frame or forcing the system to reclaim a video decoder.
-            availableMemory > 512 * 1024 * 1024 -> Triple(72L, 16L, 6)
-            availableMemory > 256 * 1024 * 1024 -> Triple(40L, 8L, 4)
-            else -> Triple(24L, 4L, 3)
+            availableMemory > 512 * 1024 * 1024 -> Triple(96L, 24L, 60)
+            availableMemory > 256 * 1024 * 1024 -> Triple(64L, 16L, 45)
+            else -> Triple(40L, 8L, 30)
         }.let { (forwardMb, backMb, seconds) ->
             Triple(forwardMb * 1024L * 1024L, backMb * 1024L * 1024L, seconds)
         }
@@ -734,7 +759,13 @@ class MpvPlayerSurfaceView @JvmOverloads constructor(
         mpv.setOptionString("volume-max", MPV_MAX_VOLUME_PERCENT.toInt().toString())
         mpv.setOptionString("osc", "no")
         mpv.setOptionString("terminal", "no")
-        mpv.setOptionString("msg-level", "all=no")
+        // Diagnosability: keep mpv's cache/demux/stream breadcrumbs so a buffer
+        // underrun prints its exact starvation line to logcat instead of staying
+        // silent. Everything else stays quiet.
+        mpv.setOptionString(
+            "msg-level",
+            "all=no,cache=info,demux=info,network=info,stream=info,status=info",
+        )
     }
 
     override fun postInitOptions() {
@@ -820,6 +851,7 @@ class MpvPlayerSurfaceView @JvmOverloads constructor(
 
     companion object {
         private const val TAG = "MpvPlayerSurfaceView"
+        private const val MPV_DIAG_TAG = "SlugYardMpv"
         private const val MPV_COVER_FALLBACK_SCALE = 1.15f
         private const val MPV_MAX_VOLUME_PERCENT = 400.0
         private const val ASPECT_RETRY_DELAY_MS = 120L

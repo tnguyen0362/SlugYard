@@ -1,5 +1,6 @@
 package com.sluggyard.tv
 
+import android.content.ComponentCallbacks2
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -9,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import coil3.SingletonImageLoader
 import com.sluggyard.tv.ui.design.SlugYardTvTheme
 import com.sluggyard.tv.core.sync.auth.SupabaseAuthGateway
 import com.sluggyard.tv.core.sync.auth.SupabaseSessionStore
@@ -94,6 +96,20 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var watchProgressRepository: WatchProgressRepository
 
+    /** Retained for OS memory-pressure callbacks; the graph itself is built in onCreate. */
+    private var graphRef: AppGraph? = null
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        // OS asked for memory: drop only rebuildable caches. Persisted state
+        // (DataStore prefs, watch progress, auth) is untouched. Levels below
+        // RUNNING_LOW are not worth disturbing — Coil already snoozes itself.
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+            runCatching { graphRef?.digitalReleaseLookup?.clear() }
+            runCatching { SingletonImageLoader.get(applicationContext).memoryCache?.clear() }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
@@ -161,6 +177,7 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                 )
             }
+            graphRef = graph
         }
     }
 }

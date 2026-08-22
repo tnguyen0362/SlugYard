@@ -292,36 +292,34 @@ private fun buildAddonCards(
     addons: List<ManagedAddon>,
     listFilter: AddonsListFilter,
 ): List<AddonCardModel> {
+    val playFlixInstalled = SlugYardCommunitySourcePolicy.isPlayFlixPackInstalled(addons)
+    val playFlixCard = playFlixPackCard(installed = playFlixInstalled)
     return when (listFilter) {
-        AddonsListFilter.Installed -> addons
-            .filter { SlugYardCommunitySourcePolicy.isUserFacingSettingsAddon(it) }
-            .map { it.toCardModel(installed = true) }
-        AddonsListFilter.Community -> buildCommunityCatalog(addons)
+        AddonsListFilter.Installed -> buildList {
+            // Always lead with PlayFlix when the scraper pack is live (debrid + scrapers).
+            if (playFlixInstalled) add(playFlixCard)
+            addAll(
+                addons
+                    .filter { SlugYardCommunitySourcePolicy.isUserFacingSettingsAddon(it) }
+                    .map { it.toCardModel(installed = true) },
+            )
+        }
+        // Community surfaces the one product pack users look for — not each scraper host.
+        AddonsListFilter.Community -> listOf(playFlixCard)
     }
 }
 
-private fun buildCommunityCatalog(installed: List<ManagedAddon>): List<AddonCardModel> {
-    // Optional allowlisted community packs — empty today (scrapers are default provision, not Community).
-    return SlugYardCommunitySourcePolicy.optionalCommunityManifestUrls.map { url ->
-        val existing = installed.firstOrNull {
-            it.manifestUrl.equals(url, ignoreCase = true)
-        }
-        if (existing != null) {
-            existing.toCardModel(installed = true)
-        } else {
-            AddonCardModel(
-                manifestUrl = url,
-                name = "Community addon",
-                version = null,
-                categoryLine = "Movie & Series",
-                description = "Stremio-compatible addon",
-                logoUrl = null,
-                showLogo = true,
-                installed = false,
-            )
-        }
-    }
-}
+private fun playFlixPackCard(installed: Boolean): AddonCardModel =
+    AddonCardModel(
+        manifestUrl = SlugYardCommunitySourcePolicy.PLAYFLIX_PACK_ID,
+        name = SlugYardCommunitySourcePolicy.PLAYFLIX_DISPLAY_NAME,
+        version = SlugYardCommunitySourcePolicy.PLAYFLIX_DISPLAY_VERSION,
+        categoryLine = "Movie & Series streams",
+        description = SlugYardCommunitySourcePolicy.PLAYFLIX_DISPLAY_DESCRIPTION,
+        logoUrl = null,
+        showLogo = true,
+        installed = installed,
+    )
 
 private fun ManagedAddon.toCardModel(installed: Boolean): AddonCardModel =
     AddonCardModel(

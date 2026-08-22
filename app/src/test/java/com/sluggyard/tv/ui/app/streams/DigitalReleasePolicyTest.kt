@@ -90,4 +90,70 @@ class DigitalReleasePolicyTest {
         assertTrue(DigitalReleasePolicy.isEarlyReleaseJunk("Foo Official Trailer"))
         assertFalse(DigitalReleasePolicy.isEarlyReleaseJunk("Foo.2026.1080p.WEB-DL.DDP5.1"))
     }
+
+    // Series gate must NOT reuse the movie theatrical ladder: a past first air means
+    // aired episodes have real sources. Regression for the "Love Beneath the Night Sky"
+    // ep-7 false gate (premiered Jul 6 2026, gated NOT_YET for a year).
+    @Test
+    fun seriesPastFirstAirIsAvailable() {
+        assertEquals(
+            DigitalReleasePolicy.Status.AVAILABLE,
+            DigitalReleasePolicy.seriesStatus("Returning Series", "2026-07-06", clock),
+        )
+        assertEquals(
+            DigitalReleasePolicy.Status.AVAILABLE,
+            DigitalReleasePolicy.seriesStatus("Ended", "2025-12-12", clock),
+        )
+    }
+
+    @Test
+    fun seriesPlannedWithNoAirYetIsNotYet() {
+        assertEquals(
+            DigitalReleasePolicy.Status.NOT_YET,
+            DigitalReleasePolicy.seriesStatus("In Production", "2026-09-01", clock),
+        )
+        assertEquals(
+            DigitalReleasePolicy.Status.NOT_YET,
+            DigitalReleasePolicy.seriesStatus("Planned", null, clock),
+        )
+    }
+
+    @Test
+    fun seriesPreReleaseWithAiredDateWinsPastDate() {
+        // TMDB keeps "in production" up to premiere day; the aired date must win.
+        assertEquals(
+            DigitalReleasePolicy.Status.AVAILABLE,
+            DigitalReleasePolicy.seriesStatus("In Production", "2026-07-06", clock),
+        )
+    }
+
+    @Test
+    fun seriesFutureFirstAirIsNotYet() {
+        // Unknown/blank status + a future first air is still pre-release.
+        assertEquals(
+            DigitalReleasePolicy.Status.NOT_YET,
+            DigitalReleasePolicy.seriesStatus("  ", "2026-09-01", clock),
+        )
+        // AIRED statuses always win: a returning/ended show exists now regardless of date.
+        assertEquals(
+            DigitalReleasePolicy.Status.AVAILABLE,
+            DigitalReleasePolicy.seriesStatus("Returning Series", "2026-09-01", clock),
+        )
+    }
+
+    @Test
+    fun airedStatusWithoutDateIsAvailable() {
+        assertEquals(
+            DigitalReleasePolicy.Status.AVAILABLE,
+            DigitalReleasePolicy.seriesStatus("Returning Series", null, clock),
+        )
+    }
+
+    @Test
+    fun seriesNoSignalIsUnknown() {
+        assertEquals(
+            DigitalReleasePolicy.Status.UNKNOWN,
+            DigitalReleasePolicy.seriesStatus(null, null, clock),
+        )
+    }
 }
