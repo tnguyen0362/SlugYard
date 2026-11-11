@@ -1710,19 +1710,10 @@ private fun AppContent(
                 }
                 streamDiscoveryComplete = true
             }
-            // Stop TorBox probe spam + Compose churn only once a real resolve is in flight.
-            // Do NOT cancel on autoPickFinishedFor / empty Finding — that killed scrapes ~0.3s
-            // after a partial empty fanout and left Choose Source thin.
-            if (streams.autoPick) {
-                launch {
-                    snapshotFlow { resolvingCandidateId != null }.first { it }
-                    fanoutJob.cancel()
-                    android.util.Log.i(
-                        "SlugYardAutoPick",
-                        "fanout cancelled after resolve start title='${streams.title}'",
-                    )
-                }
-            }
+            // Do NOT cancel discovery when a resolve starts. A successful resolve leaves the
+            // Streams route, which cancels this effect (and the fanout) on its own. Cancelling at
+            // resolve start froze the list at a partial snapshot when that first pick failed, so
+            // the user saw "no sources" until the rest popped in or never arrived.
             fanoutJob.join()
         }
     }
@@ -1796,6 +1787,10 @@ private fun AppContent(
             val scoringContext = StreamScoringEngine.Context(
                 title = streams.title,
                 contentType = streams.type,
+                // Same language the picker scores with, so a clean English release counts as
+                // "ready" for an English film instead of waiting on subtitle-tagged rows.
+                language = streams.contentLanguage
+                    ?: graph.digitalReleaseLookup?.cachedOriginalLanguage(streams.id),
                 preferredSubtitleLanguage = playerSettings.subtitleStyle.preferredLanguage,
                 preferredAudioLayout = playerSettings.preferredAudioLayout,
             )
@@ -1921,55 +1916,84 @@ private fun AppContent(
                         // audio or empty subtitle tracks. Reject EBML with zero subtitle CodecIDs
                         // whenever a preferred language is set; anime still also skips pure SRT.
                         if (streams.autoPick) {
-                            val remainingAfter =
-                                (MaxAutoPickResolveAttempts - autoPickRejectedIds.size - 1)
-                                    .coerceAtLeast(0)
-                            val inventory = MatroskaSubtitleCodecProbe.probeHttpUrl(
-                                url = result.source.url,
-                                headers = result.source.requestHeaders,
-                            )
-                            if (inventory.confidentSoftInventory) {
-                                runCatching {
-                                    graph.releaseTrackMemory?.remember(
-                                        infoHash = result.source.infoHash ?: candidate.infoHash,
-                                        fileIdx = result.source.fileIndex ?: candidate.fileIndex,
-                                        tracks = MatroskaSubtitleCodecProbe.toObservedTracks(inventory),
-                                    )
-                                }
-                            }
                             val requireDialogueSubs = StreamScoringEngine.hasPreferredLanguage(
                                 playerSettings.subtitleStyle.preferredLanguage,
                             )
-                            if (MatroskaSubtitleCodecProbe.shouldRejectAutoPick(
-                                    inventory = inventory,
-                                    remainingResolveAttemptsAfterThis = remainingAfter,
-                                    requireDialogueSubs = requireDialogueSubs,
-                                    rejectAnimePureSrt = isAnimeAutoPlayWait(streams),
+                            val rejectAnimePureSrt = isAnimeAutoPlayWait(streams)
+                            if (requireDialogueSubs || rejectAnimePureSrt) {
+                                val remainingAfter =
+                                    (MaxAutoPickResolveAttempts - autoPickRejectedIds.size - 1)
+                                        .coerceAtLeast(0)
+                                val inventory = MatroskaSubtitleCodecProbe.probeHttpUrl(
+                                    url = result.source.url,
+                                    headers = result.source.requestHeaders,
                                 )
-                            ) {
+                                if (inventory.confidentSoftInventory) {
+                                    runCatching {
+                                        graph.releaseTrackMemory?.remember(
+                                            infoHash = result.source.infoHash ?: candidate.infoHash,
+                                            fileIdx = result.source.fileIndex ?: candidate.fileIndex,
+                                            tracks = MatroskaSubtitleCodecProbe.toObservedTracks(inventory),
+                                        )
+                                    }
+                                }
+                                if (MatroskaSubtitleCodecProbe.shouldRejectAutoPick(
+                                        inventory = inventory,
+                                        remainingResolveAttemptsAfterThis = remainingAfter,
+                                        requireDialogueSubs = requireDialogueSubs,
+                                        rejectAnimePureSrt = rejectAnimePureSrt,
+                                    )
+                                ) {
+                                    android.util.Log.i(
+                                        "SlugYardAutoPick",
+                                        "MKV probe REJECT id=${candidate.id} " +
+                                            "noSoft=${inventory.confidentNoSoftsubs} " +
+                                            "srt=${inventory.hasSrt} ass=${inventory.hasAss} " +
+                                            "hits=${inventory.codecHits} remain=$remainingAfter",
+                                    )
+                                    streamMessage = if (inventory.confidentNoSoftsubs) {
+                                        "This source has no subtitles — looking for another…"
+                                    } else {
+                                        "Skipping SRT-only softsubs — looking for ASS/PGS…"
+                                    }
+                                    autoPickRejectedIds = autoPickRejectedIds + candidate.id
+                                    autoPickFinishedFor = null
+                                    return@launch
+                                }
                                 android.util.Log.i(
                                     "SlugYardAutoPick",
-                                    "MKV probe REJECT id=${candidate.id} " +
+                                    "MKV probe accept id=${candidate.id} ass=${inventory.hasAss} " +
+                                        "srt=${inventory.hasSrt} pgs=${inventory.hasPgs} " +
                                         "noSoft=${inventory.confidentNoSoftsubs} " +
-                                        "srt=${inventory.hasSrt} ass=${inventory.hasAss} " +
-                                        "hits=${inventory.codecHits} remain=$remainingAfter",
+                                        "err=${inventory.error ?: "ok"} hits=${inventory.codecHits}",
                                 )
-                                streamMessage = if (inventory.confidentNoSoftsubs) {
-                                    "This source has no subtitles — looking for another…"
-                                } else {
-                                    "Skipping SRT-only softsubs — looking for ASS/PGS…"
+                            } else {
+                                // Probe outcome can't cause rejection here, so ride rememberCoroutineScope:
+                                // it survives route changes within the shell, and overlapping probes on
+                                // rapid switching are acceptable.
+                                scope.launch {
+                                    val inventory = MatroskaSubtitleCodecProbe.probeHttpUrl(
+                                        url = result.source.url,
+                                        headers = result.source.requestHeaders,
+                                    )
+                                    android.util.Log.i(
+                                        "SlugYardAutoPick",
+                                        "MKV probe accept id=${candidate.id} ass=${inventory.hasAss} " +
+                                            "srt=${inventory.hasSrt} pgs=${inventory.hasPgs} " +
+                                            "noSoft=${inventory.confidentNoSoftsubs} " +
+                                            "err=${inventory.error ?: "ok"} hits=${inventory.codecHits}",
+                                    )
+                                    if (inventory.confidentSoftInventory) {
+                                        runCatching {
+                                            graph.releaseTrackMemory?.remember(
+                                                infoHash = result.source.infoHash ?: candidate.infoHash,
+                                                fileIdx = result.source.fileIndex ?: candidate.fileIndex,
+                                                tracks = MatroskaSubtitleCodecProbe.toObservedTracks(inventory),
+                                            )
+                                        }
+                                    }
                                 }
-                                autoPickRejectedIds = autoPickRejectedIds + candidate.id
-                                autoPickFinishedFor = null
-                                return@launch
                             }
-                            android.util.Log.i(
-                                "SlugYardAutoPick",
-                                "MKV probe accept id=${candidate.id} ass=${inventory.hasAss} " +
-                                    "srt=${inventory.hasSrt} pgs=${inventory.hasPgs} " +
-                                    "noSoft=${inventory.confidentNoSoftsubs} " +
-                                    "err=${inventory.error ?: "ok"} hits=${inventory.codecHits}",
-                            )
                         }
                         streamMessage = null
                         // Launch the retained player BEFORE rewriting the route stack. Changing
@@ -2072,7 +2096,9 @@ private fun AppContent(
                     ?.filter { it.isNotEmpty() }
                     .orEmpty()
                     .ifEmpty { detailsState?.genres.orEmpty() },
-                language = streams.contentLanguage ?: detailsState?.contentLanguage,
+                language = streams.contentLanguage
+                    ?: detailsState?.contentLanguage
+                    ?: graph.digitalReleaseLookup?.cachedOriginalLanguage(streams.id),
                 preferredSubtitleLanguage = playerSettings.subtitleStyle.preferredLanguage,
                 preferredAudioLayout = playerSettings.preferredAudioLayout,
             )
@@ -2178,7 +2204,9 @@ private fun AppContent(
                         title = streams.title,
                         contentType = streams.type,
                         genres = genreList,
-                        language = streams.contentLanguage ?: detailsState?.contentLanguage,
+                        language = streams.contentLanguage
+                            ?: detailsState?.contentLanguage
+                            ?: graph.digitalReleaseLookup?.cachedOriginalLanguage(streams.id),
                         preferredSubtitleLanguage = playerSettings.subtitleStyle.preferredLanguage,
                         preferredAudioLayout = playerSettings.preferredAudioLayout,
                         observedTracksByHash = observedByHash,
@@ -2250,7 +2278,12 @@ private fun AppContent(
                     )
                     val candidate = selectAutoPlayCandidate(
                         groups = groupsForAttempt,
-                        context = scoringContext.copy(digitalReleaseStatus = digitalReleaseStatus),
+                        context = scoringContext.copy(
+                            digitalReleaseStatus = digitalReleaseStatus,
+                            // The release lookup just learned TMDB original_language (Cinemeta has none).
+                            language = scoringContext.language
+                                ?: graph.digitalReleaseLookup?.cachedOriginalLanguage(releaseLookupId),
+                        ),
                         excludedCandidateIds = snap.rejected,
                         preferLastPlayed = null,
                         allowUncachedFallback = allowUncached,
@@ -2310,7 +2343,9 @@ private fun AppContent(
                                 title = streams.title,
                                 contentType = streams.type,
                                 genres = genreList,
-                                language = streams.contentLanguage ?: detailsState?.contentLanguage,
+                                language = streams.contentLanguage
+                                    ?: detailsState?.contentLanguage
+                                    ?: graph.digitalReleaseLookup?.cachedOriginalLanguage(streams.id),
                                 preferredSubtitleLanguage = playerSettings.subtitleStyle.preferredLanguage,
                                 preferredAudioLayout = playerSettings.preferredAudioLayout,
                                 observedTracksByHash = observedByHash,
@@ -2343,7 +2378,9 @@ private fun AppContent(
                                     title = streams.title,
                                     contentType = streams.type,
                                     genres = genreList,
-                                    language = streams.contentLanguage ?: detailsState?.contentLanguage,
+                                    language = streams.contentLanguage
+                                        ?: detailsState?.contentLanguage
+                                        ?: graph.digitalReleaseLookup?.cachedOriginalLanguage(streams.id),
                                     preferredSubtitleLanguage = playerSettings.subtitleStyle.preferredLanguage,
                                     preferredAudioLayout = playerSettings.preferredAudioLayout,
                                 ),
@@ -2807,41 +2844,18 @@ private fun AppContent(
                                 detailsState = state.copy(selectedSeason = season)
                             },
                             onMarkSeasonWatched = { season ->
+                                val before = state.toWatchPolicyEpisodes()
+                                val updated = DetailsWatchPolicy.markSeasonWatched(before, season)
+                                detailsState = state.withWatchPolicy(updated)
                                 scope.launch {
-                                    val updated = DetailsWatchPolicy.markSeasonWatched(
-                                        state.toWatchPolicyEpisodes(),
-                                        season,
+                                    persistNewlyWatchedEpisodes(
+                                        show = DetailsWatchedShow(state.id, state.title, state.posterUrl, state.backdropUrl),
+                                        before = before,
+                                        after = updated,
+                                        lastEpisodeId = null,
+                                        libraryWatch = graph.libraryWatch,
+                                        progress = watchProgressRepository,
                                     )
-                                      detailsState = state.withWatchPolicy(updated)
-                                      updated.filter { it.watched }.forEach { episode ->
-                                          graph.libraryWatch.setWatched(
-                                              id = episode.id,
-                                              watched = true,
-                                              contentType = "series",
-                                              title = state.title,
-                                              season = episode.season,
-                                              episode = episode.episode,
-                                          )
-                                          watchProgressRepository.markAsCompleted(
-                                              WatchProgress(
-                                                  contentId = state.id,
-                                                  contentType = "series",
-                                                  name = state.title,
-                                                  poster = state.posterUrl,
-                                                  backdrop = state.backdropUrl,
-                                                  logo = null,
-                                                  videoId = episode.id,
-                                                  season = episode.season,
-                                                  episode = episode.episode,
-                                                  episodeTitle = null,
-                                                  position = 1L,
-                                                  duration = 1L,
-                                                  lastWatched = System.currentTimeMillis(),
-                                                  progressPercent = 100f,
-                                              ),
-                                              syncRemoteToTrakt = true,
-                                          )
-                                      }
                                 }
                             },
                              onEpisodeSelected = { seasonNumber, episode ->
@@ -2875,49 +2889,34 @@ private fun AppContent(
                                  }
                                  detailsState = state.withWatchPolicy(updated)
                                  scope.launch {
-                                     updated.filter { next ->
-                                         next.id == episode.id || (watched && next.watched)
-                                      }.forEach { next ->
-                                          // Clear WatchedItems before LibraryWatch so the Details
-                                          // refresh effect cannot re-apply a stale completed key.
-                                          if (!next.watched && next.id == episode.id) {
-                                              watchProgressRepository.removeFromHistory(
-                                                  contentId = state.id,
-                                                  videoId = next.id,
-                                                  season = next.season,
-                                                  episode = next.episode,
-                                              )
-                                          }
-                                          graph.libraryWatch.setWatched(
-                                              id = next.id,
-                                              watched = next.watched,
-                                              contentType = "series",
-                                              title = state.title,
-                                              season = next.season,
-                                              episode = next.episode,
-                                          )
-                                          if (next.watched) {
-                                              watchProgressRepository.markAsCompleted(
-                                                  WatchProgress(
-                                                      contentId = state.id,
-                                                      contentType = "series",
-                                                      name = state.title,
-                                                      poster = state.posterUrl,
-                                                      backdrop = state.backdropUrl,
-                                                      logo = null,
-                                                      videoId = next.id,
-                                                      season = next.season,
-                                                      episode = next.episode,
-                                                      episodeTitle = null,
-                                                      position = 1L,
-                                                      duration = 1L,
-                                                      lastWatched = System.currentTimeMillis(),
-                                                      progressPercent = 100f,
-                                                  ),
-                                                  syncRemoteToTrakt = true,
-                                              )
-                                          }
-                                      }
+                                     if (watched) {
+                                         persistNewlyWatchedEpisodes(
+                                             show = DetailsWatchedShow(state.id, state.title, state.posterUrl, state.backdropUrl),
+                                             before = currentEpisodes,
+                                             after = updated,
+                                             lastEpisodeId = episode.id,
+                                             libraryWatch = graph.libraryWatch,
+                                             progress = watchProgressRepository,
+                                         )
+                                     } else {
+                                         // Clear WatchedItems before LibraryWatch so the Details
+                                         // refresh effect cannot re-apply a stale completed key.
+                                         val next = updated.first { it.id == episode.id }
+                                         watchProgressRepository.removeFromHistory(
+                                             contentId = state.id,
+                                             videoId = next.id,
+                                             season = next.season,
+                                             episode = next.episode,
+                                         )
+                                         graph.libraryWatch.setWatched(
+                                             id = next.id,
+                                             watched = false,
+                                             contentType = "series",
+                                             title = state.title,
+                                             season = next.season,
+                                             episode = next.episode,
+                                         )
+                                     }
                                  }
                              },
                              contentFocusRequester = detailsContentFocusRequester,

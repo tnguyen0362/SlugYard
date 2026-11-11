@@ -12,6 +12,10 @@ interface PlaybackProgressSink {
     fun getProgress(contentId: String): Flow<WatchProgress?>
     suspend fun saveProgress(progress: WatchProgress, syncRemote: Boolean)
     suspend fun markAsCompleted(progress: WatchProgress, syncRemoteToTrakt: Boolean)
+    suspend fun markAsCompletedBatch(progressList: List<WatchProgress>)
+
+    /** Episodes of [showId] already recorded as watched, as (season, episode). */
+    suspend fun watchedEpisodes(showId: String): Set<Pair<Int, Int>>
 }
 
 internal class RepositoryPlaybackProgressSink(
@@ -32,4 +36,10 @@ internal class RepositoryPlaybackProgressSink(
 
     override suspend fun markAsCompleted(progress: WatchProgress, syncRemoteToTrakt: Boolean) =
         repository.markAsCompleted(progress, syncRemoteToTrakt)
+
+    override suspend fun markAsCompletedBatch(progressList: List<WatchProgress>) =
+        repository.markAsCompletedBatch(progressList)
+
+    override suspend fun watchedEpisodes(showId: String): Set<Pair<Int, Int>> =
+        repository.getWatchedShowEpisodes()[showId].orEmpty()
 }

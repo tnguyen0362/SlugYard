@@ -75,6 +75,6 @@ class HomeDataSourceTest {
             AddonTransportResult.Success(Json.parseToJsonElement(catalog(manifestUrl)).jsonObject)
         override suspend fun fetchMeta(manifestUrl: String, type: String, id: String) = error("unused")
         override suspend fun fetchStreams(manifestUrl: String, type: String, id: String) = error("unused")
-        override suspend fun fetchSubtitles(manifestUrl: String, type: String, id: String) = error("unused")
+        override suspend fun fetchSubtitles(manifestUrl: String, type: String, id: String, langs: String?) = error("unused")
     }
 }

@@ -78,11 +78,13 @@ import com.sluggyard.tv.domain.model.Subtitle
 import io.github.peerless2012.ass.media.kt.buildWithAssSupport
 import io.github.peerless2012.ass.media.type.AssRenderType
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.net.SocketTimeoutException
 import kotlin.math.min
@@ -459,7 +461,10 @@ private suspend fun PlayerRuntimeController.initializePlayerInternal(
     mpvInitializationInProgress = false
 
     // ExoPlayer branch: full DV7 / libass / buffer / track pipeline.
-    val dv7Context = resolveDv7Context(playerSettings, url)
+    // Display-capability probing is moved off the main thread but stays awaited
+    // on this chain: downstream consumers read the non-volatile controller
+    // fields it sets, so fire-and-forget would race the player build.
+    val dv7Context = withContext(Dispatchers.Default) { resolveDv7Context(playerSettings, url) }
     var currentDiagnostics = buildInitialDiagnostics(url, headers, playerSettings, dv7Context)
 
     val bufferSetup = configureBufferAndNetwork(playerSettings, url)
@@ -625,7 +630,7 @@ private fun PlayerRuntimeController.resolveDv7Context(
                 DolbyVisionBaseLayerPolicy.Decision.CONVERT_TO_DV81 -> Dv7HandlingMode.DV81_LIBDOVI
                 else -> Dv7HandlingMode.HDR10_BASE_LAYER
             }
-            Log.i(
+            Log.d(
                 PlayerRuntimeController.TAG,
                 "DV7_AUTO: decision=${result.decision} effectiveMode=$mode " +
                     "hdrCapsKnown=${result.hdrCapsKnown} displayDv=${result.displayDv} " +
@@ -689,7 +694,7 @@ private fun PlayerRuntimeController.resolveDv7Context(
     hasAttemptedDv7ToDv81ForCurrentPlayback = false
     dv7ToDv81BridgeVersionForCurrentPlayback = probe.bridgeVersion
     dv7ToDv81LastProbeReasonForCurrentPlayback = probe.reason
-    Log.i(
+    Log.d(
         PlayerRuntimeController.TAG,
         "DV7_DOVI: mode=${playerSettings.dv7HandlingMode} effectiveMode=$effectiveMode " +
             "dv81Active=$dv7ToDv81SettingActive dv5Compat=${playerSettings.dv5ToDv81Enabled} " +

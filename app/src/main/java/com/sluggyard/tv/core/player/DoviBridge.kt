@@ -297,6 +297,17 @@ object DoviBridge {
         return written
     }
 
+    /**
+     * Pre-grows [rpuOutBuffer] so callers that know the expected output size can skip the
+     * negative-return retry in the functions above. Same growth rule as those handlers:
+     * never shrinks, and sizes to at least the requested capacity (doubling past it when close).
+     */
+    @JvmStatic
+    fun ensureRpuOutBufferCapacity(minBytes: Int) {
+        if (minBytes <= rpuOutBuffer.size) return
+        rpuOutBuffer = ByteArray(maxOf(minBytes, rpuOutBuffer.size * 2))
+    }
+
     private fun loadNativeLibrary(): Boolean {
         if (!isNativeEnabledInBuild) {
             return false

@@ -14,6 +14,7 @@ import com.sluggyard.tv.core.watchstate.seriesContentId
 import com.sluggyard.tv.domain.repository.MetaRepository
 import com.sluggyard.tv.domain.repository.WatchProgressRepository
 import com.sluggyard.tv.ui.app.data.LibraryWatchRepository
+import com.sluggyard.tv.ui.app.data.WatchedMark
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -889,7 +890,7 @@ class WatchProgressRepositoryImpl @Inject constructor(
             watchProgressPreferences.markAsCompletedBatch(progressList, profileId = profileId)
             val watchedItems = progressList.map { progress -> progress.toWatchedItem(watchedAt = now) }
             watchedItemsPreferences.markAsWatchedBatch(watchedItems, profileId = profileId)
-            progressList.forEach { mirrorLibraryWatched(it, watched = true) }
+            mirrorLibraryWatchedBatch(progressList, watched = true)
             return
         }
 
@@ -897,7 +898,7 @@ class WatchProgressRepositoryImpl @Inject constructor(
         watchProgressPreferences.markAsCompletedBatch(progressList, profileId = profileId)
         val watchedItems = progressList.map { progress -> progress.toWatchedItem(watchedAt = now) }
         watchedItemsPreferences.markAsWatchedBatch(watchedItems, profileId = profileId)
-        progressList.forEach { mirrorLibraryWatched(it, watched = true) }
+        mirrorLibraryWatchedBatch(progressList, watched = true)
 
         // Mirror to Trakt if connected (same as single markAsCompleted)
         if (hasEffectiveTraktConnection) {
@@ -926,32 +927,39 @@ class WatchProgressRepositoryImpl @Inject constructor(
      * Details badges also read [LibraryWatchRepository.watchedIds] (manual marks).
      * Mirror playback completion so checkmarks appear without a full Details reload.
      */
-    private suspend fun mirrorLibraryWatched(progress: WatchProgress, watched: Boolean) {
-        val season = progress.season
-        val episode = progress.episode
-        val isSeriesEpisode = (progress.contentType.equals("series", ignoreCase = true) ||
-            progress.contentType.equals("tv", ignoreCase = true)) &&
-            season != null &&
-            episode != null
-        val id = when {
-            progress.videoId.isNotBlank() -> progress.videoId
-            isSeriesEpisode -> {
-                val showId = seriesContentId(progress.contentId).ifBlank { progress.contentId }
-                "$showId:$season:$episode"
+    private suspend fun mirrorLibraryWatched(progress: WatchProgress, watched: Boolean) =
+        mirrorLibraryWatchedBatch(listOf(progress), watched)
+
+    /** One LibraryWatch write + one sync request for the whole list (see setWatchedBatch). */
+    private suspend fun mirrorLibraryWatchedBatch(progressList: List<WatchProgress>, watched: Boolean) {
+        if (progressList.isEmpty()) return
+        val marks = progressList.map { progress ->
+            val season = progress.season
+            val episode = progress.episode
+            val isSeriesEpisode = (progress.contentType.equals("series", ignoreCase = true) ||
+                progress.contentType.equals("tv", ignoreCase = true)) &&
+                season != null &&
+                episode != null
+            val id = when {
+                progress.videoId.isNotBlank() -> progress.videoId
+                isSeriesEpisode -> {
+                    val showId = seriesContentId(progress.contentId).ifBlank { progress.contentId }
+                    "$showId:$season:$episode"
+                }
+                else -> progress.contentId
             }
-            else -> progress.contentId
-        }
-        runCatching {
-            libraryWatchRepository.setWatched(
+            WatchedMark(
                 id = id,
-                watched = watched,
                 contentType = progress.contentType,
                 title = progress.name,
                 season = season,
                 episode = episode,
             )
+        }
+        runCatching {
+            libraryWatchRepository.setWatchedBatch(marks, watched)
         }.onFailure { error ->
-            Log.w(TAG, "Failed to mirror watched=$watched into LibraryWatch id=$id", error)
+            Log.w(TAG, "Failed to mirror watched=$watched into LibraryWatch count=${marks.size}", error)
         }
     }
 

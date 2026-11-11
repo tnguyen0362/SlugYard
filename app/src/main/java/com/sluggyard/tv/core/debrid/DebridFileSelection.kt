@@ -48,11 +48,37 @@ internal fun String.matchesDebridEpisode(season: Int?, episode: Int?): Boolean =
 internal fun <T> List<T>.firstDebridNameMatch(
     names: List<String>,
     displayName: (T) -> String
-): T? =
-    firstOrNull { item ->
+): T? {
+    // Exact normalized equality wins outright. Only then fall back to containment, so a
+    // short hint ("twilight") can never beat the file whose name is exactly the hint.
+    firstOrNull { item -> displayName(item).normalizedDebridFileName() in names }?.let { return it }
+    return firstOrNull { item ->
         val fileName = displayName(item).normalizedDebridFileName()
-        names.any { name -> fileName.contains(name) || name.contains(fileName) }
+        fileName.isNotBlank() && names.any { name ->
+            name.length >= MIN_CONTAINED_NAME_LENGTH &&
+                (fileName.contains(name) || name.contains(fileName))
+        }
     }
+}
+
+/** Shorter names are too generic for containment matching inside multi-file packs. */
+private const val MIN_CONTAINED_NAME_LENGTH = 12
+
+/**
+ * Last-resort pick for a torrent with no usable file hint. The largest video is only a safe
+ * guess when it clearly dominates; in a pack of similarly sized videos (a movie saga,
+ * a season of episodes) it is an arbitrary file, and playing the wrong one is worse than
+ * failing so the caller can move on to another source.
+ */
+internal fun <T> List<T>.dominantLargestOrNull(bytes: (T) -> Long?): T? {
+    if (size <= 1) return singleOrNull()
+    val sorted = sortedByDescending { bytes(it) ?: 0L }
+    val largest = bytes(sorted[0]) ?: 0L
+    val runnerUp = bytes(sorted[1]) ?: 0L
+    return sorted[0].takeIf { runnerUp <= 0L || largest >= runnerUp * DOMINANT_SIZE_RATIO }
+}
+
+private const val DOMINANT_SIZE_RATIO = 1.5
 
 internal fun buildDebridEpisodePatterns(season: Int?, episode: Int?): List<String> {
     if (season == null || episode == null) return emptyList()

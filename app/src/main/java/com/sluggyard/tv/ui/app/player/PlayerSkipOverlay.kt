@@ -178,12 +178,13 @@ private fun SkipPromptButton(
     }
 }
 
+// Outro/credits prompts were removed: the Up next banner owns the end of the
+// episode, so only intro-class segments surface a Skip button.
 private fun skipLabel(type: String): String = when {
     type.contains("recap", ignoreCase = true) -> "Skip recap"
-    type.equals("ed", ignoreCase = true) ||
-        type.contains("mixed-ed", ignoreCase = true) ||
-        type.contains("outro", ignoreCase = true) ||
-        type.contains("ending", ignoreCase = true) ||
-        type.contains("credits", ignoreCase = true) -> "Skip outro"
-    else -> "Skip intro"
+    type.equals("intro", ignoreCase = true) ||
+        type.equals("op", ignoreCase = true) ||
+        type.equals("mixed-op", ignoreCase = true) ||
+        type.contains("opening", ignoreCase = true) -> "Skip intro"
+    else -> "Skip segment"
 }

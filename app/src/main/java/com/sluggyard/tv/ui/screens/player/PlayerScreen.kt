@@ -824,6 +824,27 @@ fun PlayerScreen(
                 !uiState.showSpeedDialog &&
                 !uiState.showMoreDialog
         }
+        if (uiState.postPlayMode != null && visiblePostPlayMode == null) {
+            LaunchedEffect(
+                uiState.error != null, shouldConfirmNextEpisodeOnEnd, uiState.showLoadingOverlay,
+                uiState.showPauseOverlay, uiState.showStreamInfoOverlay, uiState.showEpisodesPanel,
+                uiState.showSourcesPanel, uiState.showAudioOverlay, uiState.showSubtitleOverlay,
+                uiState.showSubtitleStylePanel, uiState.showSubtitleDelayOverlay,
+                uiState.showSubtitleTimingDialog, uiState.showSpeedDialog, uiState.showMoreDialog,
+            ) {
+                android.util.Log.i(
+                    "UpNext",
+                    "card hidden by screen state: error=${uiState.error != null} " +
+                        "endPrompt=$shouldConfirmNextEpisodeOnEnd loading=${uiState.showLoadingOverlay} " +
+                        "pause=${uiState.showPauseOverlay} info=${uiState.showStreamInfoOverlay} " +
+                        "episodes=${uiState.showEpisodesPanel} sources=${uiState.showSourcesPanel} " +
+                        "audio=${uiState.showAudioOverlay} subs=${uiState.showSubtitleOverlay} " +
+                        "subStyle=${uiState.showSubtitleStylePanel} subDelay=${uiState.showSubtitleDelayOverlay} " +
+                        "subTiming=${uiState.showSubtitleTimingDialog} speed=${uiState.showSpeedDialog} " +
+                        "more=${uiState.showMoreDialog}",
+                )
+            }
+        }
         postPlayOverlay(
             uiState.copy(postPlayMode = visiblePostPlayMode),
             PlayerPostPlayActions(

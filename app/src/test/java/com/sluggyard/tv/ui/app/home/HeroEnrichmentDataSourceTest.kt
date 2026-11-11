@@ -41,7 +41,7 @@ class HeroEnrichmentDataSourceTest {
                 override suspend fun fetchCatalog(manifestUrl: String, type: String, catalogId: String, extras: Map<String, String>) = error("unused")
                 override suspend fun fetchMeta(manifestUrl: String, type: String, id: String): AddonTransportResult<JsonObject> = AddonTransportResult.NetworkFailure(IllegalStateException("offline"))
                 override suspend fun fetchStreams(manifestUrl: String, type: String, id: String) = error("unused")
-                override suspend fun fetchSubtitles(manifestUrl: String, type: String, id: String) = error("unused")
+                override suspend fun fetchSubtitles(manifestUrl: String, type: String, id: String, langs: String?) = error("unused")
             },
         )
         val hero = Hero(id = "movie", title = "Movie", backdropUrl = "https://poster", summary = "Base", contextTag = "Movie", addonId = "source", contentType = "movie")
@@ -60,6 +60,6 @@ class HeroEnrichmentDataSourceTest {
         override suspend fun fetchCatalog(manifestUrl: String, type: String, catalogId: String, extras: Map<String, String>) = error("unused")
         override suspend fun fetchMeta(manifestUrl: String, type: String, id: String): AddonTransportResult<JsonObject> = AddonTransportResult.Success(Json.parseToJsonElement(meta).jsonObject)
         override suspend fun fetchStreams(manifestUrl: String, type: String, id: String) = error("unused")
-        override suspend fun fetchSubtitles(manifestUrl: String, type: String, id: String) = error("unused")
+        override suspend fun fetchSubtitles(manifestUrl: String, type: String, id: String, langs: String?) = error("unused")
     }
 }

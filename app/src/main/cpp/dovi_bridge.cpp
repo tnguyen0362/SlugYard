@@ -311,7 +311,11 @@ Java_com_sluggyard_tv_core_player_DoviBridge_nativeConvertDv7RpuToDv81NonAllocat
 // ── Native optimized HEVC/DolbyVision/HDR10+ Sample Processing ──
 
 static std::vector<uint8_t> unescape_rbsp(const uint8_t* data, size_t nalOffset, size_t nalSize) {
-    std::vector<uint8_t> rbsp;
+    // Reused scratch. The single caller (filterSeiNal) copies the result into its own
+    // local before any further call, so slot reuse is safe and retained capacity is
+    // unobservable; a torn-down worker thread simply re-pays the growth.
+    thread_local std::vector<uint8_t> rbsp;
+    rbsp.clear();
     if (nalSize < 3) {
         for (size_t i = 0; i < nalSize; ++i) rbsp.push_back(data[nalOffset + i]);
         return rbsp;
@@ -335,7 +339,11 @@ static std::vector<uint8_t> unescape_rbsp(const uint8_t* data, size_t nalOffset,
 }
 
 static std::vector<uint8_t> escape_rbsp(const std::vector<uint8_t>& rbsp) {
-    std::vector<uint8_t> escaped;
+    // Reused scratch, same rationale as unescape_rbsp. Sole caller consumes the result
+    // within its call frame (moves it into its own out-param); the reserve keeps
+    // worst-case 0x03-escape expansion allocation-free in steady state.
+    thread_local std::vector<uint8_t> escaped;
+    escaped.clear();
     if (rbsp.size() <= 2) return rbsp;
     escaped.reserve(rbsp.size() * 3 / 2);
     escaped.push_back(rbsp[0]);
@@ -475,6 +483,15 @@ Java_com_sluggyard_tv_core_player_DoviBridge_nativeProcessVideoSample(
     thread_local std::vector<uint8_t> sampleBuffer;
     thread_local std::vector<uint8_t> outputBuffer;
 
+    // Per-NAL scratch reused across iterations of both format loops below. Hoisted out
+    // of the hot path: a fresh vector per NAL was the main remaining per-frame
+    // allocation. Trade-off: when a codec-pool worker thread tears down, its retained
+    // capacity dies with it and the next thread re-pays the growth ramp. The `filtered`
+    // out-param fed by filterSeiNal must stay a separate local: the move-assign below
+    // would otherwise be a self-move (UB) and break the empty-check that drops
+    // fully-stripped SEI NALs.
+    thread_local std::vector<uint8_t> processedNal;
+
     sampleBuffer.resize(sampleLen);
     {
         void* samplePtr = env->GetPrimitiveArrayCritical(sample, nullptr);
@@ -507,7 +524,7 @@ Java_com_sluggyard_tv_core_player_DoviBridge_nativeProcessVideoSample(
 
             bool shouldDrop = false;
             bool processed = false;
-            std::vector<uint8_t> processedNal;
+            processedNal.clear();
 
             if (convertDovi || stripDoviRpu) {
                 bool isRpu = (nalType == 62);
@@ -619,7 +636,7 @@ Java_com_sluggyard_tv_core_player_DoviBridge_nativeProcessVideoSample(
 
                 bool shouldDrop = false;
                 bool processed = false;
-                std::vector<uint8_t> processedNal;
+                processedNal.clear();
 
                 if (convertDovi || stripDoviRpu) {
                     bool isRpu = (nalType == 62);

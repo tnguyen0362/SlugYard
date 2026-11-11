@@ -156,4 +156,20 @@ class DigitalReleasePolicyTest {
             DigitalReleasePolicy.seriesStatus(null, null, clock),
         )
     }
+
+    @Test
+    fun episodeReleaseUsesEpisodeAirDate() {
+        assertEquals(
+            DigitalReleasePolicy.Status.AVAILABLE,
+            DigitalReleasePolicy.episodeStatus("2026-07-30", clock),
+        )
+        assertEquals(
+            DigitalReleasePolicy.Status.NOT_YET,
+            DigitalReleasePolicy.episodeStatus("2026-08-01", clock),
+        )
+        assertEquals(
+            DigitalReleasePolicy.Status.UNKNOWN,
+            DigitalReleasePolicy.episodeStatus(null, clock),
+        )
+    }
 }

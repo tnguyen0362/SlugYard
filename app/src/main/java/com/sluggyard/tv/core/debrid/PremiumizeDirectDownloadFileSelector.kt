@@ -44,7 +44,7 @@ class PremiumizeDirectDownloadFileSelector @Inject constructor() {
             }
         }
 
-        return playable.maxByOrNull { it.size ?: 0L }
+        return playable.dominantLargestOrNull { it.size }
     }
 
     private fun PremiumizeDirectDownloadFileDto.isPlayableVideo(): Boolean {

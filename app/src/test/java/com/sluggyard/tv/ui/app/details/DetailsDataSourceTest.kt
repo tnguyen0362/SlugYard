@@ -28,7 +28,7 @@ class DetailsDataSourceTest {
                 override suspend fun fetchMeta(manifestUrl: String, type: String, id: String): AddonTransportResult<JsonObject> =
                     AddonTransportResult.Success(Json.parseToJsonElement("""{"meta":{"id":"show","type":"series","name":"Show","cast":["Actor One","Actor Two"],"videos":[{"id":"e2","season":1,"episode":2,"title":"Second"},{"id":"e1","season":1,"episode":1,"title":"First"}]}}""").jsonObject)
                 override suspend fun fetchStreams(manifestUrl: String, type: String, id: String) = error("unused")
-                override suspend fun fetchSubtitles(manifestUrl: String, type: String, id: String) = error("unused")
+                override suspend fun fetchSubtitles(manifestUrl: String, type: String, id: String, langs: String?) = error("unused")
             },
         )
 
@@ -62,7 +62,7 @@ class DetailsDataSourceTest {
                         ).jsonObject,
                     )
                 override suspend fun fetchStreams(manifestUrl: String, type: String, id: String) = error("unused")
-                override suspend fun fetchSubtitles(manifestUrl: String, type: String, id: String) = error("unused")
+                override suspend fun fetchSubtitles(manifestUrl: String, type: String, id: String, langs: String?) = error("unused")
             },
         )
 
@@ -97,7 +97,7 @@ class DetailsDataSourceTest {
                 override suspend fun fetchCatalog(manifestUrl: String, type: String, catalogId: String, extras: Map<String, String>) = error("gateway should not be called")
                 override suspend fun fetchMeta(manifestUrl: String, type: String, id: String) = error("gateway should not be called")
                 override suspend fun fetchStreams(manifestUrl: String, type: String, id: String) = error("gateway should not be called")
-                override suspend fun fetchSubtitles(manifestUrl: String, type: String, id: String) = error("gateway should not be called")
+                override suspend fun fetchSubtitles(manifestUrl: String, type: String, id: String, langs: String?) = error("gateway should not be called")
             },
         )
 
@@ -137,7 +137,7 @@ class DetailsDataSourceTest {
                     )
                 }
                 override suspend fun fetchStreams(manifestUrl: String, type: String, id: String) = error("unused")
-                override suspend fun fetchSubtitles(manifestUrl: String, type: String, id: String) = error("unused")
+                override suspend fun fetchSubtitles(manifestUrl: String, type: String, id: String, langs: String?) = error("unused")
             },
             resolveMetaContentId = { _, id ->
                 resolveMetaContentId(type = "movie", id = id) { _, _ -> "tt0111161" }
@@ -159,7 +159,7 @@ class DetailsDataSourceTest {
                 override suspend fun fetchCatalog(manifestUrl: String, type: String, catalogId: String, extras: Map<String, String>) = error("unused")
                 override suspend fun fetchMeta(manifestUrl: String, type: String, id: String) = error("should not fetch")
                 override suspend fun fetchStreams(manifestUrl: String, type: String, id: String) = error("unused")
-                override suspend fun fetchSubtitles(manifestUrl: String, type: String, id: String) = error("unused")
+                override suspend fun fetchSubtitles(manifestUrl: String, type: String, id: String, langs: String?) = error("unused")
             },
             resolveMetaContentId = { _, id -> id },
         )

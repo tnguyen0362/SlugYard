@@ -41,6 +41,8 @@ import com.sluggyard.tv.ui.app.streams.StreamGroupState
 import com.sluggyard.tv.ui.app.streams.StreamsDataSource
 import com.sluggyard.tv.ui.app.streams.SubtitleDataSource
 import com.sluggyard.tv.ui.app.streams.SubtitleGroupState
+import com.sluggyard.tv.ui.app.streams.SubtitleVideoInfo
+import com.sluggyard.tv.core.player.OpenSubtitlesHasher
 import com.sluggyard.tv.ui.app.streams.stremioSubtitleLookupId
 import com.sluggyard.tv.ui.app.streams.DigitalReleaseLookup
 import com.sluggyard.tv.ui.app.streams.StreamLinkFilterPolicy
@@ -71,6 +73,7 @@ private const val NEXT_EPISODE_SEARCH_HARD_CAP_MS = 120_000L
 // A subtitle sweep must never leave the overlay on an endless spinner; bounded
 // fanout per addon plus this ceiling keeps the whole search under ~20s.
 private const val SUBTITLE_SEARCH_TIMEOUT_MS = 20_000L
+private const val SUBTITLE_HASH_TIMEOUT_MS = 6_000L
 private const val REWRITE_SUBTITLE_DIAGNOSTIC_TAG = "SubtitleDiag"
 
 private data class ActivePlaybackContext(
@@ -201,8 +204,31 @@ fun RetainedPlayerHost(
         )
     }
 
-    LaunchedEffect(contentId, contentType, season, episode, subtitleSearchNonce, subtitleSearchLang) {
+    // Hashing reads ~128 KB from the stream; do it once per source, not per language search.
+    // The file actually playing: source switches and next-episode handoffs replace it while
+    // initialSource stays the launch value, so hashing initialSource sent the wrong file's identity.
+    var playingSource by remember(initialSource.url) { mutableStateOf(initialSource) }
+    var subtitleVideoInfo by remember(playingSource.url) { mutableStateOf<SubtitleVideoInfo?>(null) }
+
+    LaunchedEffect(contentId, contentType, season, episode, subtitleSearchNonce, subtitleSearchLang, playingSource.url) {
         viewModel.setAddonSubtitles(emptyList(), stillLoading = true)
+        if (subtitleVideoInfo == null) {
+            // Without the file hash/size, OpenSubtitles can only return generic IMDB-wide rows
+            // (often cut for other releases), which is why synced subtitles were so rare.
+            val hashed = withTimeoutOrNull(SUBTITLE_HASH_TIMEOUT_MS) {
+                runCatching { OpenSubtitlesHasher.compute(playingSource.url, playingSource.requestHeaders) }.getOrNull()
+            }
+            subtitleVideoInfo = SubtitleVideoInfo(
+                hash = hashed?.hash ?: playingSource.videoHash,
+                sizeBytes = hashed?.fileSize ?: playingSource.videoSizeBytes,
+                filename = playingSource.filename,
+            )
+            Log.d(
+                REWRITE_SUBTITLE_DIAGNOSTIC_TAG,
+                "video identity hash=${subtitleVideoInfo?.hash} size=${subtitleVideoInfo?.sizeBytes} " +
+                    "file='${subtitleVideoInfo?.filename?.take(80)}' computed=${hashed != null}",
+            )
+        }
         val lookupId = stremioSubtitleLookupId(
             contentType = contentType,
             contentId = contentId,
@@ -215,7 +241,7 @@ fun RetainedPlayerHost(
         suspend fun runSearch(langs: List<String>?): Pair<List<Subtitle>, Boolean> {
             var tracksOut = emptyList<Subtitle>()
             var finished = false
-            subtitleDataSource.subtitleGroups(contentType, lookupId, langs = langs).collect { groups ->
+            subtitleDataSource.subtitleGroups(contentType, lookupId, langs = langs, video = subtitleVideoInfo).collect { groups ->
                 val stillLoading = groups.any { it.state is SubtitleGroupState.Loading }
                 val tracks = groups.flatMap { group ->
                         (group.state as? SubtitleGroupState.Content)?.tracks.orEmpty().map { track ->
@@ -554,6 +580,7 @@ fun RetainedPlayerHost(
                             parentType = parentType,
                             resumePositionMs = if (switchingEpisode) 0L else latestTimeline.currentPosition,
                         )
+                        playingSource = handoff.source
                         activeContext = activeContext.copy(
                             contentId = handoff.contentId,
                             contentType = handoff.contentType,
@@ -688,6 +715,7 @@ fun RetainedPlayerHost(
                             parentId = parentId,
                             parentType = parentType,
                         )
+                        playingSource = result.source
                         activeContext = activeContext.copy(
                             contentId = next.videoId,
                             season = next.season,

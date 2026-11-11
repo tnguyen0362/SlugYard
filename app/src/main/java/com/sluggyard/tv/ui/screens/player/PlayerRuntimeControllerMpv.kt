@@ -66,6 +66,7 @@ internal fun PlayerRuntimeController.attachMpvView(view: MpvPlayerSurfaceView?) 
         updateMpvAvailableTracks()
         scheduleHideControls()
         emitScrobbleStart()
+        scheduleMpvFirstFrameWatchdog()
     }.onFailure { err ->
         val detailedError = err.message ?: context.getString(com.sluggyard.tv.R.string.player_error_mpv_surface_failed)
         if (maybeAutoSwitchInternalPlayerOnStartupError(
@@ -80,6 +81,38 @@ internal fun PlayerRuntimeController.attachMpvView(view: MpvPlayerSurfaceView?) 
                 error = detailedError,
                 showLoadingOverlay = false
             )
+        }
+    }
+}
+
+/**
+ * libmpv does not expose ExoPlayer's STATE_READY, so a dead CDN URL or a surface
+ * that never accepted loadfile can otherwise leave the blocking startup chrome up
+ * forever. Match the ExoPlayer startup bound and hand the stream to the existing
+ * dual-engine failover path (or surface a retryable error when failover is disabled).
+ */
+private fun PlayerRuntimeController.scheduleMpvFirstFrameWatchdog() {
+    firstFrameWatchdogJob?.cancel()
+    firstFrameWatchdogJob = scope.launch {
+        delay(PlayerRuntimeController.FIRST_FRAME_TIMEOUT_MS)
+        if (hasRenderedFirstFrame || !isUsingMpvEngine()) return@launch
+        val state = _uiState.value
+        if (state.error != null || !state.showLoadingOverlay) return@launch
+        // Detach this job before failover resets the player; otherwise resetLoadingOverlayForNewStream
+        // cancels the coroutine that is currently performing the handoff.
+        firstFrameWatchdogJob = null
+        val switched = maybeAutoSwitchInternalPlayerOnStartupError(
+            detailedError = "libmpv did not render a first frame within ${PlayerRuntimeController.FIRST_FRAME_TIMEOUT_MS}ms",
+            allowEngineFailover = true,
+        )
+        if (!switched) {
+            _uiState.update {
+                it.copy(
+                    error = context.getString(com.sluggyard.tv.R.string.player_error_mpv_playback_failed),
+                    showLoadingOverlay = false,
+                    isBuffering = false,
+                )
+            }
         }
     }
 }
@@ -170,6 +203,7 @@ internal fun PlayerRuntimeController.initializeMpvPlayer(
         updateMpvAvailableTracks()
         scheduleHideControls()
         emitScrobbleStart()
+        scheduleMpvFirstFrameWatchdog()
     }.onFailure { err ->
         Log.e(PlayerRuntimeController.TAG, "libmpv initialize failed: ${err.message}", err)
         val detailedError = err.message ?: context.getString(com.sluggyard.tv.R.string.player_error_mpv_playback_failed)

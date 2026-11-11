@@ -87,16 +87,16 @@ data class StreamGroup(
 private sealed interface StreamListItem {
     val key: String
 
-    data class AddonHeader(val title: String) : StreamListItem {
-        override val key: String = "header:$title"
+    data class AddonHeader(val title: String, val scope: String) : StreamListItem {
+        override val key: String = "header:$scope"
     }
 
-    data class Status(val message: String, val color: Color) : StreamListItem {
-        override val key: String = "status:$message"
+    data class Status(val message: String, val color: Color, val scope: String) : StreamListItem {
+        override val key: String = "status:$scope"
     }
 
-    data class Candidate(val stream: StreamCandidate) : StreamListItem {
-        override val key: String = "candidate:${stream.id}"
+    data class Candidate(val stream: StreamCandidate, val scope: String) : StreamListItem {
+        override val key: String = "candidate:$scope:${stream.id}"
     }
 }
 
@@ -125,14 +125,15 @@ fun StreamsScreen(
                     StreamListItem.Status(
                         "No sources match your link filters. Open Settings → Sources to adjust.",
                         Color(0xFFFFB74D),
+                        "filters",
                     ),
                 )
             }
             groups.forEach { group ->
-                add(StreamListItem.AddonHeader(group.addonName))
+                add(StreamListItem.AddonHeader(group.addonName, group.addonId))
                 when (val state = group.state) {
                     StreamGroupState.Loading ->
-                        add(StreamListItem.Status("Searching this source...",SlugYardPalette.OnCanvasMuted))
+                        add(StreamListItem.Status("Searching this source...", SlugYardPalette.OnCanvasMuted, group.addonId))
                     StreamGroupState.Empty ->
                         add(
                             StreamListItem.Status(
@@ -142,14 +143,25 @@ fun StreamsScreen(
                                     "No streams returned"
                                 },
                                 SlugYardPalette.OnCanvasMuted,
+                                group.addonId,
                             ),
                         )
                     is StreamGroupState.Error ->
-                        add(StreamListItem.Status(state.message, SlugYardPalette.Danger))
+                        add(StreamListItem.Status(state.message, SlugYardPalette.Danger, group.addonId))
                     is StreamGroupState.Content ->
-                        state.streams.forEach { stream -> add(StreamListItem.Candidate(stream)) }
+                        state.streams.forEach { stream -> add(StreamListItem.Candidate(stream, group.addonId)) }
                 }
             }
+        }
+    }
+    // Keys must NOT include the list position. Sources stream in while the user is already
+    // focused on a row; a positional key shifted every row below a growing group, so Compose
+    // disposed the focused row, focus was lost and the D-pad went dead until Back.
+    val listKeys = remember(listItems) {
+        val seen = HashMap<String, Int>()
+        listItems.map { item ->
+            val n = seen.merge(item.key, 1, Int::plus) ?: 1
+            if (n == 1) item.key else "${item.key}~$n"
         }
     }
     val firstCandidateIndex = listItems.indexOfFirst { it is StreamListItem.Candidate }
@@ -208,7 +220,7 @@ fun StreamsScreen(
         ) {
             itemsIndexed(
                 items = listItems,
-                key = { index, item -> "${item.key}#$index" },
+                key = { index, _ -> listKeys[index] },
             ) { index, item ->
                 when (item) {
                     is StreamListItem.AddonHeader -> {

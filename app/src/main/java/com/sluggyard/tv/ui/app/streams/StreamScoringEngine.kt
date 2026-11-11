@@ -1,5 +1,6 @@
 package com.sluggyard.tv.ui.app.streams
 
+import com.sluggyard.tv.core.debrid.StreamTextSeedersParser
 import com.sluggyard.tv.core.debrid.StreamTextSizeParser
 import com.sluggyard.tv.core.streamresolution.StreamCacheState
 import com.sluggyard.tv.data.local.PreferredAudioLayout
@@ -262,13 +263,24 @@ internal object StreamScoringEngine {
         // Softsub/dual signals must come from the release name — not addon chrome
         // ("MediaFusion | Midnight 🧲 ⏳ 720p") or dump metadata that false-triggers "sub"/"en".
         val tracks = trackSignals(releaseText, context, kind, candidate)
+        val cache = cacheFit(candidate)
         return Rank(
             kind = kind,
             softsubFit = tracks.softsubFit,
             dualFit = tracks.dualFit,
-            cacheFit = cacheFit(candidate),
+            cacheFit = cache,
             curatorFit = if (kind == ContentKind.ANIME && candidate.isCuratedSeaDexSource()) 1 else 0,
-            seeders = seederFit(candidate),
+            seeders = seederFit(candidate).let { fit ->
+                // Cached/direct rows play from the debrid CDN, so seeders only signal how
+                // trusted the release is, not how well it streams. Above a modest floor they
+                // tie, letting quality decide: 800-seed 1080p must not beat a 150-seed native
+                // 4K, while 4-seed oddities (re-scaled foreign uploads) still lose.
+                if (kind != ContentKind.ANIME && cache == 2) {
+                    fit.coerceAtMost(CACHED_SEEDER_FIT_CEILING)
+                } else {
+                    fit
+                }
+            },
             decodeFit = decodeFit(text, animeEpisode),
             quality = qualityFit(text, animeEpisode, context.digitalReleaseStatus),
             audioFit = audioFitOf(candidate, context),
@@ -445,7 +457,44 @@ internal object StreamScoringEngine {
                 usedObserved = true
             }
         }
+        // Dialogue already in the preferred language (English film, English subtitle pref):
+        // subtitles are optional and come from the subtitle addons, so the softsub ladder
+        // is the wrong question. Native scene releases ("Twilight.2008.2160p.BluRay.x265")
+        // never advertise "ENG sub" and used to score opaque (1), which let foreign
+        // multi-language packs ("ITA.ENG sub ita.eng", "Castellano…Ingles+Subs") win every
+        // auto-pick and default to a dubbed audio track. Rank instead: clean native release
+        // 3 > release that also packs another language 2. Hard conflicts / RAW stay 0.
+        if ((kind == ContentKind.MAINSTREAM || kind == ContentKind.LIVE) &&
+            softsubFit > 0 &&
+            preferred != null &&
+            dialogueIsPreferredLanguage(context.language, preferred)
+        ) {
+            softsubFit = if (mentionsOtherLanguage(text, preferred)) 2 else 3
+        }
         return TrackSignals(softsubFit = softsubFit, dualFit = dualFit, usedObserved = usedObserved)
+    }
+
+    private fun dialogueIsPreferredLanguage(contentLanguage: String?, preferred: String): Boolean {
+        // Cinemeta sends "English" or "English, Spanish"; TMDB-style codes send "en".
+        val primary = contentLanguage
+            ?.split(',', '/', '|', ';')
+            ?.firstOrNull()
+            ?.trim()
+            ?.lowercase()
+            ?.takeIf { it.isNotEmpty() }
+            ?: return false
+        return languageAliases(primary).any { it in languageAliases(preferred) }
+    }
+
+    private fun mentionsOtherLanguage(text: String, preferred: String): Boolean {
+        // Compare by alias sets so "en", "eng" and "english" preferences all behave the same.
+        val preferredAliases = languageAliases(preferred)
+        val preferredIsSpanish = "spanish" in preferredAliases
+        return (!preferredIsSpanish && looksLikeSpanishFansubPack(text)) ||
+            SUBTITLE_CONFLICT_LANGUAGE_BASES.any { base ->
+                languageAliases(base).none { it in preferredAliases } &&
+                    textMentionsConflictLanguage(text, base)
+            }
     }
 
     private fun decodeFit(text: String, animeEpisode: Boolean): Int {
@@ -465,7 +514,7 @@ internal object StreamScoringEngine {
         if (MODERN_CODEC.containsMatchIn(text)) base += 8
         if (HDR_TAG.containsMatchIn(text)) base += 5
         if (CAM_TAG.containsMatchIn(text)) base -= 35
-        if (AI_UPSCALE.containsMatchIn(text)) base -= 40
+        if (AI_UPSCALE.containsMatchIn(text) || RESCALED_UPSCALE.containsMatchIn(text)) base -= 40
         // Sources ranking: bury early-release junk when digital isn't out yet.
         if (digitalReleaseStatus == DigitalReleasePolicy.Status.NOT_YET &&
             DigitalReleasePolicy.isEarlyReleaseJunk(text)
@@ -717,10 +766,8 @@ internal object StreamScoringEngine {
         }
     }
 
-    private fun parseSeeders(text: String): Int? = Regex(
-        "(?:seeders?|seeds?|\\bse\\b|\\bs\\b)\\s*[:=]?\\s*(\\d{1,6})",
-        RegexOption.IGNORE_CASE,
-    ).find(text)?.groupValues?.getOrNull(1)?.toIntOrNull()
+    // The old "\bs\b" alternative read "Ocean's 2160p" as 2160 seeders; share the narrow parser.
+    private fun parseSeeders(text: String): Int? = StreamTextSeedersParser.seedersFromText(text)
 
     private fun StreamCandidate.searchText(): String =
         listOf(
@@ -1036,4 +1083,10 @@ internal object StreamScoringEngine {
     private val HDR_TAG = Regex("\\b(hdr10\\+?|dolby.?vision|dv)\\b")
     private val CAM_TAG = Regex("\\b(cam(?:rip)?|hdcam|telesync|tscam|telecine|screener)\\b|\\[\\s*cam(?:rip)?\\s*]")
     private val AI_UPSCALE = Regex("\\b(ai.?upscale|upscaled|ai.?enhance|reupscale|topaz|esrgan)\\b")
+
+    // No leading \b: release tags glue it to the resolution ("[4Kreescalado]", "4KUpscale").
+    // Spanish/Italian "reescalado"/"riscalato" = rescaled from a lower-resolution master.
+    private val RESCALED_UPSCALE = Regex("(re-?escalad[oa]|riscalat[oa]|upscal(?:e|ed|ing)\\b)")
+
+    private const val CACHED_SEEDER_FIT_CEILING = 65
 }
