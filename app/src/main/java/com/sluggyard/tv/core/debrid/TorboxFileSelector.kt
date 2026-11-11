@@ -105,8 +105,11 @@ class TorboxFileSelector @Inject constructor() {
             }
         }
 
-        return playable.maxByOrNull { it.size ?: 0L }?.also {
-            Log.d(TAG, "selected method=largest-fallback name='${it.displayName().take(180)}'")
+        return playable.dominantLargestOrNull { it.size }?.also {
+            Log.d(TAG, "selected method=largest-dominant name='${it.displayName().take(180)}'")
+        } ?: run {
+            Log.w(TAG, "no file hint and ${playable.size} similarly sized videos; refusing to guess")
+            null
         }
     }
 

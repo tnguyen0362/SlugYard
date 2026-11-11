@@ -21,6 +21,28 @@ import java.time.ZoneId
 object PlayerNextEpisodeRules {
 
     /**
+     * Catalogs are not consistent about the label used for episodic content.
+     * Anime in particular arrives as `anime` on the initial route and as
+     * `series` after a source handoff. Keep both paths eligible for Up Next.
+     */
+    fun isSeriesLikeContentType(type: String?): Boolean =
+        type?.trim()?.lowercase() in SERIES_LIKE_CONTENT_TYPES
+
+    /**
+     * Returns the strongest episode identity available from route state. Some
+     * deep links omit season/episode fields even though the Stremio-style video
+     * id still carries the trailing `:season:episode` pair.
+     */
+    fun resolveEpisodeIdentity(
+        videoId: String?,
+        season: Int?,
+        episode: Int?,
+    ): Pair<Int?, Int?> {
+        val parsed = videoId?.let(::parseSeasonEpisodeFromVideoId)
+        return (season ?: parsed?.first) to (episode ?: parsed?.second)
+    }
+
+    /**
      * Returns the episode that follows the current one, or `null` when there is no successor.
      *
      * Prefer [currentVideoId] (Stremio `show:S:E`) over meta `episode` numbers so season-local
@@ -42,13 +64,36 @@ object PlayerNextEpisodeRules {
     }
 
     /**
+     * Episodes that come before the current one in watch order. Finishing an episode implies
+     * the viewer is caught up to it, so these are marked watched alongside it.
+     *
+     * Specials (season 0) are only included when the current episode is itself a special;
+     * they are optional side content, not part of the run the viewer has caught up on.
+     */
+    fun previousEpisodes(
+        videos: List<Video>,
+        currentSeason: Int?,
+        currentEpisode: Int,
+        currentVideoId: String? = null,
+    ): List<Video> {
+        val ordered = orderedVideos(videos)
+        val idx = indexOfCurrentEpisode(ordered, currentSeason, currentEpisode, currentVideoId)
+            ?: return emptyList()
+        val currentIsSpecial = ordered[idx].season == 0
+        return ordered.subList(0, idx).filter { video ->
+            (video.season == 0) == currentIsSpecial
+        }
+    }
+
+    /**
      * Decides whether the "Next episode" card should be visible at [positionMs].
      *
      * When outro / ending / credits skip-intervals are available, the card fires at
-     * the earliest credits start so it arrives with (and then replaces) Skip outro —
-     * Netflix-style up-next, not a late percentage-only card while ED is already up.
-     * Without outro data the user threshold is applied, plus a remaining-time floor so
-     * titles missing IntroDB/AniSkip still surface Up next before the file ends.
+     * the earliest credits start — Up next owns the end of the episode (the Skip
+     * outro button was removed; credits are covered by this card or the explicit
+     * auto-skip-outro setting). Without outro data the user threshold is applied,
+     * plus a remaining-time floor so titles missing IntroDB/AniSkip still surface
+     * Up next before the file ends.
      */
     fun shouldShowNextEpisodeCard(
         positionMs: Long,
@@ -210,6 +255,8 @@ object PlayerNextEpisodeRules {
     const val NO_OUTRO_REMAINING_FRACTION = 0.08
 
     val OUTRO_SEGMENT_TYPES = setOf("outro", "ed", "mixed-ed", "credits", "ending")
+
+    private val SERIES_LIKE_CONTENT_TYPES = setOf("series", "tv", "anime", "other")
 
     const val POST_OUTRO_AUTOPLAY_GAP_MS = 5_000L
 

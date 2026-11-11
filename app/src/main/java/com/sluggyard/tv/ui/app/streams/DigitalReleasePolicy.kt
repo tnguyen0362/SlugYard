@@ -86,6 +86,15 @@ object DigitalReleasePolicy {
         }
     }
 
+    /** Release decision for an individual TV episode, based on its air date. */
+    fun episodeStatus(
+        airDate: String?,
+        clock: Clock = Clock.systemUTC(),
+    ): Status {
+        val air = parseReleaseDate(airDate) ?: return Status.UNKNOWN
+        return if (air.isAfter(LocalDate.now(clock))) Status.NOT_YET else Status.AVAILABLE
+    }
+
     private val NOT_YET_SERIES_STATUSES = setOf(
         "planned",
         "in production",

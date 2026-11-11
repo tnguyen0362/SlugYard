@@ -45,7 +45,7 @@ class RealDebridFileSelector @Inject constructor() {
             playable.firstOrNull { it.id == fileIdx }?.let { return it }
         }
 
-        return playable.maxByOrNull { it.bytes ?: 0L }
+        return playable.dominantLargestOrNull { it.bytes }
     }
 
     private fun RealDebridTorrentFileDto.isPlayableVideo(): Boolean {

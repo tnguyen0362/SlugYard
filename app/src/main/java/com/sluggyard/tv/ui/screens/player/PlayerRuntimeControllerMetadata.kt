@@ -1,5 +1,6 @@
 package com.sluggyard.tv.ui.screens.player
 
+import android.util.Log
 import com.sluggyard.tv.R
 import com.sluggyard.tv.core.network.NetworkResult
 import com.sluggyard.tv.data.local.AutoSkipSegmentType
@@ -185,7 +186,7 @@ private suspend fun PlayerRuntimeController.enrichDescriptionFromTmdb(id: String
 
 internal fun PlayerRuntimeController.recomputeNextEpisode(resetVisibility: Boolean) {
     val normalizedType = contentType?.lowercase()
-    if (normalizedType !in listOf("series", "tv", "other")) {
+    if (!PlayerNextEpisodeRules.isSeriesLikeContentType(normalizedType)) {
         nextEpisodeVideo = null
         clearNextEpisodeAndCancelPostPlay()
         return
@@ -216,8 +217,11 @@ internal fun PlayerRuntimeController.recomputeNextEpisode(resetVisibility: Boole
         return
     }
 
-    val season = currentSeason
-    val episode = currentEpisode
+    val (season, episode) = PlayerNextEpisodeRules.resolveEpisodeIdentity(
+        videoId = currentVideoId,
+        season = currentSeason,
+        episode = currentEpisode,
+    )
     // Episode number is required; season may be null for absolute-numbered anime
     // (PlayerNextEpisodeRules.resolveNextEpisode supports currentSeason=null).
     if (episode == null) {
@@ -233,6 +237,11 @@ internal fun PlayerRuntimeController.recomputeNextEpisode(resetVisibility: Boole
         currentVideoId = currentVideoId,
     )
 
+    Log.i(
+        UP_NEXT_TAG,
+        "recompute type=$normalizedType videoId=$currentVideoId s=$season e=$episode " +
+            "metaVideos=${metaVideos.size} next=${resolvedNext?.id}",
+    )
     nextEpisodeVideo = resolvedNext
     if (resolvedNext == null) {
         clearNextEpisodeAndCancelPostPlay()
@@ -298,7 +307,7 @@ private fun PlayerRuntimeController.applyRecomputedNextEpisode(
             nextEpisode = nextInfo,
             postPlayMode = updatedMode,
             postPlayDismissedForCurrentEpisode =
-                if (shouldResetVisibility && !state.postPlayDismissedForCurrentEpisode) false
+                if (shouldResetVisibility) false
                 else state.postPlayDismissedForCurrentEpisode,
         )
     }
@@ -326,12 +335,18 @@ internal fun PlayerRuntimeController.evaluatePostPlayOverlayVisibility(positionM
 
     val state = _uiState.value
     if (state.nextEpisode == null || nextEpisodeVideo == null) {
+        logUpNextBlocked(positionMs, durationMs, "no-next-episode ui=${state.nextEpisode?.videoId} ctrl=${nextEpisodeVideo?.id}")
         if (state.postPlayMode != null) {
             _uiState.update { it.copy(postPlayMode = null) }
         }
         return
     }
-    if (state.postPlayMode != null || state.postPlayDismissedForCurrentEpisode) return
+    if (state.postPlayMode != null || state.postPlayDismissedForCurrentEpisode) {
+        if (state.postPlayDismissedForCurrentEpisode) {
+            logUpNextBlocked(positionMs, durationMs, "dismissed")
+        }
+        return
+    }
 
     val effectiveDuration = durationMs.takeIf { it > 0L } ?: lastKnownDuration
     val shouldShow = PlayerNextEpisodeRules.shouldShowNextEpisodeCard(
@@ -343,8 +358,16 @@ internal fun PlayerRuntimeController.evaluatePostPlayOverlayVisibility(positionM
         thresholdMinutesBeforeEnd = nextEpisodeThresholdMinutesBeforeEndSetting
     )
 
-    if (!shouldShow) return
+    if (!shouldShow) {
+        logUpNextBlocked(positionMs, durationMs, "threshold-not-crossed mode=$nextEpisodeThresholdModeSetting pct=$nextEpisodeThresholdPercentSetting")
+        return
+    }
     if (_uiState.value.postPlayDismissedForCurrentEpisode) return
+    Log.i(
+        UP_NEXT_TAG,
+        "show next=${state.nextEpisode.videoId} pos=$positionMs dur=$effectiveDuration " +
+            "autoplay=$streamAutoPlayNextEpisodeEnabledSetting aired=${state.nextEpisode.hasAired}",
+    )
 
     val shouldEnterStillWatching = shouldEnterStillWatchingPrompt(
         stillWatchingEnabled = stillWatchingEnabledSetting,
@@ -399,39 +422,64 @@ internal fun PlayerRuntimeController.updateActiveSkipInterval(positionMs: Long) 
     val matched = skipIntervals.find { interval ->
         positionSec >= interval.startTime && positionSec < (interval.endTime - 0.5)
     }
-    // Intro/recap clear as soon as the window ends (matched == null below → fade out).
-    // Outro/credits yield to Up next when that card is showing or about to show, so Skip
-    // outro and the next-episode banner never fight for the same remote focus.
-    val active = matched?.takeUnless { interval ->
-        isOutroLikeSkipType(interval.type) && shouldPreferNextEpisodeOverOutroSkip(positionMs)
+    // Outro/credits never surface as a Skip button: the Up next banner fires at credits
+    // start (shouldShowNextEpisodeCard) and owns the end of the episode, so the remote is
+    // never split between two end-of-episode prompts. Only intro/recap remain buttons.
+    // A malformed provider interval can be tagged as an opening segment while
+    // still covering the final seconds of the file. Never present that as
+    // "Skip intro" at the end; the end-state belongs to Up Next (or a clean
+    // completion screen when there is no successor).
+    val inEndWindow = lastKnownDuration > 0L &&
+        (lastKnownDuration - positionMs).coerceAtLeast(0L) <= END_SKIP_SUPPRESSION_WINDOW_MS
+    val active = matched?.takeIf { interval ->
+        isIntroOrRecapSkipType(interval.type) && !inEndWindow
     }
 
     val currentActive = _uiState.value.activeSkipInterval
+
+    // Auto-skip keeps its own target: an explicit auto-skip-outro setting still jumps
+    // credits, and yields to Up next exactly as before so autoplay is not raced.
+    val autoSkipTarget = matched?.takeUnless { interval ->
+        isOutroLikeSkipType(interval.type) && shouldPreferNextEpisodeOverOutroSkip(positionMs)
+    }
 
     if (active != null) {
         if (currentActive == null || active.type != currentActive.type || active.startTime != currentActive.startTime) {
             lastActiveSkipType = active.type
             _uiState.update { it.copy(activeSkipInterval = active, skipIntervalDismissed = false) }
         }
-        // Auto-skip still waits for settings so empty defaults do not skip prematurely.
-        if (!playerSettingsInitialized) return
-        val segmentType = AutoSkipSegmentType.fromSkipIntervalType(active.type)
-        val activeKey = active.autoSkipKey()
-        if (segmentType != null &&
-            segmentType in autoSkipSegmentTypes &&
-            activeKey !in autoSkippedIntervalKeys
-        ) {
-            autoSkippedIntervalKeys.add(activeKey)
-            skipInterval(active)
-        }
     } else if (currentActive != null) {
-        // Past intro/outro end (or suppressed for Up next) — clear so the button fades out.
+        // Past intro end — clear so the button fades out.
         _uiState.update { it.copy(activeSkipInterval = null, skipIntervalDismissed = false) }
+    }
+
+    // Auto-skip still waits for settings so empty defaults do not skip prematurely.
+    val autoTarget = autoSkipTarget ?: return
+    if (!playerSettingsInitialized) return
+    val segmentType = AutoSkipSegmentType.fromSkipIntervalType(autoTarget.type)
+    val activeKey = autoTarget.autoSkipKey()
+    if (segmentType != null &&
+        segmentType in autoSkipSegmentTypes &&
+        activeKey !in autoSkippedIntervalKeys
+    ) {
+        autoSkippedIntervalKeys.add(activeKey)
+        skipInterval(autoTarget)
     }
 }
 
 private fun isOutroLikeSkipType(type: String): Boolean =
     PlayerNextEpisodeRules.isOutroLikeType(type)
+
+private fun isIntroOrRecapSkipType(type: String): Boolean {
+    val normalized = type.trim().lowercase()
+    return normalized == "intro" ||
+        normalized == "recap" ||
+        normalized == "op" ||
+        normalized == "mixed-op" ||
+        normalized.contains("opening") ||
+        normalized.contains("intro") ||
+        normalized.contains("recap")
+}
 
 private fun PlayerRuntimeController.shouldPreferNextEpisodeOverOutroSkip(positionMs: Long): Boolean {
     val state = _uiState.value
@@ -451,6 +499,8 @@ private fun PlayerRuntimeController.shouldPreferNextEpisodeOverOutroSkip(positio
 }
 
 private fun SkipInterval.autoSkipKey(): String = "$provider:$type:$startTime:$endTime"
+
+private const val END_SKIP_SUPPRESSION_WINDOW_MS = 120_000L
 
 internal fun PlayerRuntimeController.tryShowParentalGuide() {
     val state = _uiState.value
@@ -511,4 +561,24 @@ internal fun PlayerRuntimeController.fetchParentalGuide(id: String?, type: Strin
             tryShowParentalGuide()
         }
     }
+}
+
+private const val UP_NEXT_TAG = "UpNext"
+private const val UP_NEXT_LOG_INTERVAL_MS = 15_000L
+
+/**
+ * Past the point where the card should already be up, say why it is not. Rate-limited so the
+ * 4 Hz progress loop cannot flood logcat; silent before ~85% so normal playback logs nothing.
+ */
+private fun PlayerRuntimeController.logUpNextBlocked(positionMs: Long, durationMs: Long, reason: String) {
+    val duration = durationMs.takeIf { it > 0L } ?: lastKnownDuration
+    if (duration <= 0L || positionMs < duration * 0.85) return
+    val now = android.os.SystemClock.elapsedRealtime()
+    if (now - lastUpNextBlockedLogAtMs < UP_NEXT_LOG_INTERVAL_MS) return
+    lastUpNextBlockedLogAtMs = now
+    Log.i(
+        UP_NEXT_TAG,
+        "blocked reason=$reason pos=$positionMs dur=$duration videoId=$currentVideoId " +
+            "mode=${_uiState.value.postPlayMode} outros=${skipIntervals.count { PlayerNextEpisodeRules.isOutroLikeType(it.type) }}",
+    )
 }

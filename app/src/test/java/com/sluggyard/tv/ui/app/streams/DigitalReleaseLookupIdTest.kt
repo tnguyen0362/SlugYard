@@ -26,4 +26,11 @@ class DigitalReleaseLookupIdTest {
         assertEquals("tt1234567", DigitalReleaseLookup.cacheKey("tt1234567"))
         assertNull(DigitalReleaseLookup.cacheKey("movie/foo"))
     }
+
+    @Test
+    fun parsesEpisodeCoordinatesWithoutChangingBaseIdNormalization() {
+        assertEquals(1 to 2, DigitalReleaseLookup.parseEpisodeCoordinate("tt1234567:1:2"))
+        assertEquals(0 to 4, DigitalReleaseLookup.parseEpisodeCoordinate("tmdb:969681:0:4"))
+        assertNull(DigitalReleaseLookup.parseEpisodeCoordinate("tt1234567"))
+    }
 }

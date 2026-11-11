@@ -17,6 +17,9 @@ import com.sluggyard.tv.data.repository.extractYear
 import com.sluggyard.tv.data.repository.parseContentIds
 import com.sluggyard.tv.data.repository.resolveEffectiveContentId
 import com.sluggyard.tv.data.repository.toTraktIds
+import com.sluggyard.tv.core.watchstate.parseSeasonEpisodeFromVideoId
+import com.sluggyard.tv.core.watchstate.seriesContentId
+import com.sluggyard.tv.domain.model.Video
 import com.sluggyard.tv.domain.model.WatchProgress
 import com.sluggyard.tv.ui.util.languageCodeToName
 import kotlinx.coroutines.NonCancellable
@@ -262,6 +265,7 @@ private fun PlayerRuntimeController.sampleMpvProgress() {
         firstFrameReady = pos > 0L || (playingNow && !cacheBuffering && duration > 0L)
         if (firstFrameReady) {
             hasRenderedFirstFrame = true
+            cancelFirstFrameWatchdog()
             // Debrid MKV track-list often lands at/after first decode. Keep polling
             // past the initial window so UI state can catch ASS/softsubs MPV already paints.
             val extendedDeadline =
@@ -725,9 +729,19 @@ internal fun PlayerRuntimeController.saveWatchProgressInternal(position: Long, d
         progressPercent = fallbackPercent
     )
 
+    val completingNow = progress.isCompleted() && !hasMarkedCurrentEpisodeCompleted
+    // Snapshot on the caller's thread: an episode handoff swaps metaVideos/ids right after
+    // this flush, and the catch-up must describe the episode that just finished.
+    val earlierEpisodes = if (completingNow) earlierEpisodesForCatchUp(progress) else emptyList()
+    // Claim completion here, not inside the coroutine: a handoff resets this flag for the
+    // next stream right after the flush, and a late write would mark that stream completed.
+    if (completingNow) hasMarkedCurrentEpisodeCompleted = true
+
     scope.launch(NonCancellable) {
-        if (progress.isCompleted() && !hasMarkedCurrentEpisodeCompleted) {
-            hasMarkedCurrentEpisodeCompleted = true
+        if (completingNow) {
+            // Earlier episodes first, so the finished episode keeps the newest lastWatched
+            // and Continue Watching advances from it rather than from a back-filled row.
+            markEarlierEpisodesWatched(progress, earlierEpisodes)
             // Don't send markAsWatched to Trakt from the player — the scrobble
             // stop (≥80%) already causes Trakt to add the history entry.
             // Local stores + Trakt Sync are still updated.
@@ -737,6 +751,66 @@ internal fun PlayerRuntimeController.saveWatchProgressInternal(position: Long, d
         }
     }
 }
+
+/** Series episodes before the one in [progress], from the loaded episode list. */
+private fun PlayerRuntimeController.earlierEpisodesForCatchUp(progress: WatchProgress): List<Video> {
+    if (progress.contentType.trim().lowercase() !in CATCH_UP_CONTENT_TYPES) return emptyList()
+    val parsed = parseSeasonEpisodeFromVideoId(progress.videoId)
+    val episode = progress.episode ?: parsed?.second ?: return emptyList()
+    return PlayerNextEpisodeRules.previousEpisodes(
+        videos = metaVideos,
+        currentSeason = progress.season ?: parsed?.first,
+        currentEpisode = episode,
+        currentVideoId = progress.videoId,
+    )
+}
+
+/**
+ * Finishing an episode means the viewer is caught up to it: record every earlier episode
+ * that is not already watched, in one batch. Already-watched rows are skipped so Trakt
+ * history never gets duplicate plays.
+ */
+private suspend fun PlayerRuntimeController.markEarlierEpisodesWatched(
+    progress: WatchProgress,
+    earlierEpisodes: List<Video>,
+) {
+    if (earlierEpisodes.isEmpty()) return
+    val showId = seriesContentId(progress.contentId).ifBlank { progress.contentId }
+    runCatching {
+        val alreadyWatched = playbackProgressSink.watchedEpisodes(showId)
+        val now = System.currentTimeMillis()
+        val rows = earlierEpisodes.mapNotNull { video ->
+            val season = video.season ?: progress.season ?: return@mapNotNull null
+            val episode = video.episode ?: return@mapNotNull null
+            if ((season to episode) in alreadyWatched) return@mapNotNull null
+            WatchProgress(
+                contentId = showId,
+                contentType = progress.contentType,
+                name = progress.name,
+                poster = progress.poster,
+                backdrop = progress.backdrop,
+                logo = progress.logo,
+                videoId = video.id,
+                season = season,
+                episode = episode,
+                episodeTitle = video.title,
+                position = 1L,
+                duration = 1L,
+                lastWatched = now,
+                progressPercent = 100f,
+            )
+        }
+        if (rows.isNotEmpty()) {
+            Log.i(TAG_WATCH_CATCH_UP, "marking ${rows.size} earlier episodes watched show=$showId")
+            playbackProgressSink.markAsCompletedBatch(rows)
+        }
+    }.onFailure { error ->
+        Log.w(TAG_WATCH_CATCH_UP, "earlier-episode catch-up failed show=$showId", error)
+    }
+}
+
+private const val TAG_WATCH_CATCH_UP = "WatchCatchUp"
+private val CATCH_UP_CONTENT_TYPES = setOf("series", "tv", "anime")
 
 internal fun PlayerRuntimeController.currentPlaybackProgressPercent(): Float {
     if (!hasRenderedFirstFrame) return 0f

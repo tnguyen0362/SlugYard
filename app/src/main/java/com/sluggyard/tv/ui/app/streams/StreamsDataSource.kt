@@ -15,6 +15,7 @@ import com.sluggyard.tv.core.aggregation.DEFAULT_ADDON_CONCURRENCY
 import com.sluggyard.tv.core.aggregation.DEFAULT_ADDON_TIMEOUT_MS
 import com.sluggyard.tv.core.aggregation.boundedAddonFanout
 import com.sluggyard.tv.core.addonprotocol.SlugYardCommunitySourcePolicy
+import com.sluggyard.tv.core.debrid.StreamTextSeedersParser
 import com.sluggyard.tv.core.debrid.StreamTextSizeParser
 import com.sluggyard.tv.core.streamresolution.DebridService
 import com.sluggyard.tv.core.streamresolution.StreamCachePolicy
@@ -203,7 +204,12 @@ class StreamsDataSource(
                                 ?: StreamTextSizeParser.sizeBytesFromText(stream.title)
                                 ?: StreamTextSizeParser.sizeBytesFromText(stream.sourceName)
                                 ?: StreamTextSizeParser.sizeBytesFromText(stream.filename),
-                            seeders = stream.seeders,
+                            seeders = stream.seeders
+                                ?: StreamTextSeedersParser.seedersFromTexts(
+                                    stream.title,
+                                    stream.description,
+                                    stream.sourceName,
+                                ),
                             filename = stream.filename,
                             streamDescription = stream.description,
                             bingeGroup = stream.bingeGroup,
@@ -314,7 +320,9 @@ private fun String.cleanStreamPresentation(): String =
 private val CLEAN_CTRL = Regex("[\\r\\n\\t]+")
 private val CLEAN_SURROGATE = Regex("[\\uD800-\\uDBFF][\\uDC00-\\uDFFF]")
 private val CLEAN_SPACE = Regex("\\s+")
-private val TB_BADGE_HINT = Regex("""\[\s*tb""")
+// Torrentio-style: "[TB+]" = cached/instant, "[TB download]" = NOT cached. Matching any "[TB"
+// marked every uncached stream as cached, so auto-pick queued a download and stalled to timeout.
+private val TB_BADGE_HINT = Regex("""\[\s*tb\s*\+""")
 private val INSTANT_CACHED_HINT = Regex("""\b(?:instant|cached)\b""")
 
 /** True when Meteor/Torrentio/Comet already labeled the row Instant/⚡/Cached. */

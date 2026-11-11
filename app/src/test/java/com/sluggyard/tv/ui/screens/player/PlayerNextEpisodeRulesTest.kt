@@ -11,6 +11,27 @@ import org.junit.Test
 
 class PlayerNextEpisodeRulesTest {
 
+    @Test
+    fun `anime is eligible for episodic next episode state`() {
+        assertTrue(PlayerNextEpisodeRules.isSeriesLikeContentType("anime"))
+    }
+
+    @Test
+    fun `episode identity falls back to stremio video id`() {
+        assertEquals(
+            2 to 9,
+            PlayerNextEpisodeRules.resolveEpisodeIdentity("kitsu:45823:2:9", null, null),
+        )
+    }
+
+    @Test
+    fun `explicit episode identity wins over video id fallback`() {
+        assertEquals(
+            3 to 4,
+            PlayerNextEpisodeRules.resolveEpisodeIdentity("kitsu:45823:2:9", 3, 4),
+        )
+    }
+
     private fun ep(season: Int?, episode: Int?, id: String = "s${season}e${episode}") =
         Video(
             id = id,
@@ -198,5 +219,38 @@ class PlayerNextEpisodeRulesTest {
                 thresholdMinutesBeforeEnd = 2f,
             )
         )
+    }
+
+    private fun tvEp(season: Int, episode: Int) = ep(season, episode, id = "tt1:$season:$episode")
+
+    @Test
+    fun `previousEpisodes spans earlier seasons and skips specials`() {
+        val videos = listOf(tvEp(0, 1), tvEp(1, 1), tvEp(1, 2), tvEp(2, 1), tvEp(2, 2), tvEp(2, 3))
+
+        val previous = PlayerNextEpisodeRules.previousEpisodes(
+            videos = videos.shuffled(),
+            currentSeason = 2,
+            currentEpisode = 2,
+            currentVideoId = "tt1:2:2",
+        )
+
+        assertEquals(listOf("tt1:1:1", "tt1:1:2", "tt1:2:1"), previous.map { it.id })
+    }
+
+    @Test
+    fun `previousEpisodes is empty for the first episode or an unknown one`() {
+        val videos = listOf(tvEp(1, 1), tvEp(1, 2))
+
+        assertTrue(PlayerNextEpisodeRules.previousEpisodes(videos, 1, 1, "tt1:1:1").isEmpty())
+        assertTrue(PlayerNextEpisodeRules.previousEpisodes(videos, 5, 9, "tt1:5:9").isEmpty())
+    }
+
+    @Test
+    fun `previousEpisodes of a special only includes earlier specials`() {
+        val videos = listOf(tvEp(0, 1), tvEp(0, 2), tvEp(1, 1))
+
+        val previous = PlayerNextEpisodeRules.previousEpisodes(videos, 0, 2, "tt1:0:2")
+
+        assertEquals(listOf("tt1:0:1"), previous.map { it.id })
     }
 }

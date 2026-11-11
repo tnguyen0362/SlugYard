@@ -12,6 +12,7 @@ import com.sluggyard.tv.core.aggregation.AddonFanoutTask
 import com.sluggyard.tv.core.aggregation.DEFAULT_ADDON_CONCURRENCY
 import com.sluggyard.tv.core.aggregation.boundedAddonFanout
 import com.sluggyard.tv.ui.app.isSeriesType
+import com.sluggyard.tv.ui.screens.player.PlayerSubtitleUtils
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.flow
@@ -44,7 +45,9 @@ class SubtitleDataSource(
         id: String,
         langs: List<String>? = null,
         maxConcurrent: Int = DEFAULT_ADDON_CONCURRENCY,
+        video: SubtitleVideoInfo? = null,
     ): Flow<List<SubtitleGroup>> = flow {
+        val extras = video?.toExtras().orEmpty()
         val addons = registrySnapshot().enabledAddons.filter { AddonResource.SUBTITLES in it.manifest.resources }
         val groups = addons.map { addon ->
             SubtitleGroup(addon.manifest.id, addon.manifest.name, SubtitleGroupState.Loading)
@@ -58,6 +61,7 @@ class SubtitleDataSource(
                     type,
                     id,
                     langs?.joinToString(","),
+                    extras,
                 )) {
                     is AddonTransportResult.Success -> StremioResponseDecoder.subtitles(response.value)
                     else -> throw SubtitleLoadException(addon, response)
@@ -92,7 +96,9 @@ private fun rankSubtitles(tracks: List<AddonSubtitleTrack>, langs: List<String>?
     val filtered = if (targets.isEmpty()) {
         tracks
     } else {
-        tracks.filter { track -> track.language?.trim()?.lowercase() in targets }
+        // Addons answer with ISO 639-2 ("eng", "spa") while the preference is ISO 639-1 ("en"),
+        // so a literal compare dropped every row and "scoped" search was always empty.
+        tracks.filter { track -> targets.any { PlayerSubtitleUtils.matchesLanguageCode(track.language, it) } }
     }
     return filtered.sortedWith(compareByDescending { formatPriority(it.format) })
 }
@@ -104,6 +110,19 @@ private fun formatPriority(format: String?): Int = when (format?.trim()?.lowerca
     "mks" -> 2
     "pgs" -> 0
     else -> 1
+}
+
+/** Identity of the file being played, so subtitle addons can match this exact release. */
+data class SubtitleVideoInfo(
+    val hash: String? = null,
+    val sizeBytes: Long? = null,
+    val filename: String? = null,
+) {
+    fun toExtras(): Map<String, String> = buildMap {
+        hash?.takeIf { it.isNotBlank() }?.let { put("videoHash", it) }
+        sizeBytes?.takeIf { it > 0L }?.let { put("videoSize", it.toString()) }
+        filename?.takeIf { it.isNotBlank() }?.let { put("filename", it) }
+    }
 }
 
 /** Stremio subtitle addons (OpenSubtitles v3) expect `{imdb}:{season}:{episode}` for series. */

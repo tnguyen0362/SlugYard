@@ -356,6 +356,7 @@ class PlayerRuntimeController(
     internal var lastSavedPosition: Long = 0L
     internal val saveThresholdMs = 5000L
     internal var hasMarkedCurrentEpisodeCompleted: Boolean = false
+    internal var lastUpNextBlockedLogAtMs: Long = 0L
     /**
      * Set after flushing the *current* episode so a following source switch does not
      * re-save that timeline under the next episode's identity.

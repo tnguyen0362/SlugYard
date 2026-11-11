@@ -13,4 +13,12 @@ class AddonInstantHintTest {
         assertFalse(looksAddonMarkedInstant("Movie.1080p.WEB-DL.x264"))
         assertFalse(looksAddonMarkedInstant("download to debrid"))
     }
+
+    @Test
+    fun torrentioCachedMarkerIsCachedButTorboxDownloadMarkerIsNot() {
+        assertTrue(looksAddonMarkedInstant("Torrentio\n4k HDR [TB+]"))
+        assertFalse(looksAddonMarkedInstant("Torrentio\n4k HDR [TB download]"))
+        assertFalse(looksAddonMarkedInstant("Torrentio\n4k HDR [TB]"))
+        assertFalse(looksAddonMarkedInstant("Crepusculo 2160p uncached"))
+    }
 }

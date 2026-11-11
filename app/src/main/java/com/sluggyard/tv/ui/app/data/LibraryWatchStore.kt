@@ -49,7 +49,27 @@ interface LibraryWatchRepository {
         season: Int? = null,
         episode: Int? = null,
     )
+
+    /**
+     * Marks many items at once. The default loops [setWatched]; [LibraryWatchStore] overrides it
+     * with a single storage write and a single sync request so back-filling a season does not
+     * cost one write + one sync per episode.
+     */
+    suspend fun setWatchedBatch(marks: List<WatchedMark>, watched: Boolean) {
+        marks.forEach { mark ->
+            setWatched(mark.id, watched, mark.contentType, mark.title, mark.season, mark.episode)
+        }
+    }
 }
+
+/** One item in [LibraryWatchRepository.setWatchedBatch]. */
+data class WatchedMark(
+    val id: String,
+    val contentType: String = "movie",
+    val title: String = id,
+    val season: Int? = null,
+    val episode: Int? = null,
+)
 
 private fun libraryWatchKey(profileId: String) = stringPreferencesKey("app_library_watch_v2_$profileId")
 private const val MAX_STORED_LIBRARY_ENTRIES = 500
@@ -93,12 +113,29 @@ class LibraryWatchStore(
         season: Int?,
         episode: Int?,
     ) {
+        setWatchedBatch(listOf(WatchedMark(id, contentType, title, season, episode)), watched)
+    }
+
+    override suspend fun setWatchedBatch(marks: List<WatchedMark>, watched: Boolean) {
+        if (marks.isEmpty()) return
         val profileId = profiles.state.first().activeProfile.id
-        Log.i(TAG, "setWatched profile=$profileId id=$id watched=$watched")
+        var changed: List<WatchedMark> = emptyList()
         mutate(profileId) { current ->
-            current.copy(watchedIds = current.watchedIds.withMembership(id, watched))
+            // Only rows whose membership actually flips are written, recorded and synced.
+            // Playback re-reports a completed episode every few seconds; without this each
+            // report cost a DataStore rewrite, an outbox row and an immediate cloud sync.
+            changed = marks.distinctBy { it.id }.filter { (it.id in current.watchedIds) != watched }
+            if (changed.isEmpty()) current
+            else current.copy(
+                watchedIds = if (watched) current.watchedIds + changed.map { it.id }
+                else current.watchedIds - changed.map { it.id }.toSet(),
+            )
         }
-        recordWatchedMutation(profileId, id, watched, contentType, title, season, episode)
+        if (changed.isEmpty()) return
+        Log.i(TAG, "setWatched profile=$profileId count=${changed.size} first=${changed.first().id} watched=$watched")
+        changed.forEach { mark ->
+            recordWatchedMutation(profileId, mark.id, watched, mark.contentType, mark.title, mark.season, mark.episode)
+        }
         requestWatchlistSync()
     }
 
@@ -111,7 +148,8 @@ class LibraryWatchStore(
         dataStore.edit { preferences ->
             val key = libraryWatchKey(profileId)
             val current = preferences[key]?.let(LibraryWatchCodec::decode) ?: LibraryWatchState()
-            preferences[key] = LibraryWatchCodec.encode(transform(current))
+            val updated = transform(current)
+            if (updated != current) preferences[key] = LibraryWatchCodec.encode(updated)
         }
     }
 

@@ -766,6 +766,11 @@ class MpvPlayerSurfaceView @JvmOverloads constructor(
             "msg-level",
             "all=no,cache=info,demux=info,network=info,stream=info,status=info",
         )
+
+        // Debrid CDN resets / expired signed URLs end the mpv stream unrecoverably (no
+        // mid-stream failover exists); ffmpeg reconnect reopens at the last byte offset
+        // with Range, delay capped at 30s; unknown options are silently ignored.
+        mpv.setOptionString("stream-lavf-o", "reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=30")
     }
 
     override fun postInitOptions() {

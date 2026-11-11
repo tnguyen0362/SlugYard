@@ -20,7 +20,9 @@ object PlayerMetaLookup {
             ?: contentType?.takeIf { it.isNotBlank() }
             ?: return null
         val id = parentId?.takeIf { it.isNotBlank() }
-            ?: contentId?.takeIf { it.isNotBlank() }?.let(::normalizeSeriesMetaId)
+            ?: contentId?.takeIf { it.isNotBlank() }?.let { rawId ->
+                if (type.trim().lowercase() in SERIES_TYPES) normalizeSeriesMetaId(rawId) else rawId
+            }
             ?: return null
         return Lookup(id = id, type = type)
     }
@@ -30,9 +32,18 @@ object PlayerMetaLookup {
      * catalog meta returns the full video list.
      */
     fun normalizeSeriesMetaId(id: String): String {
-        if (id.startsWith("tt", ignoreCase = true) && id.contains(':')) {
-            return id.substringBefore(':')
+        val parts = id.trim().split(':')
+        val season = parts.getOrNull(parts.lastIndex - 1)?.toIntOrNull()
+        val episode = parts.lastOrNull()?.toIntOrNull()
+        if (parts.size >= 3 && season != null && season >= 0 && episode != null && episode > 0
+        ) {
+            // Stremio episode ids commonly use `seriesId:season:episode`.
+            // Collapse any provider prefix (IMDb, Kitsu, MAL, etc.) so the
+            // metadata request returns the complete episode list.
+            return parts.dropLast(2).joinToString(":")
         }
         return id
     }
+
+    private val SERIES_TYPES = setOf("series", "tv", "anime", "other")
 }

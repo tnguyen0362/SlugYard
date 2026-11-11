@@ -75,7 +75,26 @@ interface DebridManualResolver {
     suspend fun resolve(infoHash: String, fileIndex: Int?): ResolvedPlaybackSource
     suspend fun resolve(infoHash: String, fileIndex: Int?, season: Int?, episode: Int?): ResolvedPlaybackSource =
         resolve(infoHash, fileIndex)
+
+    /**
+     * Resolve with the addon's own description of the wanted file. Multi-file torrents (movie
+     * sagas, season packs) need it: provider file ids and torrent indexes disagree, so the
+     * filename is the only reliable way to land on the file the user actually picked.
+     */
+    suspend fun resolve(
+        infoHash: String,
+        fileIndex: Int?,
+        season: Int?,
+        episode: Int?,
+        hint: DebridFileHint?,
+    ): ResolvedPlaybackSource = resolve(infoHash, fileIndex, season, episode)
 }
+
+/** What the addon told us about the file inside the torrent that it wants played. */
+data class DebridFileHint(
+    val filename: String? = null,
+    val videoSizeBytes: Long? = null,
+)
 
 /**
  * Prepares a user-selected stream for the retained playback engine.
@@ -120,19 +139,28 @@ class ManualStreamResolutionCoordinator(
         }
         return try {
             ManualResolutionResult.Ready(
-                resolver.resolve(infoHash, selection.fileIndex, selection.season, selection.episode)
-                    .copy(
+                resolver.resolve(
+                    infoHash,
+                    selection.fileIndex,
+                    selection.season,
+                    selection.episode,
+                    DebridFileHint(selection.filename, selection.videoSizeBytes),
+                ).let { resolved ->
+                    // Describe the file the provider really returned. Stamping the addon's
+                    // advertised name over it hid wrong-file picks (labelled one movie, played another).
+                    resolved.copy(
                         sourceId = selection.id,
                         streamName = selection.streamName,
                         streamDescription = selection.streamDescription,
-                        filename = selection.filename,
+                        filename = resolved.filename ?: selection.filename,
                         videoHash = selection.videoHash,
-                        videoSizeBytes = selection.videoSizeBytes,
+                        videoSizeBytes = resolved.videoSizeBytes ?: selection.videoSizeBytes,
                         bingeGroup = selection.bingeGroup,
                         requestHeaders = selection.requestHeaders,
                         addonName = selection.addonName,
                         trackers = selection.trackers,
-                    ),
+                    )
+                },
             )
         } catch (cancelled: CancellationException) {
             throw cancelled

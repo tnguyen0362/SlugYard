@@ -46,6 +46,19 @@ interface StremioAddonGateway {
         id: String,
         langs: String? = null,
     ): AddonTransportResult<JsonObject>
+
+    /**
+     * Subtitle lookup with Stremio "extra" args (videoHash, videoSize, filename). Addons such as
+     * OpenSubtitles use them to return subtitles synced to this exact release instead of a
+     * generic list for the IMDB id.
+     */
+    suspend fun fetchSubtitles(
+        manifestUrl: String,
+        type: String,
+        id: String,
+        langs: String?,
+        extras: Map<String, String>,
+    ): AddonTransportResult<JsonObject> = fetchSubtitles(manifestUrl, type, id, langs)
 }
 
 class StremioAddonTransport(
@@ -84,6 +97,15 @@ class StremioAddonTransport(
         langs: String?,
     ): AddonTransportResult<JsonObject> =
         getJson(StremioEndpointBuilder.subtitles(manifestUrl, type, id, langs))
+
+    override suspend fun fetchSubtitles(
+        manifestUrl: String,
+        type: String,
+        id: String,
+        langs: String?,
+        extras: Map<String, String>,
+    ): AddonTransportResult<JsonObject> =
+        getJson(StremioEndpointBuilder.subtitles(manifestUrl, type, id, langs, extras))
 
     private suspend fun getJson(url: String): AddonTransportResult<JsonObject> = withContext(Dispatchers.IO) {
         try {
@@ -130,13 +152,26 @@ object StremioEndpointBuilder {
         type: String,
         id: String,
         langs: String? = null,
+        extras: Map<String, String> = emptyMap(),
     ): String {
-        val base = endpoint(manifestUrl, listOf("subtitles", type, id))
+        // Stremio protocol: extra args live in the last path segment, "k=v&k=v", before ".json".
+        val extraSegment = extras.entries
+            .filter { it.value.isNotBlank() }
+            .joinToString("&") { (key, value) -> "$key=${value.sanitizeExtraValue()}" }
+        val segments = buildList {
+            add("subtitles"); add(type); add(id)
+            if (extraSegment.isNotEmpty()) add(extraSegment)
+        }
+        val base = endpoint(manifestUrl, segments)
         val encoded = langs?.takeIf(String::isNotBlank) ?: return base
         // OpenSubtitles-v3-style subtitle addons accept a comma-separated langs filter.
         val separator = if ('?' in base) "&" else "?"
         return base + separator + "langs=" + encoded
     }
+
+    /** '&', '/', '?', '#' and '%' would corrupt the "k=v&k=v" path segment; the values are only hints. */
+    private fun String.sanitizeExtraValue(): String =
+        map { if (it in "&/?#%") ' ' else it }.joinToString("").trim()
 
     private fun endpoint(manifestUrl: String, segments: List<String>): String {
         val manifest = URI(manifestUrl)
@@ -166,7 +201,7 @@ object StremioEndpointBuilder {
                 val value = byte.toInt() and 0xFF
                 val character = value.toChar()
                 if ((value in 0x30..0x39) || (value in 0x41..0x5A) ||
-                    (value in 0x61..0x7A) || character in "-_.=,:") {
+                    (value in 0x61..0x7A) || character in "-_.=,:&") {
                     append(character)
                 } else {
                     append("%")

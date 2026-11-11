@@ -353,6 +353,12 @@ private class NativeOptimizedVideoTrackOutput(
         val mode = if (converting) config.conversionMode(profile) else 1
         val formatVal = if (nalFormat == NalFormat.LENGTH_DELIMITED) 1 else 0
 
+        // Pre-size the shared out-buffer: the negative-return path recomputes the whole rewritten
+        // sample, and total rewritten length fits within the input except bounded RPU growth, so
+        // input-size headroom eliminates the retry in practice. The buffer is a process singleton
+        // that already grows permanently on overflow today — steady-state retention unchanged.
+        DoviBridge.ensureRpuOutBufferCapacity(sampleEnd + 4096)
+
         // Process in native C++ layer
         val written = DoviBridge.processVideoSampleNonAllocating(
             sample = pendingBuf,

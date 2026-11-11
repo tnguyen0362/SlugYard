@@ -35,7 +35,7 @@ class StreamsDataSourceTest {
                             Json.parseToJsonElement("""{"streams":[{"name":"Direct","url":"https://play"},{"name":"Torrent","infoHash":"abcdef"}]}""").jsonObject,
                         )
                     }
-                override suspend fun fetchSubtitles(manifestUrl: String, type: String, id: String) = error("unused")
+                override suspend fun fetchSubtitles(manifestUrl: String, type: String, id: String, langs: String?) = error("unused")
             },
         )
 
@@ -56,7 +56,7 @@ class StreamsDataSourceTest {
                 override suspend fun fetchCatalog(manifestUrl: String, type: String, catalogId: String, extras: Map<String, String>) = error("unused")
                 override suspend fun fetchMeta(manifestUrl: String, type: String, id: String) = error("unused")
                 override suspend fun fetchStreams(manifestUrl: String, type: String, id: String) = AddonTransportResult.HttpFailure(400, "bad request")
-                override suspend fun fetchSubtitles(manifestUrl: String, type: String, id: String) = error("unused")
+                override suspend fun fetchSubtitles(manifestUrl: String, type: String, id: String, langs: String?) = error("unused")
             },
         )
 
@@ -84,7 +84,7 @@ class StreamsDataSourceTest {
                 override suspend fun fetchStreams(manifestUrl: String, type: String, id: String) = AddonTransportResult.Success(
                     Json.parseToJsonElement("""{"streams":[{"name":"Torrent","infoHash":"abcdef"}]}""").jsonObject,
                 )
-                override suspend fun fetchSubtitles(manifestUrl: String, type: String, id: String) = error("unused")
+                override suspend fun fetchSubtitles(manifestUrl: String, type: String, id: String, langs: String?) = error("unused")
             },
             proactiveCacheCheckers = setOf(checker),
         )

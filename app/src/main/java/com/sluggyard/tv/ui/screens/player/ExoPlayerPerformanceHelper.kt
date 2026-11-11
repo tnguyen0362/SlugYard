@@ -206,6 +206,10 @@ object ExoPlayerPerformanceHelper {
                 .setTargetBufferBytes(targetBufferBytes)
                 .setBufferDurationsMs(minBufferMs, maxBufferMs, bufferForPlaybackMs, bufferForPlaybackAfterRebufferMs)
                 .setBackBuffer(backBufferMs, true)
+                // Allow buffering past the byte cap until minBufferMs is met. Fork
+                // default is false, so high-bitrate remuxes exhaust targetBufferBytes
+                // in <5s of content and stall ExoPlayer in STATE_BUFFERING.
+                .setPrioritizeTimeOverSizeThresholds(true)
                 .build()
         } else {
             DefaultLoadControl.Builder()
